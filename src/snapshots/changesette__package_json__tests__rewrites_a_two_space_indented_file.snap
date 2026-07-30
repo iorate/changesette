@@ -1,0 +1,12 @@
+---
+source: src/package_json.rs
+expression: "rewrite(\"two-space\")"
+---
+{
+  "name": "ublacklist",
+  "version": "10.1.0",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  }
+}

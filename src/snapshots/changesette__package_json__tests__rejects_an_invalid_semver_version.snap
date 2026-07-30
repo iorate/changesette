@@ -1,0 +1,5 @@
+---
+source: src/package_json.rs
+expression: "load_err(\"version-invalid-semver\")"
+---
+package.json: top-level "version" ("10.0") is not a valid semver version: unexpected end of input while parsing minor version number

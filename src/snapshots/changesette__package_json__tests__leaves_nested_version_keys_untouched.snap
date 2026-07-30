@@ -1,0 +1,15 @@
+---
+source: src/package_json.rs
+expression: "rewrite(\"scripts-version-key\")"
+---
+{
+  "name": "ublacklist",
+  "version": "10.1.0",
+  "scripts": {
+    "version": "echo version",
+    "postversion": "git push"
+  },
+  "config": {
+    "version": "not-touched"
+  }
+}

@@ -1,0 +1,9 @@
+---
+source: src/package_json.rs
+expression: "rewrite(\"tabs\")"
+---
+{
+	"name": "ublacklist",
+	"version": "10.1.0",
+	"private": true
+}

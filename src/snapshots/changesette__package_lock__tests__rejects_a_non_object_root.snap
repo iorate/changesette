@@ -1,0 +1,5 @@
+---
+source: src/package_lock.rs
+expression: "load_err(\"root-not-object\")"
+---
+package-lock.json: the root value must be an object

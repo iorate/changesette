@@ -1,0 +1,9 @@
+---
+source: src/package_lock.rs
+expression: "rewrite(\"v1\")"
+---
+{
+  "name": "ublacklist",
+  "version": "10.1.0",
+  "lockfileVersion": 1
+}

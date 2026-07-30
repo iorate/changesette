@@ -1,0 +1,16 @@
+---
+source: src/package_lock.rs
+expression: "rewrite(\"v3\")"
+---
+{
+  "name": "ublacklist",
+  "version": "10.1.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "ublacklist",
+      "version": "10.1.0"
+    }
+  }
+}
