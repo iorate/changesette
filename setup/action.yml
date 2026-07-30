@@ -1,0 +1,23 @@
+name: Setup changesette
+description: Install the changesette binary
+
+inputs:
+  token:
+    description: GitHub token for verifying build provenance
+    default: ${{ github.token }}
+    required: false
+
+outputs:
+  version:
+    description: The version of changesette that was installed
+    value: ${{ steps.install.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install changesette
+      id: install
+      run: bash "$GITHUB_ACTION_PATH/install.sh"
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      shell: bash
