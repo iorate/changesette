@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "load_err(\"[github]\\n\")"
+---
+.changeset/changesette.toml: [github] is missing the "repo" key

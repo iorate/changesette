@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "load_err(\"[gitlab]\\nrepository = \\\"iorate/ublacklist\\\"\\n\")"
+---
+.changeset/changesette.toml: unknown key "gitlab"
