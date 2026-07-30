@@ -1,0 +1,21 @@
+---
+source: src/changeset.rs
+expression: "load_ok(\"ordering\")"
+---
+[
+    LoadedChange {
+        file_name: "10-second.md",
+        bump: Minor,
+        summary: "Sorted first because file names are compared by bytes, not numerically",
+    },
+    LoadedChange {
+        file_name: "2-third.md",
+        bump: Major,
+        summary: "Sorted second",
+    },
+    LoadedChange {
+        file_name: "changesette-01h455vb4pex5vsknk084sn02q.md",
+        bump: Patch,
+        summary: "Sorted last, and written without quotes the way knope writes them",
+    },
+]

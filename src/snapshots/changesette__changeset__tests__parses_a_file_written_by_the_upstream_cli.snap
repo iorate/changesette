@@ -1,0 +1,11 @@
+---
+source: src/changeset.rs
+expression: "load_ok(\"upstream-generated\")"
+---
+[
+    LoadedChange {
+        file_name: "olive-pots-repeat.md",
+        bump: Minor,
+        summary: "Add SERPINFO satellites support",
+    },
+]

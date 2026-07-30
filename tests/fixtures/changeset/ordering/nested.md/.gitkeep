@@ -1,0 +1,1 @@
+`nested.md` is a directory, not a file, so `load` must skip it.

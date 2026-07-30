@@ -1,0 +1,5 @@
+---
+source: src/changeset.rs
+expression: "load_err(\"no-bump\")"
+---
+tests/fixtures/changeset/no-bump/changesette-01h455wz0h1x9pe0qb0mv1p1kg.md: empty changeset (no bump specified)

@@ -1,0 +1,11 @@
+---
+source: src/changeset.rs
+expression: "load_ok(\"crlf\")"
+---
+[
+    LoadedChange {
+        file_name: "changesette-01h455wz0h1x9pe0qb0mv1p1kg.md",
+        bump: Patch,
+        summary: "A body written with CRLF line endings\nand a second line",
+    },
+]

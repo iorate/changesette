@@ -1,0 +1,11 @@
+---
+source: src/changeset.rs
+expression: "load_ok(\"multi-line-body\")"
+---
+[
+    LoadedChange {
+        file_name: "changesette-01h455wz0h1x9pe0qb0mv1p1kg.md",
+        bump: Minor,
+        summary: "First line of body\nsecond line of body\n\n- a bullet\n- another bullet",
+    },
+]
