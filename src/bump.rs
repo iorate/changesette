@@ -1,11 +1,22 @@
 use semver::Version;
 
 /// A semver bump type, ordered so that `max` picks the widest one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
 pub(crate) enum Bump {
     Patch,
     Minor,
     Major,
+}
+
+impl Bump {
+    /// The lowercase name used in changeset frontmatter and CLI values.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Bump::Patch => "patch",
+            Bump::Minor => "minor",
+            Bump::Major => "major",
+        }
+    }
 }
 
 /// Returns `current` incremented by `bump`, clearing any pre-release and
