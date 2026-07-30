@@ -7,13 +7,20 @@ use crate::bump::Bump;
 
 const IGNORED_FILE_NAMES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "GEMINI.md"];
 
+/// A changeset parsed from one `.changeset/*.md` file.
 #[derive(Debug)]
 pub(crate) struct LoadedChange {
+    /// The file name within the changeset directory, e.g. `brave-lions-jump.md`.
     pub(crate) file_name: String,
+    /// The widest bump type declared in the frontmatter.
     pub(crate) bump: Bump,
+    /// The summary text below the frontmatter, trimmed.
     pub(crate) summary: String,
 }
 
+/// Loads every changeset in `changeset_dir` in file-name order, verifying
+/// that each targets `package_name`. Dotfiles, non-`.md` files, README.md,
+/// and agent instruction files are skipped.
 pub(crate) fn load(changeset_dir: &Path, package_name: &str) -> Result<Vec<LoadedChange>> {
     let entries = match fs::read_dir(changeset_dir) {
         Ok(entries) => entries,
@@ -54,6 +61,7 @@ pub(crate) fn load(changeset_dir: &Path, package_name: &str) -> Result<Vec<Loade
         .collect()
 }
 
+/// Returns the widest bump among `changes`, or `None` if there are none.
 pub(crate) fn max_bump(changes: &[LoadedChange]) -> Option<Bump> {
     changes.iter().map(|change| change.bump).max()
 }

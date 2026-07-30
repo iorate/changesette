@@ -1,5 +1,6 @@
 use semver::Version;
 
+/// A semver bump type, ordered so that `max` picks the widest one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Bump {
     Patch,
@@ -7,6 +8,8 @@ pub(crate) enum Bump {
     Major,
 }
 
+/// Returns `current` incremented by `bump`, clearing any pre-release and
+/// build metadata.
 pub(crate) fn next_version(current: &Version, bump: Bump) -> Version {
     match bump {
         Bump::Major => Version::new(current.major + 1, 0, 0),

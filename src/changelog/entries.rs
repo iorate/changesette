@@ -2,12 +2,18 @@ use semver::Version;
 
 use crate::bump::Bump;
 
+/// A changelog entry derived from one changeset.
 #[derive(Debug)]
 pub(crate) struct Entry {
+    /// The pull request numbers to link, in link order.
     pub(crate) prs: Vec<u64>,
+    /// The entry's Markdown body (the changeset summary).
     pub(crate) body: String,
 }
 
+/// Renders a `## <version>` section, grouping `entries` under Major/Minor/
+/// Patch headings and omitting empty groups. `repository` (`owner/repo`)
+/// enables PR links. The result has no surrounding newlines.
 pub(crate) fn render_section(
     version: &Version,
     entries: &[(Bump, Entry)],

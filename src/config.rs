@@ -3,11 +3,16 @@ use std::{fs, io, path::Path};
 use anyhow::{Context, Result, ensure};
 use toml_edit::DocumentMut;
 
+/// Settings read from `.changeset/changesette.toml`.
 #[derive(Debug)]
 pub(crate) struct Config {
+    /// The `github.repo` value (`owner/repo`); `None` turns the GitHub
+    /// integration off.
     pub(crate) github_repo: Option<String>,
 }
 
+/// Loads `.changeset/changesette.toml` under `dir`; a missing file yields the
+/// default config.
 pub(crate) fn load(dir: &Path) -> Result<Config> {
     let path = dir.join(".changeset").join("changesette.toml");
     let text = match fs::read_to_string(&path) {

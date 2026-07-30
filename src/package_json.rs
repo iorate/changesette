@@ -9,6 +9,8 @@ use jsonc_parser::{
     cst::{CstObject, CstRootNode, CstStringLit},
 };
 
+/// A loaded `package.json`. Saving preserves the original formatting,
+/// changing only the rewritten values.
 pub(crate) struct PackageJson {
     path: PathBuf,
     root: CstRootNode,
@@ -18,6 +20,8 @@ pub(crate) struct PackageJson {
 }
 
 impl PackageJson {
+    /// Loads `package.json` under `dir`, validating its top-level `name` and
+    /// `version`.
     pub(crate) fn load(dir: &Path) -> Result<Self> {
         let path = dir.join("package.json");
         let text = match fs::read_to_string(&path) {
@@ -61,26 +65,32 @@ impl PackageJson {
         })
     }
 
+    /// The top-level `name`.
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
+    /// The current top-level `version`.
     pub(crate) fn version(&self) -> &semver::Version {
         &self.version
     }
 
+    /// Sets the top-level `version`.
     pub(crate) fn set_version(&mut self, version: &semver::Version) -> Result<()> {
         set_string_value(&self.version_lit, &version.to_string());
         self.version = version.clone();
         Ok(())
     }
 
+    /// Writes the possibly modified text back to the file it was loaded from.
     pub(crate) fn save(&self) -> Result<()> {
         fs::write(&self.path, self.root.to_string())
             .with_context(|| self.path.display().to_string())
     }
 }
 
+/// Returns the string literal at `object[key]`, or `Ok(None)` if the key is
+/// absent; a non-string value is an error naming `location`.
 pub(crate) fn string_prop(
     object: &CstObject,
     key: &str,
@@ -96,6 +106,8 @@ pub(crate) fn string_prop(
     Ok(Some(lit))
 }
 
+/// Replaces the literal's raw text with `"<value>"`; `value` must not contain
+/// characters that need escaping (semver versions never do).
 pub(crate) fn set_string_value(lit: &CstStringLit, value: &str) {
     lit.set_raw_value(format!("\"{value}\""));
 }

@@ -11,6 +11,8 @@ use jsonc_parser::{
 
 use crate::package_json::{set_string_value, string_prop};
 
+/// A loaded `package-lock.json`. Saving preserves the original formatting,
+/// changing only the rewritten values.
 pub(crate) struct PackageLock {
     path: PathBuf,
     root: CstRootNode,
@@ -18,6 +20,8 @@ pub(crate) struct PackageLock {
 }
 
 impl PackageLock {
+    /// Loads `package-lock.json` under `dir`; a missing file yields
+    /// `Ok(None)`.
     pub(crate) fn load(dir: &Path) -> Result<Option<Self>> {
         let path = dir.join("package-lock.json");
         let text = match fs::read_to_string(&path) {
@@ -55,6 +59,8 @@ impl PackageLock {
         })
     }
 
+    /// Sets the top-level `version` and the `packages.""` entry's `version`,
+    /// whichever are present.
     pub(crate) fn set_version(&mut self, version: &semver::Version) -> Result<()> {
         for lit in &self.version_lits {
             set_string_value(lit, &version.to_string());
@@ -62,6 +68,7 @@ impl PackageLock {
         Ok(())
     }
 
+    /// Writes the possibly modified text back to the file it was loaded from.
     pub(crate) fn save(&self) -> Result<()> {
         fs::write(&self.path, self.root.to_string())
             .with_context(|| self.path.display().to_string())

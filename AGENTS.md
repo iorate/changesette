@@ -8,6 +8,8 @@ This file provides guidance to AI coding agents when working with code in this r
 
 Pure bin crate: there is no library target, and items crossing module boundaries are `pub(crate)`, never bare `pub`.
 
+Give every `pub(crate)` item a concise doc comment describing its contract, not its implementation, and keep doc comments in sync when changing code.
+
 ## Verifying Changes
 
 After editing, run `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `cargo test`.
