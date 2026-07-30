@@ -1,6 +1,6 @@
 ---
-source: src/changelog/document.rs
-expression: "upsert(\"same-version-exists\", \"1.0.0\")"
+source: src/changelog.rs
+expression: "upsert(\"h2-inside-list-item\", \"1.0.0\")"
 ---
 # ublacklist
 

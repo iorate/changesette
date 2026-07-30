@@ -1,8 +1,10 @@
 ---
-source: src/changelog/document.rs
-expression: "upsert(\"no-h1\", \"1.0.0\")"
+source: src/changelog.rs
+expression: "upsert(\"preamble\", \"1.0.0\")"
 ---
 # ublacklist
+
+All notable changes to this project are documented in this file.
 
 ## 1.0.0
 
@@ -15,3 +17,9 @@ expression: "upsert(\"no-h1\", \"1.0.0\")"
 ### Minor Changes
 
 - Add something
+
+## 0.8.0
+
+### Patch Changes
+
+- Fix something

@@ -1,5 +1,5 @@
 ---
-source: src/changelog/entries.rs
+source: src/changelog.rs
 expression: "render(&[entry(&[12],\n\"First line of body\\nsecond line of body\\n\\nline after a blank line\",)],\nSome(\"iorate/ublacklist\"),)"
 ---
 ## 10.1.0

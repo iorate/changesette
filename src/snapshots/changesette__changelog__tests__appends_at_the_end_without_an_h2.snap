@@ -1,8 +1,10 @@
 ---
-source: src/changelog/document.rs
-expression: "upsert(\"empty\", \"1.0.0\")"
+source: src/changelog.rs
+expression: "upsert(\"no-h2\", \"1.0.0\")"
 ---
 # ublacklist
+
+All notable changes to this project are documented in this file.
 
 ## 1.0.0
 

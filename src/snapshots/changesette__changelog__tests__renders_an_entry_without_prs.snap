@@ -1,5 +1,5 @@
 ---
-source: src/changelog/entries.rs
+source: src/changelog.rs
 expression: "render(&[entry(&[], \"Add SERPINFO satellites support\")],\nSome(\"iorate/ublacklist\"),)"
 ---
 ## 10.1.0

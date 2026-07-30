@@ -1,16 +1,8 @@
 ---
-source: src/changelog/document.rs
-expression: "upsert(\"code-block-hashes\", \"1.0.0\")"
+source: src/changelog.rs
+expression: "upsert(\"same-version-exists\", \"1.0.0\")"
 ---
 # ublacklist
-
-Example changelog section:
-
-```md
-## 9.9.9
-
-Not a real section.
-```
 
 ## 1.0.0
 

@@ -4,10 +4,7 @@ use anyhow::{Context, Result};
 
 use crate::{
     bump,
-    changelog::{
-        document,
-        entries::{Entry, render_section},
-    },
+    changelog::{self, Entry, render_section},
     changeset, config,
     github::GithubClient,
     package_json::PackageJson,
@@ -89,7 +86,7 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
         Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
         Err(err) => return Err(err).context(changelog_path.display().to_string()),
     };
-    let new_changelog_text = document::upsert_section(
+    let new_changelog_text = changelog::upsert_section(
         &changelog_text,
         package_json.name(),
         &next.to_string(),

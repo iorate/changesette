@@ -1,5 +1,5 @@
 ---
-source: src/changelog/document.rs
+source: src/changelog.rs
 expression: "upsert(\"ublacklist-head\", \"10.1.0\")"
 ---
 # ublacklist

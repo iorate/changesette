@@ -69,6 +69,7 @@ jobs:
           commit-message: Release v${{ steps.version.outputs.next }}
           title: Release v${{ steps.version.outputs.next }}
           body: ${{ steps.version.outputs.body }}
+          delete-branch: true
 
       - if: steps.version.outputs.next == ''
         run: |
@@ -109,7 +110,9 @@ jobs:
 
       - uses: iorate/changesette/setup@v1
 
-      - run: gh release create "$GITHUB_REF_NAME" --notes "$(changesette changelog "${GITHUB_REF_NAME#v}")"
+      - run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --notes "$(changesette changelog "${GITHUB_REF_NAME#v}")"
         env:
           GH_TOKEN: ${{ github.token }}
 ```

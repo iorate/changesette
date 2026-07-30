@@ -1,0 +1,25 @@
+---
+source: src/changelog.rs
+expression: "upsert(\"code-block-hashes\", \"1.0.0\")"
+---
+# ublacklist
+
+Example changelog section:
+
+```md
+## 9.9.9
+
+Not a real section.
+```
+
+## 1.0.0
+
+### Minor Changes
+
+- [#42](https://github.com/iorate/ublacklist/pull/42) - Add SERPINFO satellites support
+
+## 0.9.0
+
+### Patch Changes
+
+- Fix something
