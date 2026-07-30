@@ -7,6 +7,7 @@ mod changelog;
 mod changeset;
 mod commands;
 mod config;
+mod github;
 mod package_json;
 mod package_lock;
 
@@ -29,7 +30,11 @@ enum Command {
         message: Option<String>,
     },
     /// Consume changesets: bump the package version and update CHANGELOG.md
-    Version,
+    Version {
+        /// Print the plan to stderr instead of modifying any file
+        #[arg(short = 'n', long)]
+        dry_run: bool,
+    },
     /// Print the current version from package.json
     Current,
     /// Print a version section from CHANGELOG.md
@@ -52,7 +57,7 @@ fn main() -> ExitCode {
 fn run() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Add { bump, message } => commands::add::run(bump, message),
-        Command::Version => commands::version::run(),
+        Command::Version { dry_run } => commands::version::run(dry_run),
         Command::Current => commands::current::run(),
         Command::Changelog { version } => commands::changelog::run(version),
     }

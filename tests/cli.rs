@@ -1,3 +1,5 @@
+mod util;
+
 use std::{
     fs,
     path::Path,
@@ -5,6 +7,7 @@ use std::{
 };
 
 use tempfile::TempDir;
+use util::{dir_snapshot, write_changeset};
 
 const CROCKFORD_ALPHABET: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -177,12 +180,180 @@ fn changelog_fails_without_a_changelog_file() {
     assert!(stderr(&output).contains("CHANGELOG.md not found"));
 }
 
+const ULID_A: &str = "changesette-01H455VB4PEX5VSKNK084SN02Q.md";
+const ULID_B: &str = "changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md";
+
+const PACKAGE_LOCK: &str = "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\",\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"\": {\n      \"name\": \"ublacklist\",\n      \"version\": \"1.2.3\"\n    }\n  }\n}\n";
+
 #[test]
-fn version_is_not_implemented_yet() {
+fn version_with_zero_changesets_does_nothing() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert!(
+        stderr(&output).contains("no changesets found"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_fails_without_the_changeset_directory() {
     let dir = package_dir();
     let output = changesette(dir.path(), &["version"]);
     assert!(!output.status.success());
-    assert!(stderr(&output).contains("not implemented"));
+    assert!(
+        stderr(&output).contains(".changeset"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn version_bumps_and_writes_the_changelog() {
+    let dir = package_dir();
+    write_changeset(dir.path(), ULID_B, "minor", "Add feature");
+    fs::write(dir.path().join(".changeset/README.md"), "# Changesets\n").unwrap();
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "1.3.0\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("package.json")).unwrap(),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.3.0\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
+        "# ublacklist\n\n## 1.3.0\n\n### Minor Changes\n\n- Add feature\n"
+    );
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(dir.path().join(".changeset/README.md").exists());
+}
+
+#[test]
+fn version_syncs_the_package_lock() {
+    let dir = package_dir();
+    fs::write(dir.path().join("package-lock.json"), PACKAGE_LOCK).unwrap();
+    write_changeset(dir.path(), ULID_B, "minor", "Add feature");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("package-lock.json")).unwrap(),
+        PACKAGE_LOCK.replace("1.2.3", "1.3.0")
+    );
+}
+
+#[test]
+fn version_uses_the_max_bump_across_changesets() {
+    let dir = package_dir();
+    write_changeset(dir.path(), ULID_A, "major", "Rework everything");
+    write_changeset(dir.path(), ULID_B, "patch", "Fix bug");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "2.0.0\n");
+    let changelog = fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+    assert!(changelog.contains("## 2.0.0"), "{changelog}");
+    assert!(changelog.contains("### Major Changes"), "{changelog}");
+    assert!(changelog.contains("### Patch Changes"), "{changelog}");
+}
+
+#[test]
+fn version_fails_on_a_validation_error_leaving_the_tree_untouched() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    fs::write(
+        dir.path().join(".changeset").join(ULID_B),
+        "---\n\"other-package\": minor\n---\n\nAdd feature\n",
+    )
+    .unwrap();
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version"]);
+    assert!(!output.status.success());
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_rerun_replaces_the_same_section() {
+    let dir = package_dir();
+    write_changeset(dir.path(), ULID_B, "minor", "Add feature");
+    let package_json = fs::read_to_string(dir.path().join("package.json")).unwrap();
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let changelog = fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+
+    fs::write(dir.path().join("package.json"), package_json).unwrap();
+    write_changeset(dir.path(), ULID_B, "minor", "Add feature");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "1.3.0\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
+        changelog
+    );
+}
+
+#[test]
+fn version_dry_run_prints_the_plan_without_modifying_files() {
+    let dir = package_dir();
+    write_changeset(dir.path(), ULID_B, "minor", "Add feature");
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "--dry-run"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "1.3.0\n");
+    assert_eq!(dir_snapshot(dir.path()), before);
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "dry run: no files will be modified\n\
+             would consume 1 changeset:\n\
+             \x20\x20.changeset/{ULID_B} (minor)\n\
+             would update package.json: 1.2.3 -> 1.3.0\n\
+             would insert into CHANGELOG.md:\n\
+             \n\
+             ## 1.3.0\n\
+             \n\
+             ### Minor Changes\n\
+             \n\
+             - Add feature\n"
+        )
+    );
+}
+
+#[test]
+fn version_dry_run_via_the_short_flag_names_the_package_lock() {
+    let dir = package_dir();
+    fs::write(dir.path().join("package-lock.json"), PACKAGE_LOCK).unwrap();
+    write_changeset(dir.path(), ULID_A, "patch", "Fix bug");
+    write_changeset(dir.path(), ULID_B, "minor", "Add feature");
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "-n"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "1.3.0\n");
+    assert_eq!(dir_snapshot(dir.path()), before);
+    let err = stderr(&output);
+    assert!(err.contains("would consume 2 changesets:"), "{err}");
+    assert!(
+        err.contains("would update package.json, package-lock.json: 1.2.3 -> 1.3.0"),
+        "{err}"
+    );
+}
+
+#[test]
+fn version_dry_run_with_zero_changesets_behaves_like_a_normal_run() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    let output = changesette(dir.path(), &["version", "--dry-run"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert!(
+        stderr(&output).contains("no changesets found"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!stderr(&output).contains("dry run"), "{}", stderr(&output));
 }
 
 #[test]
