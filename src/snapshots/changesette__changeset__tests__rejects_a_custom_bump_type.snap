@@ -2,4 +2,4 @@
 source: src/changeset.rs
 expression: "load_err(\"custom-type\")"
 ---
-tests/fixtures/changeset/custom-type/changesette-01h455wz0h1x9pe0qb0mv1p1kg.md: unknown bump type `none`; expected major, minor, or patch
+tests/fixtures/changeset/custom-type/changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md: unknown bump type `none`; expected major, minor, or patch

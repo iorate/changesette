@@ -14,7 +14,7 @@ expression: "load_ok(\"ordering\")"
         summary: "Sorted second",
     },
     LoadedChange {
-        file_name: "changesette-01h455vb4pex5vsknk084sn02q.md",
+        file_name: "changesette-01H455VB4PEX5VSKNK084SN02Q.md",
         bump: Patch,
         summary: "Sorted last, and written without quotes the way knope writes them",
     },
