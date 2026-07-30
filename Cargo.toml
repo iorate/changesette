@@ -1,0 +1,23 @@
+[package]
+name = "changesette"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A changesets-compatible version and changelog manager for single-package applications"
+repository = "https://github.com/iorate/changesette"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.104"
+changesets = "0.4.0"
+jsonc-parser = { version = "0.33.1", features = ["cst"] }
+pulldown-cmark = { version = "0.13.4", default-features = false }
+semver = "1.0.28"
+toml_edit = "0.25.13"
+
+[dev-dependencies]
+insta = "1.48.0"
+tempfile = "3.27.0"
+
+[lints.rust]
+unreachable_pub = "warn"
