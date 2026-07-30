@@ -1,0 +1,11 @@
+---
+source: src/changelog/document.rs
+expression: "extract(\"code-block\", None).unwrap()"
+---
+### Minor Changes
+
+- Document the changelog format
+
+```md
+## 9.9.9
+```

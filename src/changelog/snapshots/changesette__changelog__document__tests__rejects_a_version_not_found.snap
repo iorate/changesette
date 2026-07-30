@@ -1,0 +1,5 @@
+---
+source: src/changelog/document.rs
+expression: "format!(\"{:#}\", extract(\"basic\", Some(\"3.0.0\")).unwrap_err())"
+---
+version 3.0.0 not found in CHANGELOG.md

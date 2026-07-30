@@ -1,0 +1,7 @@
+---
+source: src/changelog/document.rs
+expression: "extract(\"basic\", Some(\"1.0.0\")).unwrap()"
+---
+### Minor Changes
+
+- Add something

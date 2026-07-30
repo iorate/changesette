@@ -1,0 +1,5 @@
+---
+source: src/changelog/document.rs
+expression: "format!(\"{:#}\", extract(\"no-h2\", None).unwrap_err())"
+---
+no version sections found in CHANGELOG.md

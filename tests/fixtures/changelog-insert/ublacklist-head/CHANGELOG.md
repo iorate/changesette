@@ -1,0 +1,23 @@
+# ublacklist
+
+## 10.0.1
+
+### Patch Changes
+
+- [#967](https://github.com/iorate/ublacklist/pull/967) [`5263cbc`](https://github.com/iorate/ublacklist/commit/5263cbcf58c04fe83e556c5463d63646d74b6210) - Google Drive and Dropbox sync now uses PKCE when authorizing, improving the security of the sign-in flow. Existing connections keep working without re-authorization.
+
+- [#968](https://github.com/iorate/ublacklist/pull/968) [`4a0b84b`](https://github.com/iorate/ublacklist/commit/4a0b84b9ff8627aba20bd73a95c07423cd8a188f) - Updated the German translation.
+
+- [#953](https://github.com/iorate/ublacklist/pull/953) [`acaa62e`](https://github.com/iorate/ublacklist/commit/acaa62e534401f77030b4af5fcf5d47d9927967a) - Updated the Russian translation.
+
+- [#951](https://github.com/iorate/ublacklist/pull/951) [`ac6e253`](https://github.com/iorate/ublacklist/commit/ac6e2532050dbbebd3daa41e7466fa8bf4372506) - Updated the Chinese (China) translation.
+
+- [#953](https://github.com/iorate/ublacklist/pull/953) [`acaa62e`](https://github.com/iorate/ublacklist/commit/acaa62e534401f77030b4af5fcf5d47d9927967a) - Updated the Chinese (Taiwan) translation.
+
+## 10.0.0
+
+### Major Changes
+
+- [#922](https://github.com/iorate/ublacklist/pull/922) [`64e81e9`](https://github.com/iorate/ublacklist/commit/64e81e956e9ce7e0b9087789ddcbf176f8a97f15) - uBlacklist now blocks the whole site by default when you block a search result, and all sync categories are now enabled by default. You can change these in the options page. These new defaults also apply to existing users who have never changed them.
+
+- [#920](https://github.com/iorate/ublacklist/pull/920) [`c0597b5`](https://github.com/iorate/ublacklist/commit/c0597b5e80effcaf706cdc068eb7b37c2c596c1f) - The subscription update interval is now set in days, and update checks run at most once a day even if a shorter interval was configured before. The sync interval can now be set to any number of minutes (minimum five).

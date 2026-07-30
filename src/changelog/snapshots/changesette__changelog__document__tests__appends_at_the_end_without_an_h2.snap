@@ -1,0 +1,13 @@
+---
+source: src/changelog/document.rs
+expression: "upsert(\"no-h2\", \"1.0.0\")"
+---
+# ublacklist
+
+All notable changes to this project are documented in this file.
+
+## 1.0.0
+
+### Minor Changes
+
+- [#42](https://github.com/iorate/ublacklist/pull/42) - Add SERPINFO satellites support
