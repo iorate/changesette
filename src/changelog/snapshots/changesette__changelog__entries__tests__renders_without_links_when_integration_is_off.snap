@@ -1,0 +1,9 @@
+---
+source: src/changelog/entries.rs
+expression: "render(&[entry(&[12, 23], \"Add SERPINFO satellites support\")], None,)"
+---
+## 10.1.0
+
+### Minor Changes
+
+- Add SERPINFO satellites support
