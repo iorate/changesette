@@ -39,8 +39,8 @@ enum Command {
     Current,
     /// Print a version section from CHANGELOG.md
     Changelog {
-        /// The version whose section to print (defaults to the latest)
-        version: Option<String>,
+        /// The version whose section to print
+        version: String,
     },
 }
 
@@ -59,6 +59,6 @@ fn run() -> anyhow::Result<()> {
         Command::Add { bump, message } => commands::add::run(bump, message),
         Command::Version { dry_run } => commands::version::run(dry_run),
         Command::Current => commands::current::run(),
-        Command::Changelog { version } => commands::changelog::run(version),
+        Command::Changelog { version } => commands::changelog::run(&version),
     }
 }

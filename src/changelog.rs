@@ -133,18 +133,12 @@ pub(crate) fn upsert_section(
 
 /// Returns the body of the `## <version>` section — the text between that
 /// heading and the next top-level `##` heading (or the end of the document) —
-/// with surrounding blank lines trimmed and no trailing newline. `None` means
-/// the first (= latest) section. Errors if the section is not found.
-pub(crate) fn extract_section(text: &str, version: Option<&str>) -> Result<String> {
+/// with surrounding blank lines trimmed and no trailing newline. Errors if
+/// the section is not found.
+pub(crate) fn extract_section(text: &str, version: &str) -> Result<String> {
     let headings = parse_headings(text);
-    let index = match version {
-        Some(version) => find_h2(&headings, version)
-            .with_context(|| format!("version {version} not found in CHANGELOG.md"))?,
-        None => headings
-            .iter()
-            .position(|heading| heading.level == HeadingLevel::H2)
-            .context("no version sections found in CHANGELOG.md")?,
-    };
+    let index = find_h2(&headings, version)
+        .with_context(|| format!("version {version} not found in CHANGELOG.md"))?;
     let end = next_h2_start(&headings, index, text.len());
     Ok(trim_blank_lines(&text[headings[index].range.end..end]).to_owned())
 }
@@ -279,7 +273,7 @@ mod tests {
         )
     }
 
-    fn extract(case: &str, version: Option<&str>) -> Result<String> {
+    fn extract(case: &str, version: &str) -> Result<String> {
         extract_section(&read_fixture("changelog-extract", case), version)
     }
 
@@ -411,30 +405,27 @@ mod tests {
     }
 
     #[test]
-    fn extracts_the_latest_section() {
-        insta::assert_snapshot!(extract("basic", None).unwrap());
+    fn extracts_the_first_section() {
+        insta::assert_snapshot!(extract("basic", "2.0.0").unwrap());
     }
 
     #[test]
-    fn extracts_an_explicit_version() {
-        insta::assert_snapshot!(extract("basic", Some("1.0.0")).unwrap());
+    fn extracts_a_later_section() {
+        insta::assert_snapshot!(extract("basic", "1.0.0").unwrap());
     }
 
     #[test]
     fn keeps_a_code_block_inside_a_section() {
-        insta::assert_snapshot!(extract("code-block", None).unwrap());
+        insta::assert_snapshot!(extract("code-block", "2.0.0").unwrap());
     }
 
     #[test]
     fn rejects_a_version_not_found() {
-        insta::assert_snapshot!(format!(
-            "{:#}",
-            extract("basic", Some("3.0.0")).unwrap_err()
-        ));
+        insta::assert_snapshot!(format!("{:#}", extract("basic", "3.0.0").unwrap_err()));
     }
 
     #[test]
     fn rejects_a_changelog_without_sections() {
-        insta::assert_snapshot!(format!("{:#}", extract("no-h2", None).unwrap_err()));
+        insta::assert_snapshot!(format!("{:#}", extract("no-h2", "1.0.0").unwrap_err()));
     }
 }

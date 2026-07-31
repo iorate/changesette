@@ -1,6 +1,6 @@
 ---
 source: src/changelog.rs
-expression: "extract(\"basic\", None).unwrap()"
+expression: "extract(\"basic\", \"2.0.0\").unwrap()"
 ---
 ### Major Changes
 

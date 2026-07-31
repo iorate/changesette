@@ -131,9 +131,9 @@ Applies all pending changesets: bumps `package.json` (and `package-lock.json`), 
 
 Prints the current version from `package.json`.
 
-### `changesette changelog [<version>]`
+### `changesette changelog <version>`
 
-Prints the `## <version>` section of `CHANGELOG.md` (the latest one if omitted).
+Prints the `## <version>` section of `CHANGELOG.md`.
 
 ## GitHub integration
 

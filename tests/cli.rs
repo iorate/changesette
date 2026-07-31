@@ -147,12 +147,12 @@ fn current_fails_without_package_json() {
 }
 
 #[test]
-fn changelog_prints_the_latest_section_by_default() {
+fn changelog_without_a_version_fails() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
     let output = changesette(dir.path(), &["changelog"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "### Minor Changes\n\n- Add feature\n");
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("<VERSION>"), "{}", stderr(&output));
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn changelog_fails_for_a_missing_version() {
 #[test]
 fn changelog_fails_without_a_changelog_file() {
     let dir = tempfile::tempdir().unwrap();
-    let output = changesette(dir.path(), &["changelog"]);
+    let output = changesette(dir.path(), &["changelog", "1.0.0"]);
     assert!(!output.status.success());
     assert!(stderr(&output).contains("CHANGELOG.md not found"));
 }
