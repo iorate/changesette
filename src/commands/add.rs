@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
 use ulid::Ulid;
 
 use crate::{bump::Bump, package_json::PackageJson};
@@ -48,12 +49,14 @@ pub(crate) fn run(bump: Option<Bump>, summary: Option<String>) -> Result<()> {
     let changeset_dir = Path::new(".changeset");
     fs::create_dir_all(changeset_dir).with_context(|| changeset_dir.display().to_string())?;
     let path = changeset_dir.join(format!("changesette-{}.md", Ulid::generate()));
-    let content = format!(
-        "---\n\"{}\": {}\n---\n\n{}\n",
-        package_json.name(),
-        bump.as_str(),
-        summary.trim()
+    let mut mapping = Mapping::new();
+    mapping.insert(
+        Yaml::Value(Scalar::String(package_json.name().into())),
+        Yaml::Value(Scalar::String(bump.as_str().into())),
     );
+    let mut frontmatter = String::new();
+    YamlEmitter::new(&mut frontmatter).dump(&Yaml::Mapping(mapping))?;
+    let content = format!("{}\n---\n\n{}\n", frontmatter, summary.trim());
     fs::OpenOptions::new()
         .write(true)
         .create_new(true)

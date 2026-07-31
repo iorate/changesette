@@ -68,7 +68,28 @@ fn add_with_both_flags_creates_a_changeset() {
     assert_changeset_path(line);
     assert!(dir.path().join(".changeset").is_dir());
     let content = fs::read_to_string(dir.path().join(line)).unwrap();
-    assert_eq!(content, "---\n\"ublacklist\": minor\n---\n\nAdd feature\n");
+    assert_eq!(content, "---\nublacklist: minor\n---\n\nAdd feature\n");
+}
+
+#[test]
+fn add_quotes_a_scoped_package_name() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"name\": \"@iorate/ublacklist\",\n  \"version\": \"1.2.3\"\n}\n",
+    )
+    .unwrap();
+    let output = changesette(
+        dir.path(),
+        &["add", "--bump", "minor", "--message", "Add feature"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    let content = fs::read_to_string(dir.path().join(out.trim_end())).unwrap();
+    assert_eq!(
+        content,
+        "---\n\"@iorate/ublacklist\": minor\n---\n\nAdd feature\n"
+    );
 }
 
 #[test]
@@ -81,7 +102,7 @@ fn add_accepts_a_multi_line_message_via_the_short_flag() {
     assert!(output.status.success(), "{}", stderr(&output));
     let out = stdout(&output);
     let content = fs::read_to_string(dir.path().join(out.trim_end())).unwrap();
-    assert_eq!(content, "---\n\"ublacklist\": patch\n---\n\nline1\nline2\n");
+    assert_eq!(content, "---\nublacklist: patch\n---\n\nline1\nline2\n");
 }
 
 #[test]
