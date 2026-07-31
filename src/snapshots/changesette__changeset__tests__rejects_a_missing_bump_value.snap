@@ -1,0 +1,5 @@
+---
+source: src/changeset.rs
+expression: "load_err(\"null-bump\")"
+---
+tests/fixtures/changeset/null-bump/changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md: invalid bump type; expected major, minor, or patch

@@ -1,11 +1,17 @@
-use std::{fs, io, path::Path};
+use std::{fs, io, path::Path, sync::LazyLock};
 
 use anyhow::{Context, Result, bail, ensure};
-use changesets::{Change, ChangeType, LoadingError, ParsingError};
+use regex::Regex;
+use saphyr::{LoadableYamlNode, Yaml};
 
 use crate::bump::Bump;
 
 const IGNORED_FILE_NAMES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "GEMINI.md"];
+
+// A port of the upstream `@changesets/parse` regex; capture 1 is the
+// frontmatter YAML and capture 2 is the summary.
+static FRONTMATTER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)\s*---(.*?)\r?\n\s*---(\s*(?:\n|$).*)").unwrap());
 
 /// A changeset parsed from one `.changeset/*.md` file.
 #[derive(Debug)]
@@ -71,33 +77,60 @@ fn load_one(changeset_dir: &Path, file_name: &str, package_name: &str) -> Result
 
     let content =
         fs::read_to_string(&file_path).with_context(|| file_path.display().to_string())?;
-    let change = match Change::from_file_name_and_content(file_name, &content) {
-        Ok(change) => change,
-        Err(LoadingError::Parsing(ParsingError::InvalidVersioning(_))) => bail!(
-            "{}: empty changeset (no bump specified)",
+    let Some(captures) = FRONTMATTER.captures(&content) else {
+        bail!(
+            "{}: missing frontmatter (expected `---`-delimited YAML)",
+            file_path.display()
+        )
+    };
+    let frontmatter = &captures[1];
+    let summary = captures[2].trim();
+
+    let docs = match Yaml::load_from_str(frontmatter) {
+        Ok(docs) => docs,
+        Err(err) => bail!(
+            "{}: invalid YAML in frontmatter: {err}",
             file_path.display()
         ),
-        Err(err) => return Err(err).context(file_path.display().to_string()),
     };
 
     let mut bump = None;
-    for (name, change_type) in change.versioning.iter() {
-        let name = strip_quotes(name);
-        ensure!(
-            name == package_name,
-            "{}: changeset targets package `{name}`, but the manifest declares `{package_name}`",
+    match docs.into_iter().next() {
+        None => {}
+        Some(doc) if doc.is_null() => {}
+        Some(Yaml::Mapping(mapping)) => {
+            for (key, value) in &mapping {
+                let Some(name) = key.as_str() else {
+                    bail!(
+                        "{}: invalid package name in frontmatter",
+                        file_path.display()
+                    )
+                };
+                ensure!(
+                    name == package_name,
+                    "{}: changeset targets package `{name}`, but the manifest declares `{package_name}`",
+                    file_path.display()
+                );
+                let entry_bump = match value.as_str() {
+                    Some("major") => Bump::Major,
+                    Some("minor") => Bump::Minor,
+                    Some("patch") => Bump::Patch,
+                    Some(other) => bail!(
+                        "{}: unknown bump type `{other}`; expected major, minor, or patch",
+                        file_path.display()
+                    ),
+                    None => bail!(
+                        "{}: invalid bump type; expected major, minor, or patch",
+                        file_path.display()
+                    ),
+                };
+                bump = bump.max(Some(entry_bump));
+            }
+        }
+        Some(_) => bail!(
+            "{}: frontmatter must be a mapping of package names to bump types",
             file_path.display()
-        );
-        let entry_bump = match change_type {
-            ChangeType::Major => Bump::Major,
-            ChangeType::Minor => Bump::Minor,
-            ChangeType::Patch => Bump::Patch,
-            ChangeType::Custom(change_type) => bail!(
-                "{}: unknown bump type `{change_type}`; expected major, minor, or patch",
-                file_path.display()
-            ),
-        };
-        bump = bump.max(Some(entry_bump));
+        ),
     }
     let Some(bump) = bump else {
         bail!(
@@ -106,7 +139,6 @@ fn load_one(changeset_dir: &Path, file_name: &str, package_name: &str) -> Result
         )
     };
 
-    let summary = change.summary.trim();
     ensure!(
         !summary.is_empty(),
         "{}: empty changeset (the summary is empty)",
@@ -118,18 +150,6 @@ fn load_one(changeset_dir: &Path, file_name: &str, package_name: &str) -> Result
         bump,
         summary: summary.to_owned(),
     })
-}
-
-fn strip_quotes(name: &str) -> &str {
-    for quote in ['"', '\''] {
-        if let Some(name) = name
-            .strip_prefix(quote)
-            .and_then(|name| name.strip_suffix(quote))
-        {
-            return name;
-        }
-    }
-    name
 }
 
 #[cfg(test)]
@@ -174,6 +194,16 @@ mod tests {
     }
 
     #[test]
+    fn parses_a_quoted_bump_type() {
+        insta::assert_debug_snapshot!(load_ok("quoted-value"));
+    }
+
+    #[test]
+    fn parses_frontmatter_with_comments_and_blank_lines() {
+        insta::assert_debug_snapshot!(load_ok("comments-and-blank-lines"));
+    }
+
+    #[test]
     fn max_bump_is_none_without_changesets() {
         assert_eq!(max_bump(&[]), None);
     }
@@ -206,5 +236,25 @@ mod tests {
     #[test]
     fn rejects_a_custom_bump_type() {
         insta::assert_snapshot!(load_err("custom-type"));
+    }
+
+    #[test]
+    fn rejects_a_file_without_frontmatter() {
+        insta::assert_snapshot!(load_err("no-frontmatter"));
+    }
+
+    #[test]
+    fn rejects_invalid_yaml_in_frontmatter() {
+        insta::assert_snapshot!(load_err("invalid-yaml"));
+    }
+
+    #[test]
+    fn rejects_a_non_mapping_frontmatter() {
+        insta::assert_snapshot!(load_err("non-mapping"));
+    }
+
+    #[test]
+    fn rejects_a_missing_bump_value() {
+        insta::assert_snapshot!(load_err("null-bump"));
     }
 }

@@ -1,0 +1,11 @@
+---
+source: src/changeset.rs
+expression: "load_ok(\"quoted-value\")"
+---
+[
+    LoadedChange {
+        file_name: "changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md",
+        bump: Minor,
+        summary: "Uses a quoted bump type, which real YAML unquotes",
+    },
+]

@@ -1,0 +1,5 @@
+---
+source: src/changeset.rs
+expression: "load_err(\"invalid-yaml\")"
+---
+tests/fixtures/changeset/invalid-yaml/changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md: invalid YAML in frontmatter: mapping values are not allowed in this context at byte 20 line 2 column 20
