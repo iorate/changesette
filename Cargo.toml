@@ -3,7 +3,7 @@ name = "changesette"
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.85"
-description = "A changesets-like version and changelog manager for single-package applications"
+description = "A version and changelog manager for single-package applications, using the changesets file format"
 repository = "https://github.com/iorate/changesette"
 license = "MIT"
 

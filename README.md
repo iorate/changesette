@@ -1,6 +1,6 @@
 # changesette
 
-A [changesets](https://github.com/changesets/changesets)-like version and changelog manager for single-package applications. The name is changeset + the diminutive suffix -ette (as in diskette).
+A version and changelog manager for single-package applications, using the same changeset file format as [changesets](https://github.com/changesets/changesets) and shipped as a single dependency-free Rust binary. The name is changeset + the diminutive suffix -ette (as in diskette).
 
 `changesette` reads changeset files, bumps the version in `package.json` (and `package-lock.json` when present), and generates `CHANGELOG.md`. `changesette` performs no git operations, and no GitHub access beyond the read-only API calls of the GitHub integration; commits, pull requests, tags, and releases belong to your workflows.
 
