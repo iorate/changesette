@@ -21,7 +21,7 @@ struct Cli {
 #[derive(clap::Args)]
 struct AddArgs {
     /// The bump type to record in the changeset
-    #[arg(long)]
+    #[arg(short, long)]
     bump: Option<bump::Bump>,
     /// The summary text of the change
     #[arg(short, long)]
