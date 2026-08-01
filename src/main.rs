@@ -7,7 +7,6 @@ mod changelog;
 mod changeset;
 mod commands;
 mod package_json;
-mod package_lock;
 
 #[derive(Parser)]
 #[command(version, args_conflicts_with_subcommands = true)]

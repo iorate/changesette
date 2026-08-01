@@ -1,5 +1,0 @@
----
-source: src/package_lock.rs
-expression: "load_err(\"version-not-string\")"
----
-package-lock.json: top-level "version" must be a string

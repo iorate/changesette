@@ -6,7 +6,7 @@
 
 A version and changelog manager for single-package applications, using the same changeset file format as [changesets](https://github.com/changesets/changesets) and shipped as a single dependency-free Rust binary. The name is changeset + the diminutive suffix -ette (as in diskette).
 
-`changesette` reads changeset files, bumps the version in `package.json` (and `package-lock.json` when present), and generates `CHANGELOG.md`. `changesette` performs no git operations and no network access; commits, pull requests, tags, and releases belong to your workflows.
+`changesette` reads changeset files, bumps the version in `package.json`, and generates `CHANGELOG.md`. It never touches lockfiles; regenerating a lockfile such as `package-lock.json` is your package manager's job. `changesette` performs no git operations and no network access; commits, pull requests, tags, and releases belong to your workflows.
 
 ## Install
 
@@ -86,6 +86,7 @@ jobs:
               changesette changelog "$next"
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
+            npm install --package-lock-only # if you use npm
           fi
 
       - uses: peter-evans/create-pull-request@v8
@@ -120,7 +121,7 @@ Creates a changeset file in `.changeset/` and prints its path. `--bump` and `--m
 
 ### `changesette version [--dry-run]`
 
-Applies all pending changesets: bumps `package.json` (and `package-lock.json`), inserts the new section into `CHANGELOG.md`, and deletes the consumed changesets. Prints the next version, or nothing when there were no changesets and nothing was changed. `--dry-run` (short form `-n`) prints the plan to stderr without changing any files.
+Applies all pending changesets: bumps `package.json`, inserts the new section into `CHANGELOG.md`, and deletes the consumed changesets. Prints the next version, or nothing when there were no changesets and nothing was changed. `--dry-run` (short form `-n`) prints the plan to stderr without changing any files. Lockfiles are not updated; if you use npm, run `npm install --package-lock-only` afterwards.
 
 ### `changesette current`
 
@@ -139,7 +140,7 @@ Prints the `## <version>` section of `CHANGELOG.md`.
 - No pre-release mode (`pre.json`).
 - No `none` bump type and no empty changesets; both are errors.
 - Changelog entries are plain summaries: no auto-generated PR / commit / author links and no changelog plugins.
-- The only lockfile synced is npm's `package-lock.json`; yarn and pnpm lockfiles do not record the package's own version, so they need no syncing.
+- No lockfile syncing, by design: `changesette` writes only `package.json`, `CHANGELOG.md`, and the changeset files; updating derived files is the package manager's responsibility. If you use npm, run `npm install --package-lock-only` after `changesette version`.
 - The CLI is not command-compatible with `changeset`; only the changeset files are interchangeable.
 
 ## License
