@@ -1,0 +1,1 @@
+`nested.md` is a directory; its name is adopted, so `load` must fail to read it.

@@ -25,8 +25,10 @@ pub(crate) struct LoadedChange {
 }
 
 /// Loads every changeset in `changeset_dir` in file-name order, verifying
-/// that each targets `package_name`. Dotfiles, non-`.md` files, README.md,
-/// and agent instruction files are skipped.
+/// that each targets `package_name`. Entries are selected by name alone, as
+/// in the upstream `@changesets/read`: dotfiles, non-`.md` names, README.md,
+/// and agent instruction files are skipped, symlinks are followed, and a
+/// directory with an adopted name is a read error.
 pub(crate) fn load(changeset_dir: &Path, package_name: &str) -> Result<Vec<LoadedChange>> {
     let entries = match fs::read_dir(changeset_dir) {
         Ok(entries) => entries,
@@ -40,13 +42,6 @@ pub(crate) fn load(changeset_dir: &Path, package_name: &str) -> Result<Vec<Loade
     let mut file_names = Vec::new();
     for entry in entries {
         let entry = entry.with_context(|| changeset_dir.display().to_string())?;
-        if !entry
-            .file_type()
-            .with_context(|| entry.path().display().to_string())?
-            .is_file()
-        {
-            continue;
-        }
         let Ok(file_name) = entry.file_name().into_string() else {
             continue;
         };
@@ -181,6 +176,16 @@ mod tests {
     #[test]
     fn parses_a_file_written_by_the_upstream_cli() {
         insta::assert_debug_snapshot!(load_ok("upstream-generated"));
+    }
+
+    #[test]
+    fn follows_symlinked_changesets() {
+        insta::assert_debug_snapshot!(load_ok("symlink"));
+    }
+
+    #[test]
+    fn rejects_a_directory_with_an_adopted_name() {
+        insta::assert_snapshot!(load_err("md-directory"));
     }
 
     #[test]

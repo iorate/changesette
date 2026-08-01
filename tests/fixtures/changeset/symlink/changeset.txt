@@ -1,0 +1,5 @@
+---
+"ublacklist": patch
+---
+
+Fix something recorded in a symlinked changeset.
