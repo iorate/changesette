@@ -13,7 +13,7 @@ A version and changelog manager for single-package applications, using the same 
 GitHub Actions (verifies the build provenance of the downloaded archive; GitHub-hosted runners are assumed):
 
 ```yaml
-uses: iorate/changesette/setup@v1
+uses: iorate/changesette/setup@v2
 ```
 
 Shell script (macOS / Linux):
@@ -73,7 +73,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: iorate/changesette/setup@v1
+      - uses: iorate/changesette/setup@v2
 
       - id: version
         run: |
@@ -140,7 +140,6 @@ Prints the `## <version>` section of `CHANGELOG.md`.
 - No pre-release mode (`pre.json`).
 - No `none` bump type and no empty changesets; both are errors.
 - Changelog entries are plain summaries: no auto-generated PR / commit / author links and no changelog plugins.
-- No lockfile syncing, by design: `changesette` writes only `package.json`, `CHANGELOG.md`, and the changeset files; updating derived files is the package manager's responsibility. If you use npm, run `npm install --package-lock-only` after `changesette version`.
 - The CLI is not command-compatible with `changeset`; only the changeset files are interchangeable.
 
 ## License
