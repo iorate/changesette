@@ -48,7 +48,7 @@ jobs:
           if [[ -n "$next" ]]; then
             delim="$(openssl rand -hex 16)"
             {
-              echo "body<<$delim"
+              echo "changelog<<$delim"
               changesette changelog "$next"
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
@@ -59,7 +59,7 @@ jobs:
           branch: changesette/release
           commit-message: Release v${{ steps.version.outputs.next }}
           title: Release v${{ steps.version.outputs.next }}
-          body: ${{ steps.version.outputs.body }}
+          body: ${{ steps.version.outputs.changelog }}
           delete-branch: true
 
       - if: steps.version.outputs.next == ''
