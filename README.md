@@ -12,11 +12,9 @@ The setup action installs the `changesette` binary and adds it to `PATH`, verify
 uses: iorate/changesette/setup@v1
 ```
 
-## Example workflows
+## Example workflow
 
-### Version PR + tag
-
-On every push to `main`, maintains a Version PR that applies the pending changesets; merging it tags the new version.
+On every push to `main`, maintains a Version PR that applies the pending changesets; merging it creates a GitHub Release (and its tag) with the changelog section as the notes.
 
 ```yaml
 name: Version
@@ -32,18 +30,14 @@ jobs:
   version:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+      pull-requests: write
+
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-
-      - uses: actions/create-github-app-token@v3
-        id: app-token
-        with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
 
       - uses: iorate/changesette/setup@v1
 
@@ -62,7 +56,6 @@ jobs:
 
       - uses: peter-evans/create-pull-request@v8
         with:
-          token: ${{ steps.app-token.outputs.token }}
           branch: changesette/release
           commit-message: Release v${{ steps.version.outputs.next }}
           title: Release v${{ steps.version.outputs.next }}
@@ -72,45 +65,11 @@ jobs:
       - if: steps.version.outputs.next == ''
         run: |
           v="v$(changesette current)"
-          if [[ -z "$(git ls-remote origin "refs/tags/$v")" ]]; then
-            git tag "$v"
-            git push origin "$v"
+          if ! gh release view "$v" > /dev/null 2>&1; then
+            gh release create "$v" \
+              --target "$GITHUB_SHA" \
+              --notes "$(changesette changelog "${v#v}")"
           fi
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          GIT_CONFIG_COUNT: 1
-          GIT_CONFIG_KEY_0: credential.helper
-          GIT_CONFIG_VALUE_0: "!gh auth git-credential"
-```
-
-### Release on tag
-
-Creates a GitHub Release with the changelog section as its notes; replace the body with whatever your release needs.
-
-```yaml
-name: Release
-
-on:
-  push:
-    tags: ["v*"]
-
-jobs:
-  release:
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - uses: iorate/changesette/setup@v1
-
-      - run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --notes "$(changesette changelog "${GITHUB_REF_NAME#v}")"
         env:
           GH_TOKEN: ${{ github.token }}
 ```
