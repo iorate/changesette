@@ -1,5 +1,0 @@
----
-changesette: minor
----
-
-Initial release
