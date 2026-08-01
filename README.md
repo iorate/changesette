@@ -130,6 +130,18 @@ Prints the current version from `package.json`.
 
 Prints the `## <version>` section of `CHANGELOG.md`.
 
+## Differences from changesets
+
+`changesette` shares the changeset file format with changesets, but is deliberately much smaller. Coming from changesets, expect the following:
+
+- Single package only: no monorepo / workspace support.
+- No configuration: `.changeset/config.json` is not read, and there is nothing to configure.
+- No pre-release mode (`pre.json`).
+- No `none` bump type and no empty changesets; both are errors.
+- Changelog entries are plain summaries: no auto-generated PR / commit / author links and no changelog plugins.
+- The only lockfile synced is npm's `package-lock.json`; yarn and pnpm lockfiles do not record the package's own version, so they need no syncing.
+- The CLI is not command-compatible with `changeset`; only the changeset files are interchangeable.
+
 ## License
 
 [MIT](LICENSE)
