@@ -10,12 +10,19 @@ use ulid::Ulid;
 
 use crate::{bump::Bump, package_json::PackageJson};
 
-/// Creates a changeset file under `.changeset/` (creating the directory if
-/// needed) and prints its path to stdout. Inputs missing from the flags are
-/// prompted for interactively when both stdin and stderr are terminals;
-/// otherwise the missing flags are reported as an error.
+/// Creates a changeset file under `.changeset/` and prints its path to
+/// stdout; the directory must already exist (see `init`). Inputs missing from
+/// the flags are prompted for interactively when both stdin and stderr are
+/// terminals; otherwise the missing flags are reported as an error.
 pub(crate) fn run(bump: Option<Bump>, summary: Option<String>) -> Result<()> {
     let package_json = PackageJson::load(Path::new("."))?;
+
+    let changeset_dir = Path::new(".changeset");
+    ensure!(
+        changeset_dir.is_dir(),
+        "{}: changeset directory not found; run `changesette init` to create it",
+        changeset_dir.display()
+    );
 
     if let Some(summary) = &summary {
         ensure!(!summary.trim().is_empty(), "the summary must not be empty");
@@ -46,8 +53,6 @@ pub(crate) fn run(bump: Option<Bump>, summary: Option<String>) -> Result<()> {
         None => prompt_summary()?,
     };
 
-    let changeset_dir = Path::new(".changeset");
-    fs::create_dir_all(changeset_dir).with_context(|| changeset_dir.display().to_string())?;
     let path = changeset_dir.join(format!("changesette-{}.md", Ulid::generate()));
     let mut mapping = Mapping::new();
     mapping.insert(

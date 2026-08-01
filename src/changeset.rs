@@ -31,7 +31,7 @@ pub(crate) fn load(changeset_dir: &Path, package_name: &str) -> Result<Vec<Loade
     let entries = match fs::read_dir(changeset_dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == io::ErrorKind::NotFound => bail!(
-            "{}: changeset directory not found; run `changesette add` to create it",
+            "{}: changeset directory not found; run `changesette init` to create it",
             changeset_dir.display()
         ),
         Err(err) => return Err(err).context(changeset_dir.display().to_string()),

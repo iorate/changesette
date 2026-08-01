@@ -2,4 +2,4 @@
 source: src/changeset.rs
 expression: "load_err(\"does-not-exist\")"
 ---
-tests/fixtures/changeset/does-not-exist: changeset directory not found; run `changesette add` to create it
+tests/fixtures/changeset/does-not-exist: changeset directory not found; run `changesette init` to create it

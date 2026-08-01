@@ -52,8 +52,33 @@ fn assert_changeset_path(line: &str) {
 }
 
 #[test]
+fn init_creates_the_changeset_directory_with_a_readme() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = changesette(dir.path(), &["init"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "");
+    let readme = fs::read_to_string(dir.path().join(".changeset/README.md")).unwrap();
+    assert!(readme.starts_with("# Changesets\n"), "{readme}");
+}
+
+#[test]
+fn init_does_nothing_when_the_directory_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["init"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "");
+    assert_eq!(dir_snapshot(dir.path()), before);
+    assert!(!dir.path().join(".changeset/README.md").exists());
+}
+
+#[test]
 fn add_with_both_flags_creates_a_changeset() {
     let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(
         dir.path(),
         &["add", "--bump", "minor", "--message", "Add feature"],
@@ -79,6 +104,7 @@ fn add_quotes_a_scoped_package_name() {
         "{\n  \"name\": \"@iorate/ublacklist\",\n  \"version\": \"1.2.3\"\n}\n",
     )
     .unwrap();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(
         dir.path(),
         &["add", "--bump", "minor", "--message", "Add feature"],
@@ -93,8 +119,36 @@ fn add_quotes_a_scoped_package_name() {
 }
 
 #[test]
+fn add_is_the_default_command() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    let output = changesette(dir.path(), &["--bump", "minor", "--message", "Add feature"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert_changeset_path(out.trim_end());
+    let content = fs::read_to_string(dir.path().join(out.trim_end())).unwrap();
+    assert_eq!(content, "---\nublacklist: minor\n---\n\nAdd feature\n");
+}
+
+#[test]
+fn add_fails_without_the_changeset_directory() {
+    let dir = package_dir();
+    let output = changesette(
+        dir.path(),
+        &["add", "--bump", "minor", "--message", "Add feature"],
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("changesette init"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn add_accepts_a_multi_line_message_via_the_short_flag() {
     let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(
         dir.path(),
         &["add", "--bump", "patch", "-m", "line1\nline2"],
@@ -108,6 +162,7 @@ fn add_accepts_a_multi_line_message_via_the_short_flag() {
 #[test]
 fn add_without_message_fails_naming_the_missing_flag() {
     let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(dir.path(), &["add", "--bump", "minor"]);
     assert!(!output.status.success());
     let err = stderr(&output);
@@ -118,6 +173,7 @@ fn add_without_message_fails_naming_the_missing_flag() {
 #[test]
 fn add_without_bump_fails_naming_the_missing_flag() {
     let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(dir.path(), &["add", "-m", "Add feature"]);
     assert!(!output.status.success());
     let err = stderr(&output);
@@ -128,6 +184,7 @@ fn add_without_bump_fails_naming_the_missing_flag() {
 #[test]
 fn add_without_any_flags_fails_naming_both_missing_flags() {
     let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(dir.path(), &["add"]);
     assert!(!output.status.success());
     assert!(
@@ -140,9 +197,13 @@ fn add_without_any_flags_fails_naming_both_missing_flags() {
 #[test]
 fn add_rejects_an_empty_message() {
     let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(dir.path(), &["add", "--bump", "minor", "-m", ""]);
     assert!(!output.status.success());
-    assert!(fs::read_dir(dir.path().join(".changeset")).is_err());
+    assert_eq!(
+        fs::read_dir(dir.path().join(".changeset")).unwrap().count(),
+        0
+    );
 }
 
 #[test]
@@ -394,7 +455,7 @@ fn prints_help() {
     let output = changesette(dir.path(), &["--help"]);
     assert!(output.status.success());
     let out = stdout(&output);
-    for subcommand in ["add", "version", "current", "changelog"] {
+    for subcommand in ["init", "add", "version", "current", "changelog"] {
         assert!(out.contains(subcommand), "{out}");
     }
 }

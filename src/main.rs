@@ -10,23 +10,30 @@ mod package_json;
 mod package_lock;
 
 #[derive(Parser)]
-#[command(version)]
+#[command(version, args_conflicts_with_subcommands = true)]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
+    #[command(flatten)]
+    add: AddArgs,
+}
+
+#[derive(clap::Args)]
+struct AddArgs {
+    /// The bump type to record in the changeset
+    #[arg(long)]
+    bump: Option<bump::Bump>,
+    /// The summary text of the change
+    #[arg(short, long)]
+    message: Option<String>,
 }
 
 #[derive(clap::Subcommand)]
 enum Command {
-    /// Create a changeset
-    Add {
-        /// The bump type to record in the changeset
-        #[arg(long)]
-        bump: Option<bump::Bump>,
-        /// The summary text of the change
-        #[arg(short, long)]
-        message: Option<String>,
-    },
+    /// Create the changeset directory
+    Init,
+    /// Create a changeset (the default command)
+    Add(AddArgs),
     /// Consume changesets: bump the package version and update CHANGELOG.md
     Version {
         /// Print the plan to stderr instead of modifying any file
@@ -53,8 +60,10 @@ fn main() -> ExitCode {
 }
 
 fn run() -> anyhow::Result<()> {
-    match Cli::parse().command {
-        Command::Add { bump, message } => commands::add::run(bump, message),
+    let cli = Cli::parse();
+    match cli.command.unwrap_or(Command::Add(cli.add)) {
+        Command::Init => commands::init::run(),
+        Command::Add(AddArgs { bump, message }) => commands::add::run(bump, message),
         Command::Version { dry_run } => commands::version::run(dry_run),
         Command::Current => commands::current::run(),
         Command::Changelog { version } => commands::changelog::run(&version),

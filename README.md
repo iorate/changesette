@@ -117,7 +117,11 @@ jobs:
 
 ## CLI
 
-### `changesette add [--bump <major|minor|patch>] [--message <text>]`
+### `changesette init`
+
+Creates the `.changeset/` directory with a README.md. Does nothing if the directory already exists.
+
+### `changesette [add] [--bump <major|minor|patch>] [--message <text>]`
 
 Creates a changeset file in `.changeset/` and prints its path.
 
