@@ -1,0 +1,95 @@
+name: Tag aliases
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test-setup:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04      # x86_64-unknown-linux-gnu
+          - ubuntu-24.04-arm  # aarch64-unknown-linux-gnu
+          - macos-26-intel    # x86_64-apple-darwin
+          - macos-26          # aarch64-apple-darwin
+          - windows-2025      # x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.os }}
+
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install changesette
+        id: install
+        uses: ./setup
+
+      - name: Verify install and output
+        env:
+          ANNOUNCEMENT_TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+          INSTALLED_VERSION: ${{ steps.install.outputs.version }}
+        run: |
+          changesette --version
+          if [[ "changesette-v$INSTALLED_VERSION" != "$ANNOUNCEMENT_TAG" ]]; then
+            echo "unexpected output: $INSTALLED_VERSION"
+            exit 1
+          fi
+
+      - name: Re-run to exercise cache hit
+        uses: ./setup
+
+  tag-aliases:
+    needs: test-setup
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 30
+
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.BOT_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Create version and major tags
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          ANNOUNCEMENT_TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+        run: |
+          version="${ANNOUNCEMENT_TAG#changesette-v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Unexpected announcement tag: \"$ANNOUNCEMENT_TAG\""
+            exit 1
+          fi
+
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$ANNOUNCEMENT_TAG" --jq '.sha')
+
+          create_or_update_tag() {
+            local tag="$1"
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --silent 2>/dev/null; then
+              gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" -f "sha=$sha" -F force=true
+            else
+              gh api "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$tag" -f "sha=$sha"
+            fi
+          }
+
+          create_or_update_tag "v$version"
+          create_or_update_tag "v${version%%.*}"

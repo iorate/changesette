@@ -26,7 +26,7 @@ pr-run-mode = "skip"
 # Only react to tags like "changesette-v0.1.0"; plain "v0.1.0" tags are created post-announce
 tag-namespace = "changesette"
 # Create the "v0.1.0" and "v0" tags after the release is published
-post-announce-jobs = ["./post-announce"]
+post-announce-jobs = ["./tag-aliases"]
 # Attest build provenance of release artifacts with GitHub Artifact Attestations
 github-attestations = true
 
