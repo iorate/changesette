@@ -39,7 +39,7 @@ curl -fsSL "$base_url/$archive" -o "$RUNNER_TEMP/$archive"
 # Verify build provenance
 gh attestation verify "$RUNNER_TEMP/$archive" \
   --repo iorate/changesette \
-  --signer-workflow iorate/changesette/.github/workflows/release.yml
+  --signer-workflow iorate/changesette/.github/workflows/changesette-release.yml
 echo "Verified the build provenance of $archive"
 
 # Extract binary into tool cache
