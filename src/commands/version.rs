@@ -7,20 +7,18 @@ use crate::{
     changelog::{self, render_section},
     changeset,
     package_json::PackageJson,
-    package_lock::PackageLock,
 };
 
-/// Consumes every changeset: bumps package.json (and package-lock.json if
-/// present), inserts the new section into CHANGELOG.md, deletes the consumed
-/// files, and prints the next version to stdout. With zero changesets, does
-/// nothing and prints nothing. With `dry_run`, computes everything but prints
-/// the plan to stderr instead of touching any file.
+/// Consumes every changeset: bumps package.json, inserts the new section into
+/// CHANGELOG.md, deletes the consumed files, and prints the next version to
+/// stdout. With zero changesets, does nothing and prints nothing. With
+/// `dry_run`, computes everything but prints the plan to stderr instead of
+/// touching any file.
 pub(crate) fn run(dry_run: bool) -> Result<()> {
     let dir = Path::new(".");
     let changeset_dir = Path::new(".changeset");
 
     let mut package_json = PackageJson::load(dir)?;
-    let mut package_lock = PackageLock::load(dir)?;
     let changes = changeset::load(changeset_dir, package_json.name())?;
     if changes.is_empty() {
         eprintln!("note: no changesets found; nothing to do");
@@ -38,9 +36,6 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
     let section = render_section(&next, &entries);
 
     package_json.set_version(&next)?;
-    if let Some(package_lock) = &mut package_lock {
-        package_lock.set_version(&next)?;
-    }
     let changelog_path = Path::new("CHANGELOG.md");
     let changelog_text = match fs::read_to_string(changelog_path) {
         Ok(text) => text,
@@ -72,20 +67,10 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
                 change.bump.as_str()
             );
         }
-        eprintln!(
-            "would update {}: {current} -> {next}",
-            if package_lock.is_some() {
-                "package.json, package-lock.json"
-            } else {
-                "package.json"
-            }
-        );
+        eprintln!("would update package.json: {current} -> {next}");
         eprintln!("would insert into CHANGELOG.md:\n\n{section}");
     } else {
         package_json.save()?;
-        if let Some(package_lock) = &package_lock {
-            package_lock.save()?;
-        }
         fs::write(changelog_path, new_changelog_text)
             .with_context(|| changelog_path.display().to_string())?;
         for change in &changes {

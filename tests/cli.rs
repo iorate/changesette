@@ -265,8 +265,6 @@ fn changelog_fails_without_a_changelog_file() {
 const ULID_A: &str = "changesette-01H455VB4PEX5VSKNK084SN02Q.md";
 const ULID_B: &str = "changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md";
 
-const PACKAGE_LOCK: &str = "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\",\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"\": {\n      \"name\": \"ublacklist\",\n      \"version\": \"1.2.3\"\n    }\n  }\n}\n";
-
 #[test]
 fn version_with_zero_changesets_does_nothing() {
     let dir = package_dir();
@@ -316,15 +314,17 @@ fn version_bumps_and_writes_the_changelog() {
 }
 
 #[test]
-fn version_syncs_the_package_lock() {
+fn version_leaves_the_package_lock_untouched() {
     let dir = package_dir();
-    fs::write(dir.path().join("package-lock.json"), PACKAGE_LOCK).unwrap();
+    let package_lock = "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\",\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"\": {\n      \"name\": \"ublacklist\",\n      \"version\": \"1.2.3\"\n    }\n  }\n}\n";
+    fs::write(dir.path().join("package-lock.json"), package_lock).unwrap();
     write_changeset(dir.path(), ULID_B, "minor", "Add feature");
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "1.3.0\n");
     assert_eq!(
         fs::read_to_string(dir.path().join("package-lock.json")).unwrap(),
-        PACKAGE_LOCK.replace("1.2.3", "1.3.0")
+        package_lock
     );
 }
 
@@ -405,9 +405,8 @@ fn version_dry_run_prints_the_plan_without_modifying_files() {
 }
 
 #[test]
-fn version_dry_run_via_the_short_flag_names_the_package_lock() {
+fn version_dry_run_via_the_short_flag_consumes_multiple_changesets() {
     let dir = package_dir();
-    fs::write(dir.path().join("package-lock.json"), PACKAGE_LOCK).unwrap();
     write_changeset(dir.path(), ULID_A, "patch", "Fix bug");
     write_changeset(dir.path(), ULID_B, "minor", "Add feature");
     let before = dir_snapshot(dir.path());
@@ -418,7 +417,7 @@ fn version_dry_run_via_the_short_flag_names_the_package_lock() {
     let err = stderr(&output);
     assert!(err.contains("would consume 2 changesets:"), "{err}");
     assert!(
-        err.contains("would update package.json, package-lock.json: 1.2.3 -> 1.3.0"),
+        err.contains("would update package.json: 1.2.3 -> 1.3.0"),
         "{err}"
     );
 }
