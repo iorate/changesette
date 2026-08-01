@@ -1,15 +1,49 @@
 # changesette
 
+[![Crates.io](https://img.shields.io/crates/v/changesette.svg)](https://crates.io/crates/changesette)
+[![CI](https://github.com/iorate/changesette/actions/workflows/ci.yml/badge.svg)](https://github.com/iorate/changesette/actions/workflows/ci.yml)
+[![License](https://img.shields.io/crates/l/changesette.svg)](#license)
+
 A version and changelog manager for single-package applications, using the same changeset file format as [changesets](https://github.com/changesets/changesets) and shipped as a single dependency-free Rust binary. The name is changeset + the diminutive suffix -ette (as in diskette).
 
 `changesette` reads changeset files, bumps the version in `package.json` (and `package-lock.json` when present), and generates `CHANGELOG.md`. `changesette` performs no git operations and no network access; commits, pull requests, tags, and releases belong to your workflows.
 
-## Setup
+## Install
 
-The setup action installs the `changesette` binary and adds it to `PATH`, verifying the build provenance of the downloaded archive. GitHub-hosted runners are assumed.
+GitHub Actions (verifies the build provenance of the downloaded archive; GitHub-hosted runners are assumed):
 
 ```yaml
 uses: iorate/changesette/setup@v1
+```
+
+Shell script (macOS / Linux):
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/iorate/changesette/releases/latest/download/changesette-installer.sh | sh
+```
+
+PowerShell (Windows):
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/iorate/changesette/releases/latest/download/changesette-installer.ps1 | iex"
+```
+
+Homebrew:
+
+```sh
+brew install iorate/tap/changesette
+```
+
+npm:
+
+```sh
+npm install -g @iorate/changesette
+```
+
+Cargo (requires Rust 1.85+):
+
+```sh
+cargo install changesette
 ```
 
 ## Example workflow
@@ -64,11 +98,11 @@ jobs:
 
       - if: steps.version.outputs.next == ''
         run: |
-          v="v$(changesette current)"
-          if ! gh release view "$v" > /dev/null 2>&1; then
-            gh release create "$v" \
+          version="$(changesette current)"
+          if ! gh release view "v$version" > /dev/null 2>&1; then
+            gh release create "v$version" \
               --target "$GITHUB_SHA" \
-              --notes "$(changesette changelog "${v#v}")"
+              --notes "$(changesette changelog "$version")"
           fi
         env:
           GH_TOKEN: ${{ github.token }}
