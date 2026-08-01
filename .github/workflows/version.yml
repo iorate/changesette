@@ -65,6 +65,7 @@ jobs:
           title: Release v${{ steps.version.outputs.next }}
           body: ${{ steps.version.outputs.changelog }}
           delete-branch: true
+          sign-commits: true
 
       - name: Determine the version to release
         id: release
