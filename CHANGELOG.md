@@ -1,5 +1,11 @@
 # changesette
 
+## 1.0.1
+
+### Patch Changes
+
+- Add crates.io keywords and categories to the package metadata.
+
 ## 1.0.0
 
 ### Major Changes
