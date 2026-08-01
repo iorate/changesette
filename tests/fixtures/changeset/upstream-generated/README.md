@@ -15,7 +15,7 @@ ${summary}
 which is then run through `prettier` with `parser: "markdown"`, normalising the
 trailing whitespace to a single newline. The quoting of package names is
 deliberate upstream ("the quotation marks in here are really important even
-though they are not spec for yaml"), and is what `changeset::strip_quotes`
-exists to absorb.
+though they are not spec for yaml"), and is absorbed by parsing the
+frontmatter with a real YAML parser.
 
 This file also doubles as the fixture for the `README.md` exclusion rule (§4).
