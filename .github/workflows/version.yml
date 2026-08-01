@@ -47,8 +47,8 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create GitHub App token
-        id: app-token
+      - name: Generate token
+        id: generate-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.BOT_CLIENT_ID }}
@@ -59,7 +59,7 @@ jobs:
       - name: Create pull request
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.generate-token.outputs.token }}
           branch: changesette/release
           commit-message: Release v${{ steps.version.outputs.next }}
           title: Release v${{ steps.version.outputs.next }}
@@ -112,8 +112,8 @@ jobs:
           VERSION: ${{ needs.version.outputs.release-version }}
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
-      - name: Create GitHub App token
-        id: app-token
+      - name: Generate token
+        id: generate-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.BOT_CLIENT_ID }}
@@ -126,5 +126,5 @@ jobs:
           git -c credential.helper='!gh auth git-credential' \
             push origin "changesette-v$VERSION"
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           VERSION: ${{ needs.version.outputs.release-version }}
