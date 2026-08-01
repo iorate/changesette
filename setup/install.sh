@@ -10,11 +10,11 @@ fi
 
 # Map runner platform to release artifact parameters
 case "$RUNNER_OS-$RUNNER_ARCH" in
-  Linux-X64)   target=x86_64-unknown-linux-gnu  archive_ext=.tar.xz ;;
-  Linux-ARM64) target=aarch64-unknown-linux-gnu archive_ext=.tar.xz ;;
-  macOS-X64)   target=x86_64-apple-darwin       archive_ext=.tar.xz ;;
-  macOS-ARM64) target=aarch64-apple-darwin      archive_ext=.tar.xz ;;
-  Windows-X64) target=x86_64-pc-windows-msvc    archive_ext=.zip    ;;
+  Linux-X64)   target=x86_64-unknown-linux-gnu  archive_ext=.tar.xz binary_ext=     ;;
+  Linux-ARM64) target=aarch64-unknown-linux-gnu archive_ext=.tar.xz binary_ext=     ;;
+  macOS-X64)   target=x86_64-apple-darwin       archive_ext=.tar.xz binary_ext=     ;;
+  macOS-ARM64) target=aarch64-apple-darwin      archive_ext=.tar.xz binary_ext=     ;;
+  Windows-X64) target=x86_64-pc-windows-msvc    archive_ext=.zip    binary_ext=.exe ;;
   *)
     echo "::error::Unsupported platform: $RUNNER_OS $RUNNER_ARCH"
     exit 1
@@ -23,7 +23,7 @@ esac
 
 # Check tool cache
 tool_dir="$RUNNER_TOOL_CACHE/changesette/$version/$RUNNER_ARCH"
-if [[ -f "$tool_dir/changesette" || -f "$tool_dir/changesette.exe" ]]; then
+if [[ -f "$tool_dir/changesette$binary_ext" ]]; then
   echo "changesette $version is already cached"
   echo "$tool_dir" >> "$GITHUB_PATH"
   echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -46,10 +46,10 @@ echo "Verified the build provenance of $archive"
 mkdir -p "$tool_dir"
 if [[ "$archive_ext" == ".tar.xz" ]]; then
   # Tarballs nest the binary under a changesette-$target/ directory.
-  tar -xJf "$RUNNER_TEMP/$archive" -C "$tool_dir" --strip-components=1 "changesette-$target/changesette"
+  tar -xJf "$RUNNER_TEMP/$archive" -C "$tool_dir" --strip-components=1 "changesette-$target/changesette$binary_ext"
 else
   # The zip places the binary at the archive root.
-  unzip -q "$RUNNER_TEMP/$archive" changesette.exe -d "$tool_dir"
+  unzip -q "$RUNNER_TEMP/$archive" "changesette$binary_ext" -d "$tool_dir"
 fi
 
 echo "$tool_dir" >> "$GITHUB_PATH"
