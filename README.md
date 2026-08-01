@@ -116,11 +116,11 @@ Creates the `.changeset/` directory with a README.md. Does nothing if the direct
 
 ### `changesette [add] [--bump <major|minor|patch>] [--message <text>]`
 
-Creates a changeset file in `.changeset/` and prints its path.
+Creates a changeset file in `.changeset/` and prints its path. `--bump` and `--message` have the short forms `-b` and `-m`. When run in a terminal, missing flags are prompted for interactively; submitting an empty summary opens your editor for a multi-line one.
 
 ### `changesette version [--dry-run]`
 
-Applies all pending changesets: bumps `package.json` (and `package-lock.json`), inserts the new section into `CHANGELOG.md`, and deletes the consumed changesets. Prints the next version, or nothing when there were no changesets and nothing was changed.
+Applies all pending changesets: bumps `package.json` (and `package-lock.json`), inserts the new section into `CHANGELOG.md`, and deletes the consumed changesets. Prints the next version, or nothing when there were no changesets and nothing was changed. `--dry-run` (short form `-n`) prints the plan to stderr without changing any files.
 
 ### `changesette current`
 
