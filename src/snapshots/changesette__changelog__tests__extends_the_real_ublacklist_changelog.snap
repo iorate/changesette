@@ -8,7 +8,7 @@ expression: "upsert(\"ublacklist-head\", \"10.1.0\")"
 
 ### Minor Changes
 
-- [#42](https://github.com/iorate/ublacklist/pull/42) - Add SERPINFO satellites support
+- Add SERPINFO satellites support
 
 ## 10.0.1
 

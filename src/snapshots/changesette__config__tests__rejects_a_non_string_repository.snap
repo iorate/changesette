@@ -1,5 +1,0 @@
----
-source: src/config.rs
-expression: "load_err(\"[github]\\nrepo = 1\\n\")"
----
-.changeset/changesette.toml: "github.repo" must be a string

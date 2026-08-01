@@ -4,18 +4,16 @@ use anyhow::{Context, Result};
 
 use crate::{
     bump,
-    changelog::{self, Entry, render_section},
-    changeset, config,
-    github::GithubClient,
+    changelog::{self, render_section},
+    changeset,
     package_json::PackageJson,
     package_lock::PackageLock,
 };
 
-/// Consumes every changeset: resolves PR links (when the GitHub integration
-/// is on), bumps package.json (and package-lock.json if present), inserts the
-/// new section into CHANGELOG.md, deletes the consumed files, and prints the
-/// next version to stdout. With zero changesets, does nothing and prints
-/// nothing. With `dry_run`, computes everything (network included) but prints
+/// Consumes every changeset: bumps package.json (and package-lock.json if
+/// present), inserts the new section into CHANGELOG.md, deletes the consumed
+/// files, and prints the next version to stdout. With zero changesets, does
+/// nothing and prints nothing. With `dry_run`, computes everything but prints
 /// the plan to stderr instead of touching any file.
 pub(crate) fn run(dry_run: bool) -> Result<()> {
     let dir = Path::new(".");
@@ -29,52 +27,15 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
         return Ok(());
     }
 
-    let config = config::load(dir)?;
-    let entries: Vec<(bump::Bump, Entry)> = match &config.github_repo {
-        Some(repository) => {
-            let mut client = GithubClient::new(repository);
-            changes
-                .iter()
-                .map(|change| {
-                    let prs = match client.merged_prs_for_changeset(&change.file_name)? {
-                        Some(prs) => prs,
-                        None => {
-                            eprintln!(
-                                "warning: no commits found for .changeset/{}; generating the \
-                                 entry without PR links",
-                                change.file_name
-                            );
-                            Vec::new()
-                        }
-                    };
-                    Ok((
-                        change.bump,
-                        Entry {
-                            prs,
-                            body: change.summary.clone(),
-                        },
-                    ))
-                })
-                .collect::<Result<_>>()?
-        }
-        None => changes
-            .iter()
-            .map(|change| {
-                (
-                    change.bump,
-                    Entry {
-                        prs: Vec::new(),
-                        body: change.summary.clone(),
-                    },
-                )
-            })
-            .collect(),
-    };
+    let entries: Vec<(bump::Bump, &str)> = changes
+        .iter()
+        .map(|change| (change.bump, change.summary.as_str()))
+        .collect();
 
     let current = package_json.version().clone();
     // max_bump is None only for zero changesets, which returned early above.
     let next = bump::next_version(&current, changeset::max_bump(&changes).unwrap());
-    let section = render_section(&next, &entries, config.github_repo.as_deref());
+    let section = render_section(&next, &entries);
 
     package_json.set_version(&next)?;
     if let Some(package_lock) = &mut package_lock {

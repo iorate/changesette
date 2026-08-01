@@ -1,5 +1,0 @@
----
-source: src/config.rs
-expression: "load_err(\"[github]\\nrepository = \\\"iorate/ublacklist\\\"\\ntoken = \\\"secret\\\"\\n\")"
----
-.changeset/changesette.toml: unknown key "github.token"

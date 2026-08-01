@@ -1,9 +1,0 @@
----
-source: src/changelog.rs
-expression: "render(&[entry(&[12, 23], \"Add SERPINFO satellites support\")],\nSome(\"iorate/ublacklist\"),)"
----
-## 10.1.0
-
-### Minor Changes
-
-- [#12](https://github.com/iorate/ublacklist/pull/12) [#23](https://github.com/iorate/ublacklist/pull/23) - Add SERPINFO satellites support

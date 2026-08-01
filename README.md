@@ -2,7 +2,7 @@
 
 A version and changelog manager for single-package applications, using the same changeset file format as [changesets](https://github.com/changesets/changesets) and shipped as a single dependency-free Rust binary. The name is changeset + the diminutive suffix -ette (as in diskette).
 
-`changesette` reads changeset files, bumps the version in `package.json` (and `package-lock.json` when present), and generates `CHANGELOG.md`. `changesette` performs no git operations, and no GitHub access beyond the read-only API calls of the GitHub integration; commits, pull requests, tags, and releases belong to your workflows.
+`changesette` reads changeset files, bumps the version in `package.json` (and `package-lock.json` when present), and generates `CHANGELOG.md`. `changesette` performs no git operations and no network access; commits, pull requests, tags, and releases belong to your workflows.
 
 ## Setup
 
@@ -59,8 +59,6 @@ jobs:
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
           fi
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
       - uses: peter-evans/create-pull-request@v8
         with:
@@ -134,17 +132,6 @@ Prints the current version from `package.json`.
 ### `changesette changelog <version>`
 
 Prints the `## <version>` section of `CHANGELOG.md`.
-
-## GitHub integration
-
-Set `github.repo` in `.changeset/changesette.toml`:
-
-```toml
-[github]
-repo = "owner/repo"
-```
-
-`changesette version` then prefixes each changelog entry with links to the pull requests behind its changeset. API requests are authenticated with the `GITHUB_TOKEN` environment variable when set.
 
 ## License
 

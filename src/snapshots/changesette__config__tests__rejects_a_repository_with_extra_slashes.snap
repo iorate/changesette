@@ -1,5 +1,0 @@
----
-source: src/config.rs
-expression: "load_err(\"[github]\\nrepo = \\\"iorate/ublacklist/extra\\\"\\n\")"
----
-.changeset/changesette.toml: "github.repo" ("iorate/ublacklist/extra") must be of the form "owner/repo"

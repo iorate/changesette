@@ -6,8 +6,6 @@ mod bump;
 mod changelog;
 mod changeset;
 mod commands;
-mod config;
-mod github;
 mod package_json;
 mod package_lock;
 

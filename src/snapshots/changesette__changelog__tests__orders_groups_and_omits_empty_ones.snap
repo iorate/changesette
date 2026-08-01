@@ -1,15 +1,15 @@
 ---
 source: src/changelog.rs
-expression: "render(&entries, Some(\"iorate/ublacklist\"))"
+expression: render(&entries)
 ---
 ## 10.1.0
 
 ### Major Changes
 
-- [#12](https://github.com/iorate/ublacklist/pull/12) - Major change
+- Major change
 
 ### Patch Changes
 
-- [#23](https://github.com/iorate/ublacklist/pull/23) - First patch change
+- First patch change
 
 - Second patch change
