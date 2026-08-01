@@ -1,5 +1,11 @@
 # changesette
 
+## 2.0.1
+
+### Patch Changes
+
+- Update the setup action references in the README from @v1 to @v2, and remove the incorrect claim that lockfile handling differs from changesets.
+
 ## 2.0.0
 
 ### Major Changes
