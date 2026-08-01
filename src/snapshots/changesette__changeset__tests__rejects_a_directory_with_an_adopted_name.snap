@@ -1,0 +1,5 @@
+---
+source: src/changeset.rs
+expression: "load_err(\"md-directory\")"
+---
+tests/fixtures/changeset/md-directory/nested.md: Is a directory (os error 21)
