@@ -1,5 +1,11 @@
 # changesette
 
+## 0.1.1
+
+### Patch Changes
+
+- Document all installation methods in the README.
+
 ## 0.1.0
 
 ### Minor Changes
