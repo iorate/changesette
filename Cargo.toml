@@ -7,6 +7,8 @@ description = "A version and changelog manager for single-package applications, 
 homepage = "https://github.com/iorate/changesette"
 repository = "https://github.com/iorate/changesette"
 license = "MIT"
+keywords = ["changeset", "changelog", "versioning", "release", "semver"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1.0.104"
