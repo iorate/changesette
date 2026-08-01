@@ -1,5 +1,11 @@
 # changesette
 
+## 2.0.0
+
+### Major Changes
+
+- The version command no longer updates package-lock.json; it now writes only package.json and CHANGELOG.md. If you use npm, run `npm install --package-lock-only` after `changesette version` to sync the lockfile.
+
 ## 1.0.1
 
 ### Patch Changes
