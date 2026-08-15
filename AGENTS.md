@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents when working with code in this r
 
 ## Project Overview
 
-`changesette` is a CLI implementing a reduced, data-format-compatible subset of [changesets](https://github.com/changesets/changesets) for single-package applications.
+`changesette` is a CLI implementing a reduced, data-format-compatible subset of [changesets](https://github.com/changesets/changesets) for single packages and npm / pnpm workspaces.
 
 Pure bin crate: there is no library target, and items crossing module boundaries are `pub(crate)`, never bare `pub`.
 

@@ -4,7 +4,7 @@
 [![CI](https://github.com/iorate/changesette/actions/workflows/ci.yml/badge.svg)](https://github.com/iorate/changesette/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/changesette.svg)](#license)
 
-A version and changelog manager for applications, using the same changeset file format as [changesets](https://github.com/changesets/changesets) and shipped as a single dependency-free Rust binary. The name is changeset + the diminutive suffix -ette (as in diskette).
+A version and changelog manager using the same changeset file format as [changesets](https://github.com/changesets/changesets) and shipped as a single dependency-free Rust binary. The name is changeset + the diminutive suffix -ette (as in diskette).
 
 `changesette` reads changeset files, bumps the version in each named package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / pnpm workspaces. It never touches lockfiles; regenerating a lockfile such as `package-lock.json` is your package manager's job. `changesette` performs no git operations and no network access; commits, pull requests, tags, and releases belong to your workflows.
 
