@@ -7,6 +7,9 @@ pub(crate) mod get_changelog_entry;
 pub(crate) mod get_packages;
 /// The `init` subcommand: create the changeset directory.
 pub(crate) mod init;
+/// The `status` subcommand: print the packages to be bumped by `version`
+/// without applying anything.
+pub(crate) mod status;
 /// The `version` subcommand: consume changesets, bump each named package's
 /// version, and update its CHANGELOG.md.
 pub(crate) mod version;

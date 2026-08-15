@@ -1,4 +1,7 @@
-use std::{fs, io, path::PathBuf};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -11,9 +14,9 @@ use crate::{
     workspace::Workspace,
 };
 
-/// The JSON document that `version` prints to stdout, mirroring the upstream
-/// `ReleasePlan` type (without `preState`, plus `changelogEntry` on each
-/// release). Serialized as a single line.
+/// The JSON document that `version` and `status` write with `--output`,
+/// mirroring the upstream `ReleasePlan` type (without `preState`, plus
+/// `changelogEntry` on each release).
 #[derive(Serialize)]
 pub(crate) struct ReleasePlan {
     /// The consumed changesets, in file-name order.
@@ -170,6 +173,11 @@ pub(crate) fn compute(
         releases,
     };
     Ok((plan, writes))
+}
+
+/// Writes `plan` to `path` as pretty-printed JSON without a trailing newline.
+pub(crate) fn write_file(path: &Path, plan: &ReleasePlan) -> Result<()> {
+    fs::write(path, serde_json::to_string_pretty(plan)?).with_context(|| path.display().to_string())
 }
 
 fn id(change: &LoadedChange) -> String {
