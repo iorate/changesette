@@ -4,8 +4,8 @@ use anyhow::{Context, Result, bail};
 
 use crate::{changelog, workspace::Workspace};
 
-/// Prints the section of the given version from the named package's
-/// CHANGELOG.md to stdout.
+/// Prints the body of the given version's section, without the `## <version>`
+/// heading, from the named package's CHANGELOG.md to stdout.
 pub(crate) fn run(package: &str, version: &semver::Version) -> Result<()> {
     let workspace = Workspace::discover(&std::env::current_dir()?)?;
     let member = workspace.member(package)?;
