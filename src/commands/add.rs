@@ -259,18 +259,11 @@ fn prompt_summary() -> Result<String> {
         return Ok(input);
     }
     let edited = dialoguer::Editor::new()
-        .edit(
-            "\n\n# Please enter a summary for your changes.\n# An empty message aborts the editor.",
-        )
+        .edit("")
         .context("failed to edit the summary")?;
     let Some(text) = edited else {
         bail!("the summary must not be empty")
     };
-    let text = text
-        .lines()
-        .filter(|line| !line.starts_with('#'))
-        .collect::<Vec<_>>()
-        .join("\n");
     let text = text.trim();
     ensure!(!text.is_empty(), "the summary must not be empty");
     Ok(text.to_owned())
