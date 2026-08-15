@@ -50,11 +50,8 @@ enum Command {
         #[arg(short = 'n', long)]
         dry_run: bool,
     },
-    /// Print a package's version from its package.json
-    GetVersion {
-        /// The name of the package
-        package: String,
-    },
+    /// Print the workspace packages as JSON
+    GetPackages,
     /// Print a version section from a package's CHANGELOG.md
     GetChangelogEntry {
         /// The name of the package
@@ -86,7 +83,7 @@ fn run() -> anyhow::Result<()> {
             empty,
         }) => commands::add::run(major, minor, patch, message, empty),
         Command::Version { dry_run } => commands::version::run(dry_run),
-        Command::GetVersion { package } => commands::get_version::run(&package),
+        Command::GetPackages => commands::get_packages::run(),
         Command::GetChangelogEntry { package, version } => {
             commands::get_changelog_entry::run(&package, &version)
         }

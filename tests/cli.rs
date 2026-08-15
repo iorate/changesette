@@ -440,53 +440,6 @@ fn workspace_dir() -> TempDir {
 }
 
 #[test]
-fn get_version_prints_the_version() {
-    let dir = package_dir();
-    let output = changesette(dir.path(), &["get-version", "ublacklist"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "1.2.3\n");
-}
-
-#[test]
-fn get_version_without_a_package_fails() {
-    let dir = package_dir();
-    let output = changesette(dir.path(), &["get-version"]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("<PACKAGE>"), "{}", stderr(&output));
-}
-
-#[test]
-fn get_version_fails_for_an_unknown_package() {
-    let dir = package_dir();
-    let output = changesette(dir.path(), &["get-version", "other"]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("`other`"), "{}", stderr(&output));
-}
-
-#[test]
-fn get_version_fails_without_package_json() {
-    let dir = tempfile::tempdir().unwrap();
-    let output = changesette(dir.path(), &["get-version", "ublacklist"]);
-    assert!(!output.status.success());
-}
-
-#[test]
-fn get_version_resolves_a_workspace_member() {
-    let dir = workspace_dir();
-    let output = changesette(dir.path(), &["get-version", "pkg-a"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "3.1.4\n");
-}
-
-#[test]
-fn get_version_resolves_the_workspace_root_from_a_subdirectory() {
-    let dir = workspace_dir();
-    let output = changesette(&dir.path().join("packages/a"), &["get-version", "pkg-a"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "3.1.4\n");
-}
-
-#[test]
 fn get_changelog_entry_without_a_version_fails() {
     let dir = package_dir();
     fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
@@ -527,6 +480,65 @@ fn get_changelog_entry_fails_without_a_changelog_file() {
     let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist", "1.0.0"]);
     assert!(!output.status.success());
     assert!(stderr(&output).contains("CHANGELOG.md not found"));
+}
+
+#[test]
+fn get_packages_prints_the_single_package_with_a_dot_dir() {
+    let dir = package_dir();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"ublacklist\",\"version\":\"1.2.3\",\"dir\":\".\"}]\n"
+    );
+}
+
+#[test]
+fn get_packages_lists_workspace_members_in_name_order() {
+    let dir = workspace_dir();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"1.0.0\"\n}\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"dir\":\"packages/a\"},{\"name\":\"pkg-b\",\"version\":\"1.0.0\",\"dir\":\"packages/b\"}]\n"
+    );
+}
+
+#[test]
+fn get_packages_keeps_dirs_relative_to_the_root_from_a_subdirectory() {
+    let dir = workspace_dir();
+    let output = changesette(&dir.path().join("packages/a"), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"dir\":\"packages/a\"}]\n"
+    );
+}
+
+#[test]
+fn get_packages_prints_an_empty_array_for_a_memberless_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": []\n}\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "[]\n");
+}
+
+#[test]
+fn get_packages_fails_without_package_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(!output.status.success());
 }
 
 #[test]
@@ -863,7 +875,7 @@ fn prints_help() {
         "init",
         "add",
         "version",
-        "get-version",
+        "get-packages",
         "get-changelog-entry",
     ] {
         assert!(out.contains(subcommand), "{out}");

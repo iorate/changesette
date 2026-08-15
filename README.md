@@ -103,7 +103,7 @@ jobs:
 
       - if: steps.pr.outputs.pull-request-number == ''
         run: |
-          version="$(changesette get-version my-package)"
+          version="$(changesette get-packages | jq -r '.[] | select(.name == "my-package").version')"
           if ! gh release view "v$version" > /dev/null 2>&1; then
             gh release create "v$version" \
               --target "$GITHUB_SHA" \
@@ -137,9 +137,13 @@ Applies all pending changesets: bumps each named package's `package.json`, inser
 
 `--dry-run` (short form `-n`) prints exactly the same JSON without changing any files. Lockfiles are not updated; if you use npm, run `npm install --package-lock-only` afterwards.
 
-### `changesette get-version <package>`
+### `changesette get-packages`
 
-Prints the named package's version from its `package.json`.
+Prints the workspace packages to stdout as a single-line JSON array in package name order. Each entry has the package's `name`, its `version`, and its `dir` relative to the workspace root (`"."` when the root's own `package.json` is the sole package):
+
+```json
+[{"name":"pkg-a","version":"3.1.4","dir":"packages/a"},{"name":"pkg-b","version":"1.0.0","dir":"packages/b"}]
+```
 
 ### `changesette get-changelog-entry <package> <version>`
 
