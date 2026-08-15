@@ -53,7 +53,7 @@ fn assert_changeset_path(line: &str) {
 
 #[test]
 fn init_creates_the_changeset_directory_with_a_readme() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = package_dir();
     let output = changesette(dir.path(), &["init"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
@@ -63,8 +63,17 @@ fn init_creates_the_changeset_directory_with_a_readme() {
 }
 
 #[test]
+fn init_creates_the_directory_at_the_workspace_root() {
+    let dir = workspace_dir();
+    let output = changesette(&dir.path().join("packages/a"), &["init"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(dir.path().join(".changeset/README.md").is_file());
+    assert!(!dir.path().join("packages/a/.changeset").exists());
+}
+
+#[test]
 fn init_does_nothing_when_the_directory_exists() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
     let before = dir_snapshot(dir.path());
     let output = changesette(dir.path(), &["init"]);
