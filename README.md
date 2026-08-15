@@ -50,7 +50,7 @@ cargo install changesette
 
 ### Single package
 
-On every push to `main`, maintains a Version PR that applies the pending changesets; merging it creates a GitHub Release (and its tag) with the changelog section as the notes. Replace `my-package` with the `name` declared in your `package.json`.
+On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the package to the npm registry and creates a GitHub Release (and its tag) with the changelog section as the notes. Replace `my-package` with the `name` declared in your `package.json`.
 
 ```yaml
 name: Version
@@ -68,6 +68,7 @@ jobs:
 
     permissions:
       contents: write
+      id-token: write
       pull-requests: write
 
     steps:
@@ -106,6 +107,9 @@ jobs:
       - if: steps.pr.outputs.pull-request-number == ''
         run: |
           version="$(jq -re .version package.json)"
+          if ! npm view "my-package@$version" version > /dev/null 2>&1; then
+            npm publish
+          fi
           if ! gh release view "v$version" > /dev/null 2>&1; then
             notes="$(changesette get-changelog-entry my-package "$version")"
             gh release create "v$version" \
@@ -118,7 +122,7 @@ jobs:
 
 ### Workspace
 
-On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the bumped packages to the npm registry with pnpm. `pnpm publish -r` publishes every workspace package whose version is not on the registry yet and skips the rest, so no per-package bookkeeping is needed; insert a build step before it if your packages need one. Publishing authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers) through the `id-token: write` permission; configure each package's trusted publisher on npmjs.com first. With npm instead of pnpm, there is no equivalent of `pnpm publish -r`; iterate over `changesette get-packages` and publish each package whose version is not on the registry yet.
+On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the bumped packages to the npm registry with pnpm and creates a GitHub Release (and its tag, `<name>@<version>`) per package with the changelog section as the notes. `pnpm publish -r` publishes every workspace package whose version is not on the registry yet and skips the rest, so no per-package bookkeeping is needed; insert a build step before it if your packages need one. With npm instead of pnpm, there is no equivalent of `pnpm publish -r`; iterate over `changesette get-packages` and publish each package whose version is not on the registry yet.
 
 ```yaml
 name: Version
@@ -174,6 +178,19 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm publish -r
+          packages="$(changesette get-packages)"
+          jq -c '.[]' <<< "$packages" | while read -r package; do
+            name="$(jq -re .name <<< "$package")"
+            version="$(jq -re .version <<< "$package")"
+            if ! gh release view "$name@$version" > /dev/null 2>&1; then
+              notes="$(changesette get-changelog-entry "$name" "$version")"
+              gh release create "$name@$version" \
+                --target "$GITHUB_SHA" \
+                --notes "$notes"
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ github.token }}
 ```
 
 ## CLI
