@@ -22,6 +22,12 @@ struct Cli {
 
 #[derive(clap::Args)]
 struct AddArgs {
+    /// Create a changeset that names no packages
+    #[arg(long, conflicts_with_all = ["major", "minor", "patch"])]
+    empty: bool,
+    /// The summary text of the change
+    #[arg(short, long)]
+    message: Option<String>,
     /// The packages to record a major bump for (comma-separated, repeatable)
     #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
     major: Vec<String>,
@@ -31,12 +37,6 @@ struct AddArgs {
     /// The packages to record a patch bump for (comma-separated, repeatable)
     #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
     patch: Vec<String>,
-    /// The summary text of the change
-    #[arg(short, long)]
-    message: Option<String>,
-    /// Create a changeset that names no packages
-    #[arg(long, conflicts_with_all = ["major", "minor", "patch"])]
-    empty: bool,
 }
 
 #[derive(clap::Subcommand)]
