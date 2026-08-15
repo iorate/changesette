@@ -888,6 +888,142 @@ fn version_output_writes_the_pretty_plan_and_applies_the_changesets() {
     assert!(!dir.path().join(".changeset").join(ULID_B).exists());
 }
 
+fn two_package_workspace_dir() -> TempDir {
+    let dir = workspace_dir();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\"\n}\n",
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn version_ignore_skips_the_package_and_keeps_its_changeset() {
+    let dir = two_package_workspace_dir();
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version", "--ignore", "pkg-b"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), UPDATED);
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.2.0\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\"\n}\n"
+    );
+    assert!(!dir.path().join("packages/b/CHANGELOG.md").exists());
+    assert!(!dir.path().join(".changeset").join(ULID_A).exists());
+    assert!(dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_ignore_excludes_the_changeset_from_the_plan() {
+    let dir = two_package_workspace_dir();
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(
+        dir.path(),
+        &["version", "--ignore", "pkg-b", "-o", "plan.json"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let plan = fs::read_to_string(dir.path().join("plan.json")).unwrap();
+    assert!(plan.contains(ID_A), "{plan}");
+    assert!(!plan.contains(ID_B), "{plan}");
+    assert!(!plan.contains("pkg-b"), "{plan}");
+}
+
+#[test]
+fn version_ignore_accepts_comma_separated_packages() {
+    let dir = two_package_workspace_dir();
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "--ignore", "pkg-a,pkg-b"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), UPDATED);
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_ignore_rejects_an_unknown_package() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "--ignore", "other-package"]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains("--ignore"), "{err}");
+    assert!(err.contains("other-package"), "{err}");
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_ignore_may_be_repeated() {
+    let dir = two_package_workspace_dir();
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let before = dir_snapshot(dir.path());
+    let output = changesette(
+        dir.path(),
+        &["version", "--ignore", "pkg-a", "--ignore", "pkg-b"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_ignore_skips_a_none_only_changeset() {
+    let dir = package_dir();
+    write_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "--ignore", "ublacklist"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_ignore_rejects_a_mixed_changeset_with_a_none_release() {
+    let dir = two_package_workspace_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("pkg-a", "minor"), ("pkg-b", "none")],
+        "Improve things",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "--ignore", "pkg-a"]);
+    assert!(!output.status.success());
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_ignore_rejects_a_mixed_changeset() {
+    let dir = two_package_workspace_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("pkg-a", "minor"), ("pkg-b", "patch")],
+        "Improve things",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "--ignore", "pkg-a"]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains(ULID_B), "{err}");
+    assert!(err.contains("pkg-a"), "{err}");
+    assert!(err.contains("pkg-b"), "{err}");
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
 #[test]
 fn version_rejects_the_removed_dry_run_flag() {
     let dir = package_dir();

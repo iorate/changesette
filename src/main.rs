@@ -47,6 +47,9 @@ enum Command {
     Add(AddArgs),
     /// Consume changesets: bump each named package's version and update its CHANGELOG.md
     Version {
+        /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
+        #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
+        ignore: Vec<String>,
         /// Write the release plan to the file as pretty-printed JSON
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
@@ -92,7 +95,7 @@ fn run() -> anyhow::Result<()> {
             message,
             empty,
         }) => commands::add::run(major, minor, patch, message, empty),
-        Command::Version { output } => commands::version::run(output.as_deref()),
+        Command::Version { ignore, output } => commands::version::run(&ignore, output.as_deref()),
         Command::Status { verbose, output } => commands::status::run(verbose, output.as_deref()),
         Command::GetPackages => commands::get_packages::run(),
         Command::GetChangelogEntry { package, version } => {

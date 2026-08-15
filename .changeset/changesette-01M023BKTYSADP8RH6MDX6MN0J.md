@@ -8,6 +8,7 @@ Add npm and pnpm workspace support.
 - Changesets may name multiple packages, and the `none` bump type, empty changesets, and changesets with an empty summary are accepted, as in upstream changesets.
 - Dependencies are never bumped automatically; every bump must be named explicitly in a changeset.
 - Pre-release versions now bump as node-semver's `inc` does: 2.0.0-beta.1 graduates to 2.0.0 instead of being incremented past it.
+- `version --ignore <pkgs>` skips the named packages: changesets naming them are excluded from the release plan and left in place for a later run. Names must match workspace members exactly, and a changeset naming both an ignored and a not-ignored package is an error.
 - Breaking: `add` takes `--major`, `--minor`, and `--patch` package list flags, plus `--empty`, instead of `-b, --bump`.
 - Breaking: `version` prints a completion message instead of the new version; `--output <file>` suppresses stdout and writes the release plan to a file as pretty-printed JSON.
 - Breaking: `version --dry-run` is replaced by a new `status` command: it prints the packages to be bumped, `--verbose` adds the new versions and the changeset files, and `--output <file>` writes the release plan to a file as pretty-printed JSON.
