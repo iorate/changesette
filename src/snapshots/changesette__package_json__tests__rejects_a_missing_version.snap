@@ -2,4 +2,4 @@
 source: src/package_json.rs
 expression: "load_err(\"version-missing\")"
 ---
-package.json: missing top-level "version"
+tests/fixtures/package-json/version-missing/package.json: missing top-level "version"

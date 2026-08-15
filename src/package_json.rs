@@ -31,7 +31,8 @@ impl PackageJson {
             }
             Err(err) => return Err(err).context(path.display().to_string()),
         };
-        Self::parse(path, &text).context("package.json")
+        let context = path.display().to_string();
+        Self::parse(path, &text).context(context)
     }
 
     fn parse(path: PathBuf, text: &str) -> Result<Self> {
