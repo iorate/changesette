@@ -37,12 +37,11 @@ impl Workspace {
     pub(crate) fn discover(cwd: &Path) -> Result<Workspace> {
         let mut fallback = None;
         for dir in cwd.ancestors() {
-            let pnpm = read_pnpm_manifest(dir)?;
-            if let PnpmManifest::Packages(patterns) = &pnpm {
+            if let Some(patterns) = read_pnpm_manifest(dir)? {
                 let manifest = dir.join("pnpm-workspace.yaml");
                 return Ok(Workspace {
                     root: dir.to_path_buf(),
-                    members: collect_members(dir, &manifest, patterns)?,
+                    members: collect_members(dir, &manifest, &patterns)?,
                 });
             }
             let path = dir.join("package.json");
@@ -52,19 +51,17 @@ impl Workspace {
             let Some(object) = value.as_object() else {
                 bail!("{}: the root value must be an object", path.display())
             };
-            if matches!(pnpm, PnpmManifest::Absent) {
-                if let Some(workspaces) = object.get("workspaces") {
-                    let Some(patterns) = string_array(workspaces) else {
-                        bail!(
-                            "{}: \"workspaces\" must be an array of strings (the Yarn 1 object form is not supported)",
-                            path.display()
-                        )
-                    };
-                    return Ok(Workspace {
-                        root: dir.to_path_buf(),
-                        members: collect_members(dir, &path, &patterns)?,
-                    });
-                }
+            if let Some(workspaces) = object.get("workspaces") {
+                let Some(patterns) = string_array(workspaces) else {
+                    bail!(
+                        "{}: \"workspaces\" must be an array of strings (the Yarn 1 object form is not supported)",
+                        path.display()
+                    )
+                };
+                return Ok(Workspace {
+                    root: dir.to_path_buf(),
+                    members: collect_members(dir, &path, &patterns)?,
+                });
             }
             if fallback.is_none() {
                 fallback = Some((dir.to_path_buf(), path, value));
@@ -128,17 +125,11 @@ impl Member {
     }
 }
 
-enum PnpmManifest {
-    Absent,
-    NoPackages,
-    Packages(Vec<String>),
-}
-
-fn read_pnpm_manifest(dir: &Path) -> Result<PnpmManifest> {
+fn read_pnpm_manifest(dir: &Path) -> Result<Option<Vec<String>>> {
     let path = dir.join("pnpm-workspace.yaml");
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(PnpmManifest::Absent),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(err).context(path.display().to_string()),
     };
     let docs = match Yaml::load_from_str(&text) {
@@ -146,16 +137,16 @@ fn read_pnpm_manifest(dir: &Path) -> Result<PnpmManifest> {
         Err(err) => bail!("{}: invalid YAML: {err}", path.display()),
     };
     let Some(Yaml::Mapping(mapping)) = docs.into_iter().next() else {
-        return Ok(PnpmManifest::NoPackages);
+        return Ok(None);
     };
     let packages = mapping
         .iter()
         .find_map(|(key, value)| (key.as_str() == Some("packages")).then_some(value));
     let Some(packages) = packages else {
-        return Ok(PnpmManifest::NoPackages);
+        return Ok(None);
     };
     if packages.is_null() {
-        return Ok(PnpmManifest::NoPackages);
+        return Ok(None);
     }
     let Yaml::Sequence(items) = packages else {
         bail!("{}: \"packages\" must be a list of strings", path.display())
@@ -167,7 +158,7 @@ fn read_pnpm_manifest(dir: &Path) -> Result<PnpmManifest> {
         };
         patterns.push(pattern.to_owned());
     }
-    Ok(PnpmManifest::Packages(patterns))
+    Ok(Some(patterns))
 }
 
 fn read_json(path: &Path) -> Result<Option<Value>> {
@@ -421,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn pnpm_manifest_without_packages_is_not_a_workspace_root() {
+    fn pnpm_manifest_without_packages_does_not_suppress_npm_workspaces() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -439,7 +430,10 @@ mod tests {
             "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = Workspace::discover(dir.path()).unwrap();
-        assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
     }
 
     #[test]
