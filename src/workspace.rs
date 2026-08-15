@@ -7,8 +7,9 @@ use anyhow::{Context, Result, bail, ensure};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use saphyr::{LoadableYamlNode, Yaml};
 
-/// A versioned package discovered in the workspace: a directory whose
-/// `package.json` has both a `name` and a `version` key.
+/// A package discovered in the workspace: a directory whose `package.json`
+/// has both a `name` and a `version` key, or the single-package fallback,
+/// whose `package.json` only needs a `name`.
 #[derive(Debug)]
 pub(crate) struct Member {
     name: String,
@@ -48,7 +49,8 @@ impl Workspace {
     /// sorted by package name; the root itself is not a member, and two
     /// members declaring the same name are an error. Without a workspace
     /// root, the directory nearest to `cwd` with a `package.json` becomes a
-    /// single-member workspace; without even that, discovery fails.
+    /// single-member workspace, erroring if that `package.json` has no
+    /// `name`; without even that, discovery fails.
     pub(crate) fn discover(cwd: &Path) -> Result<Self> {
         let mut nearest_package = None;
         for dir in cwd.ancestors() {
