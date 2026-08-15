@@ -19,12 +19,20 @@ impl Bump {
     }
 }
 
-/// Returns `current` incremented by `bump`, clearing any pre-release and
-/// build metadata.
+/// Returns `current` incremented by `bump`, following node-semver's `inc`
+/// (used by changesets): a pre-release graduates to the release it precedes
+/// when that release satisfies the bump, and pre-release and build metadata
+/// are always cleared.
 pub(crate) fn next_version(current: &Version, bump: Bump) -> Version {
+    let pre = !current.pre.is_empty();
     match bump {
+        Bump::Major if pre && current.minor == 0 && current.patch == 0 => {
+            Version::new(current.major, 0, 0)
+        }
         Bump::Major => Version::new(current.major + 1, 0, 0),
+        Bump::Minor if pre && current.patch == 0 => Version::new(current.major, current.minor, 0),
         Bump::Minor => Version::new(current.major, current.minor + 1, 0),
+        Bump::Patch if pre => Version::new(current.major, current.minor, current.patch),
         Bump::Patch => Version::new(current.major, current.minor, current.patch + 1),
     }
 }
@@ -70,9 +78,24 @@ mod tests {
     }
 
     #[test]
-    fn clears_pre_and_build() {
-        assert_eq!(next("1.2.3-rc.1+abc", Bump::Major), "2.0.0");
-        assert_eq!(next("1.2.3-rc.1+abc", Bump::Minor), "1.3.0");
-        assert_eq!(next("1.2.3-rc.1+abc", Bump::Patch), "1.2.4");
+    fn graduates_a_pre_release_that_satisfies_the_bump() {
+        assert_eq!(next("2.0.0-beta.1", Bump::Major), "2.0.0");
+        assert_eq!(next("1.2.0-rc.1", Bump::Minor), "1.2.0");
+        assert_eq!(next("1.2.3-rc.1", Bump::Patch), "1.2.3");
+    }
+
+    #[test]
+    fn increments_past_a_pre_release_that_does_not_satisfy_the_bump() {
+        assert_eq!(next("2.1.0-beta.1", Bump::Major), "3.0.0");
+        assert_eq!(next("2.0.1-beta.1", Bump::Major), "3.0.0");
+        assert_eq!(next("1.2.3-rc.1", Bump::Minor), "1.3.0");
+    }
+
+    #[test]
+    fn clears_build_metadata() {
+        assert_eq!(next("1.2.3+abc", Bump::Major), "2.0.0");
+        assert_eq!(next("1.2.3+abc", Bump::Minor), "1.3.0");
+        assert_eq!(next("1.2.3+abc", Bump::Patch), "1.2.4");
+        assert_eq!(next("1.2.3-rc.1+abc", Bump::Patch), "1.2.3");
     }
 }

@@ -44,9 +44,9 @@ enum Command {
     Init,
     /// Create a changeset (the default command)
     Add(AddArgs),
-    /// Consume changesets: bump the package version and update CHANGELOG.md
+    /// Consume changesets: bump each named package's version and update its CHANGELOG.md
     Version {
-        /// Print the plan to stderr instead of modifying any file
+        /// Print the plan without modifying any file
         #[arg(short = 'n', long)]
         dry_run: bool,
     },
