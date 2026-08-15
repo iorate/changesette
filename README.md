@@ -46,9 +46,11 @@ Cargo (requires Rust 1.85+):
 cargo install changesette
 ```
 
-## Example workflow
+## Example workflows
 
-On every push to `main`, maintains a Version PR that applies the pending changesets; merging it creates a GitHub Release (and its tag) with the changelog section as the notes. The example is for a single-package repository; replace `my-package` with the `name` declared in your `package.json`.
+### Single package
+
+On every push to `main`, maintains a Version PR that applies the pending changesets; merging it creates a GitHub Release (and its tag) with the changelog section as the notes. Replace `my-package` with the `name` declared in your `package.json`.
 
 ```yaml
 name: Version
@@ -103,14 +105,75 @@ jobs:
 
       - if: steps.pr.outputs.pull-request-number == ''
         run: |
-          version="$(changesette get-packages | jq -r '.[] | select(.name == "my-package").version')"
+          version="$(jq -r .version package.json)"
           if ! gh release view "v$version" > /dev/null 2>&1; then
+            notes="$(changesette get-changelog-entry my-package "$version")"
             gh release create "v$version" \
               --target "$GITHUB_SHA" \
-              --notes "$(changesette get-changelog-entry my-package "$version")"
+              --notes "$notes"
           fi
         env:
           GH_TOKEN: ${{ github.token }}
+```
+
+### Workspace
+
+On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the bumped packages to the npm registry with pnpm. `pnpm publish -r` publishes every workspace package whose version is not on the registry yet and skips the rest, so no per-package bookkeeping is needed; insert a build step before it if your packages need one. Publishing authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers) through the `id-token: write` permission; configure each package's trusted publisher on npmjs.com first. With npm instead of pnpm, there is no equivalent of `pnpm publish -r`; iterate over `changesette get-packages` and publish each package whose version is not on the registry yet.
+
+```yaml
+name: Version
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: version
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: iorate/changesette/setup@v3
+
+      - id: version
+        run: |
+          plan="$(changesette version)"
+          if jq -e 'any(.releases[]; .type != "none")' <<< "$plan" > /dev/null; then
+            delim="$(openssl rand -hex 16)"
+            {
+              echo "body<<$delim"
+              jq -r '[.releases[] | select(.type != "none") | "## \(.name)@\(.newVersion)\n\n\(.changelogEntry)"] | join("\n\n")' <<< "$plan"
+              echo "$delim"
+            } >> "$GITHUB_OUTPUT"
+            pnpm install --lockfile-only
+          fi
+
+      - id: pr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: changesette/release
+          commit-message: Version packages
+          title: Version packages
+          body: ${{ steps.version.outputs.body }}
+          delete-branch: true
+
+      - if: steps.pr.outputs.pull-request-number == ''
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm publish -r
 ```
 
 ## CLI

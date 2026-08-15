@@ -75,7 +75,7 @@ jobs:
         id: release
         if: steps.pr.outputs.pull-request-number == ''
         run: |
-          v="$(cargo run --release -- get-packages | jq -r '.[] | select(.name == "changesette").version')"
+          v="$(jq -r .version package.json)"
           if [[ -z "$(git ls-remote origin "refs/tags/changesette-v$v")" ]]; then
             echo "version=$v" >> "$GITHUB_OUTPUT"
           fi
