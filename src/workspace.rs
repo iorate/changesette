@@ -65,7 +65,7 @@ impl Workspace {
                 if let Some(patterns) =
                     pnpm_packages(&text).with_context(|| pnpm_path.display().to_string())?
                 {
-                    return Self::from_patterns(dir, &patterns);
+                    return Self::from_patterns(dir, &pnpm_path, &patterns);
                 }
                 continue;
             }
@@ -73,7 +73,7 @@ impl Workspace {
                 if let Some(patterns) =
                     npm_workspaces(&text).with_context(|| package_path.display().to_string())?
                 {
-                    return Self::from_patterns(dir, &patterns);
+                    return Self::from_patterns(dir, &package_path, &patterns);
                 }
             }
         }
@@ -131,7 +131,7 @@ impl Workspace {
             })
     }
 
-    fn from_patterns(root: &Path, patterns: &[String]) -> Result<Self> {
+    fn from_patterns(root: &Path, manifest: &Path, patterns: &[String]) -> Result<Self> {
         let mut includes = GlobSetBuilder::new();
         let mut excludes = GlobSetBuilder::new();
         for pattern in patterns {
@@ -143,7 +143,12 @@ impl Workspace {
                 GlobBuilder::new(glob)
                     .literal_separator(true)
                     .build()
-                    .with_context(|| format!("invalid workspace pattern {pattern:?}"))?,
+                    .with_context(|| {
+                        format!(
+                            "{}: invalid workspace pattern {pattern:?}",
+                            manifest.display()
+                        )
+                    })?,
             );
         }
         let includes = includes.build()?;
