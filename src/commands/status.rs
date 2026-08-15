@@ -4,12 +4,11 @@ use anyhow::Result;
 
 use crate::{changeset, output, release_plan, workspace::Workspace};
 
-/// Prints the packages to be bumped by `version` to stdout, grouped by bump
-/// type in major, minor, patch order; packages named only with `none` are
-/// omitted. With `verbose`, each package carries its new version and the
-/// changeset files naming it. With `output_path`, writes the release plan to
-/// that file as pretty-printed JSON instead and prints nothing. Modifies no
-/// other file.
+/// Prints the packages to be bumped by `version` to stdout; packages named
+/// only with `none` are omitted. With `verbose`, also shows each package's
+/// new version and the changeset files naming it. With `output_path`, writes
+/// the release plan to that file as pretty-printed JSON instead and prints
+/// nothing. Modifies no other file.
 pub(crate) fn run(verbose: bool, output_path: Option<&Path>) -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
     let changeset_dir = workspace.root().join(".changeset");

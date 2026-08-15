@@ -11,9 +11,9 @@ use crate::{changeset, output, release_plan, workspace::Workspace};
 /// changesets, nothing changes. Each name in `ignore` must be a workspace
 /// member; a changeset naming an ignored package is skipped — excluded from
 /// the release plan and left on disk — and it is an error for such a
-/// changeset to also name a package that is not ignored. Prints a completion
-/// message to stdout; with `output_path`, prints nothing and instead writes
-/// the release plan, each bumped release carrying its new changelog entry, to
+/// changeset to also name a package that is not ignored. Reports the applied
+/// bumps to stdout; with `output_path`, prints nothing and instead writes the
+/// release plan, each bumped release carrying its new changelog entry, to
 /// that file as pretty-printed JSON.
 pub(crate) fn run(ignore: &[String], output_path: Option<&Path>) -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
@@ -57,11 +57,20 @@ pub(crate) fn run(ignore: &[String], output_path: Option<&Path>) -> Result<()> {
 
     match output_path {
         Some(path) => release_plan::write_file(path, &plan),
-        None => output::print_line(if no_changes {
-            "No unreleased changesets found."
-        } else {
-            "All files have been updated. Review them and commit at your leisure"
-        }),
+        None => {
+            if no_changes {
+                return output::print_line("No unreleased changesets found.");
+            }
+            for release in &plan.releases {
+                if release.bump != "none" {
+                    output::print_line(&format!(
+                        "Bumped {} {} -> {}",
+                        release.name, release.old_version, release.new_version
+                    ))?;
+                }
+            }
+            Ok(())
+        }
     }
 }
 

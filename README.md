@@ -206,11 +206,11 @@ Creates the `.changeset/` directory with a README.md. Does nothing if the direct
 
 ### `changesette [add] [--major <pkgs>] [--minor <pkgs>] [--patch <pkgs>] [--empty] [--message <text>]`
 
-Creates a changeset file in `.changeset/` and prints its path (relative to the working directory). `--major`, `--minor`, and `--patch` each take a comma-separated list of package names and may be repeated; `--empty` creates a changeset that names no packages and conflicts with the bump flags; `--message` (short form `-m`) sets the summary. When run in a terminal, missing inputs are prompted for interactively: the affected packages and their bump types when no bump flag is given, and the summary when `--message` is not given (submitting an empty summary opens your editor for a multi-line one).
+Creates a changeset file in `.changeset/`. `--major`, `--minor`, and `--patch` each take a comma-separated list of package names and may be repeated; `--empty` creates a changeset that names no packages and conflicts with the bump flags; `--message` (short form `-m`) sets the summary. When run in a terminal, missing inputs are prompted for interactively: the affected packages and their bump types when no bump flag is given, and the summary when `--message` is not given (submitting an empty summary opens your editor for a multi-line one).
 
 ### `changesette version [--ignore <pkgs>] [--output <file>]`
 
-Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. On success prints a completion message to stdout. `--output` (short form `-o`) suppresses stdout and writes the release plan to the given file as pretty-printed JSON, mirroring the changesets `ReleasePlan` type:
+Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. `--output` (short form `-o`) suppresses stdout and writes the release plan to the given file as pretty-printed JSON, mirroring the changesets `ReleasePlan` type:
 
 ```json
 {
@@ -243,23 +243,15 @@ Applies all pending changesets: bumps each named package's `package.json`, inser
 
 - With pending bumps, `releases` lists every named package with its widest bump and new version. `changelogEntry` is the body of the package's new changelog section, without the `## <version>` heading.
 - Packages named only with the `none` type appear with `"type": "none"`, an unchanged version, and no `changelogEntry`; their files are still deleted, as are empty changesets.
-- With zero changesets, changes nothing: it prints `No unreleased changesets found.` instead of the completion message, or with `--output` writes an empty plan.
+- With zero changesets, changes nothing; with `--output` it writes an empty plan.
 
-`--ignore` takes a comma-separated list of package names and may be repeated. Each name must be an exact package name of a workspace member; glob expressions are not supported. Changesets naming an ignored package are skipped: they are excluded from the release plan and left in place for a later run. A changeset naming both an ignored and a not-ignored package is an error.
+`--ignore` takes a comma-separated list of package names and may be repeated. Each name must be a workspace member's package name. Changesets naming an ignored package are skipped: they are excluded from the release plan and left in place for a later run. A changeset naming both an ignored and a not-ignored package is an error.
 
 Lockfiles are not updated; if you use npm, run `npm install --package-lock-only` afterwards.
 
 ### `changesette status [--verbose] [--output <file>]`
 
-Prints the packages that `version` would bump, grouped by bump type, without changing any file:
-
-```
-Packages to be bumped:
-- minor
-  - my-package
-```
-
-`--verbose` (short form `-v`) appends each package's new version and lists the changeset files naming it. `--output` (short form `-o`) writes the release plan to the given file instead of printing the list — the same file `version --output` writes. Packages named only with the `none` type appear in the JSON but not in the list.
+Prints the packages that `version` would bump, without changing any file. `--verbose` (short form `-v`) adds each package's new version and the changeset files naming it. `--output` (short form `-o`) writes the release plan to the given file instead of printing the list — the same file `version --output` writes. Packages named only with the `none` type appear in the JSON but not in the list.
 
 ### `changesette get-packages`
 
