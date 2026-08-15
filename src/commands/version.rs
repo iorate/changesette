@@ -2,7 +2,7 @@ use std::{env, fs};
 
 use anyhow::{Context, Result};
 
-use crate::{changeset, release_plan, workspace::Workspace};
+use crate::{changeset, output, release_plan, workspace::Workspace};
 
 /// Consumes every changeset in the workspace: bumps each named package's
 /// package.json, inserts the new section into its CHANGELOG.md, deletes the
@@ -35,6 +35,6 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
         }
     }
 
-    println!("{}", serde_json::to_string(&plan)?);
+    output::print_line(&serde_json::to_string(&plan)?)?;
     Ok(())
 }

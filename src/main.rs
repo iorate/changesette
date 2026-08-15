@@ -6,6 +6,7 @@ mod bump;
 mod changelog;
 mod changeset;
 mod commands;
+mod output;
 mod package_json;
 mod release_plan;
 mod workspace;

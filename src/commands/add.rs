@@ -11,6 +11,7 @@ use ulid::Ulid;
 
 use crate::{
     bump::Bump,
+    output,
     package_json::PackageJson,
     workspace::{Member, Workspace},
 };
@@ -109,7 +110,7 @@ pub(crate) fn run(
     } else {
         display_path = path;
     }
-    println!("{}", display_path.display());
+    output::print_line(&display_path.display().to_string())?;
     Ok(())
 }
 

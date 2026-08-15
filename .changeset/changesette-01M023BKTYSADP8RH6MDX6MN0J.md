@@ -12,3 +12,4 @@ Add npm and pnpm workspace support.
 - Breaking: `version` prints a JSON release plan to stdout.
 - Breaking: `changelog` is renamed to `get-changelog-entry <package> <version>`.
 - Breaking: `current` is replaced by `get-packages`, which prints the workspace packages as JSON.
+- Commands no longer panic when a consumer closes stdout early; a broken pipe ends the output quietly.

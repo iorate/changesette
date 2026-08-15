@@ -2,7 +2,7 @@ use std::{fs, io};
 
 use anyhow::{Context, Result, bail};
 
-use crate::{changelog, workspace::Workspace};
+use crate::{changelog, output, workspace::Workspace};
 
 /// Prints the body of the given version's section, without the `## <version>`
 /// heading, from the named package's CHANGELOG.md to stdout.
@@ -19,6 +19,6 @@ pub(crate) fn run(package: &str, version: &semver::Version) -> Result<()> {
     };
     let section = changelog::extract_section(&text, &version.to_string())
         .with_context(|| path.display().to_string())?;
-    println!("{section}");
+    output::print_line(&section)?;
     Ok(())
 }

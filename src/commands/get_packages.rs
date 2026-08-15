@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::{package_json::PackageJson, workspace::Workspace};
+use crate::{output, package_json::PackageJson, workspace::Workspace};
 
 #[derive(Serialize)]
 struct Package<'a> {
@@ -40,6 +40,6 @@ pub(crate) fn run() -> Result<()> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    println!("{}", serde_json::to_string(&packages)?);
+    output::print_line(&serde_json::to_string(&packages)?)?;
     Ok(())
 }
