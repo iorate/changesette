@@ -472,6 +472,24 @@ fn get_changelog_entry_fails_for_a_missing_version() {
     fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
     let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist", "9.9.9"]);
     assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("CHANGELOG.md: version 9.9.9 not found"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn get_changelog_entry_rejects_an_invalid_version() {
+    let dir = package_dir();
+    fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
+    let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist", "1.0"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("invalid value '1.0'"),
+        "{}",
+        stderr(&output)
+    );
 }
 
 #[test]

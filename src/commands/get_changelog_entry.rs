@@ -6,7 +6,7 @@ use crate::{changelog, workspace::Workspace};
 
 /// Prints the section of the given version from the named package's
 /// CHANGELOG.md to stdout.
-pub(crate) fn run(package: &str, version: &str) -> Result<()> {
+pub(crate) fn run(package: &str, version: &semver::Version) -> Result<()> {
     let workspace = Workspace::discover(&std::env::current_dir()?)?;
     let member = workspace.member(package)?;
     let path = member.dir().join("CHANGELOG.md");
@@ -17,6 +17,8 @@ pub(crate) fn run(package: &str, version: &str) -> Result<()> {
         }
         Err(err) => return Err(err).context(path.display().to_string()),
     };
-    println!("{}", changelog::extract_section(&text, version)?);
+    let section = changelog::extract_section(&text, &version.to_string())
+        .with_context(|| path.display().to_string())?;
+    println!("{section}");
     Ok(())
 }

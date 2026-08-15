@@ -124,8 +124,8 @@ pub(crate) fn upsert_section(
 /// the section is not found.
 pub(crate) fn extract_section(text: &str, version: &str) -> Result<String> {
     let headings = parse_headings(text);
-    let index = find_h2(&headings, version)
-        .with_context(|| format!("version {version} not found in CHANGELOG.md"))?;
+    let index =
+        find_h2(&headings, version).with_context(|| format!("version {version} not found"))?;
     let end = next_h2_start(&headings, index, text.len());
     Ok(trim_blank_lines(&text[headings[index].range.end..end]).to_owned())
 }

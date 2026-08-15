@@ -57,7 +57,7 @@ enum Command {
         /// The name of the package
         package: String,
         /// The version whose section to print
-        version: String,
+        version: semver::Version,
     },
 }
 
