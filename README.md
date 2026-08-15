@@ -50,7 +50,7 @@ cargo install changesette
 
 ### Single package
 
-On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the package to the npm registry and creates a GitHub Release (and its tag) with the changelog section as the notes. Replace `my-package` with the `name` declared in your `package.json`.
+On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the package to the npm registry and creates a GitHub Release (and its tag) with the changelog section as the notes. A version whose section is missing from the changelog (for example one released before adopting changesette) gets no release. Replace `my-package` with the `name` declared in your `package.json`.
 
 ```yaml
 name: Version
@@ -111,10 +111,11 @@ jobs:
             npm publish
           fi
           if ! gh release view "v$version" > /dev/null 2>&1; then
-            notes="$(changesette get-changelog-entry my-package "$version")"
-            gh release create "v$version" \
-              --target "$GITHUB_SHA" \
-              --notes "$notes"
+            if notes="$(changesette get-changelog-entry my-package "$version")"; then
+              gh release create "v$version" \
+                --target "$GITHUB_SHA" \
+                --notes "$notes"
+            fi
           fi
         env:
           GH_TOKEN: ${{ github.token }}
@@ -122,7 +123,7 @@ jobs:
 
 ### Workspace
 
-On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the bumped packages to the npm registry with pnpm and creates a GitHub Release (and its tag, `<name>@<version>`) per package with the changelog section as the notes. `pnpm publish -r` publishes every workspace package whose version is not on the registry yet and skips the rest, so no per-package bookkeeping is needed; insert a build step before it if your packages need one. With npm instead of pnpm, there is no equivalent of `pnpm publish -r`; iterate over `changesette get-packages` and publish each package whose version is not on the registry yet.
+On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the bumped packages to the npm registry with pnpm and creates a GitHub Release (and its tag, `<name>@<version>`) per package with the changelog section as the notes. `pnpm publish -r` publishes every workspace package whose version is not on the registry yet and skips the rest, so no per-package bookkeeping is needed; insert a build step before it if your packages need one. A package whose changelog has no section for its current version (for example a private package never named in a changeset) gets no release. With npm instead of pnpm, there is no equivalent of `pnpm publish -r`; iterate over `changesette get-packages` and publish each package whose version is not on the registry yet.
 
 ```yaml
 name: Version
@@ -183,10 +184,11 @@ jobs:
             name="$(jq -re .name <<< "$package")"
             version="$(jq -re .version <<< "$package")"
             if ! gh release view "$name@$version" > /dev/null 2>&1; then
-              notes="$(changesette get-changelog-entry "$name" "$version")"
-              gh release create "$name@$version" \
-                --target "$GITHUB_SHA" \
-                --notes "$notes"
+              if notes="$(changesette get-changelog-entry "$name" "$version")"; then
+                gh release create "$name@$version" \
+                  --target "$GITHUB_SHA" \
+                  --notes "$notes"
+              fi
             fi
           done
         env:
