@@ -311,15 +311,14 @@ fn add_without_any_flags_fails_naming_all_missing_flags() {
 }
 
 #[test]
-fn add_rejects_an_empty_message() {
+fn add_accepts_an_empty_message() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(dir.path(), &["add", "--minor", "ublacklist", "-m", ""]);
-    assert!(!output.status.success());
-    assert_eq!(
-        fs::read_dir(dir.path().join(".changeset")).unwrap().count(),
-        0
-    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    let content = fs::read_to_string(dir.path().join(out.trim_end())).unwrap();
+    assert_eq!(content, "---\nublacklist: minor\n---\n");
 }
 
 #[test]
@@ -645,6 +644,18 @@ fn version_bumps_and_writes_the_changelog() {
     );
     assert!(!dir.path().join(".changeset").join(ULID_B).exists());
     assert!(dir.path().join(".changeset/README.md").exists());
+}
+
+#[test]
+fn version_writes_an_empty_release_line_for_an_empty_summary() {
+    let dir = package_dir();
+    write_changeset(dir.path(), ULID_B, &[("ublacklist", "minor")], "");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
+        "# ublacklist\n\n## 1.3.0\n\n### Minor Changes\n\n- \n"
+    );
 }
 
 #[test]

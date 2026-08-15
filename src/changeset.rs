@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fs, io, path::Path, sync::LazyLock};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, bail};
 use regex::Regex;
 use saphyr::{LoadableYamlNode, Yaml};
 
@@ -22,8 +22,8 @@ pub(crate) struct LoadedChange {
     /// its requested bump; `None` stands for the `none` type (no bump). Empty
     /// for an empty changeset.
     pub(crate) releases: Vec<(String, Option<Bump>)>,
-    /// The summary text below the frontmatter, trimmed. May be empty only
-    /// when `releases` is empty.
+    /// The summary text below the frontmatter, trimmed. May be empty, as in
+    /// the upstream parser, which does not validate the summary.
     pub(crate) summary: String,
 }
 
@@ -136,12 +136,6 @@ fn load_one(changeset_dir: &Path, file_name: &str) -> Result<LoadedChange> {
             file_path.display()
         ),
     }
-
-    ensure!(
-        releases.is_empty() || !summary.is_empty(),
-        "{}: empty changeset (the summary is empty)",
-        file_path.display()
-    );
 
     Ok(LoadedChange {
         file_name: file_name.to_owned(),
@@ -289,8 +283,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_frontmatter_only_file() {
-        insta::assert_snapshot!(load_err("frontmatter-only"));
+    fn parses_a_frontmatter_only_file_with_an_empty_summary() {
+        insta::assert_debug_snapshot!(load_ok("frontmatter-only"));
     }
 
     #[test]

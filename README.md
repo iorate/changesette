@@ -229,14 +229,14 @@ Prints the workspace packages to stdout as a single-line JSON array in package n
 
 ### `changesette get-changelog-entry <package> <version>`
 
-Prints the `## <version>` section of the named package's `CHANGELOG.md`.
+Prints the body of the `## <version>` section of the named package's `CHANGELOG.md` — the text below that heading, without the heading itself.
 
 ## Workspaces
 
 Every command resolves its workspace by walking up from the working directory. The first ancestor directory that is a workspace root wins:
 
 - a `pnpm-workspace.yaml` with a `packages` list (pnpm), or
-- with no `pnpm-workspace.yaml`, a `package.json` whose `workspaces` key is an array of globs (npm / Yarn; the Yarn 1 object form is not supported).
+- otherwise, a `package.json` whose `workspaces` key is an array of globs (npm / Yarn; the Yarn 1 object form is not supported).
 
 The workspace members are the directories matching those globs whose `package.json` has both a `name` and a `version`; the root itself is not a member. Without a workspace root, the nearest `package.json` acts as a single-package workspace. The `.changeset/` directory always lives at the resolved root.
 

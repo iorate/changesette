@@ -1,5 +1,0 @@
----
-source: src/changeset.rs
-expression: "load_err(\"frontmatter-only\")"
----
-tests/fixtures/changeset/frontmatter-only/changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md: empty changeset (the summary is empty)

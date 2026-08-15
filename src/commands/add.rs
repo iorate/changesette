@@ -43,10 +43,6 @@ pub(crate) fn run(
         changeset_dir.display()
     );
 
-    if let Some(message) = &message {
-        ensure!(!message.trim().is_empty(), "the summary must not be empty");
-    }
-
     let (releases, summary) = if empty {
         (Vec::new(), message.unwrap_or_default())
     } else {
@@ -259,35 +255,52 @@ fn prompt_summary() -> Result<String> {
         return Ok(input);
     }
     let edited = dialoguer::Editor::new()
-        .edit("")
+        .edit(
+            "\n\n# Please enter a summary for your changes.\n# An empty message aborts the editor.",
+        )
         .context("failed to edit the summary")?;
-    let Some(text) = edited else {
-        bail!("the summary must not be empty")
-    };
-    let text = text.trim();
-    ensure!(!text.is_empty(), "the summary must not be empty");
-    Ok(text.to_owned())
+    if let Some(text) = edited {
+        let text = text
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let text = text.trim();
+        if !text.is_empty() {
+            return Ok(text.to_owned());
+        }
+    }
+    loop {
+        let input: String = dialoguer::Input::new()
+            .with_prompt("Did not find a summary in the edited file. Please enter one")
+            .allow_empty(true)
+            .interact_text()?;
+        if !input.trim().is_empty() {
+            return Ok(input);
+        }
+    }
 }
 
 fn render(releases: &[(String, Bump)], summary: &str) -> Result<String> {
     let summary = summary.trim();
-    if releases.is_empty() {
-        let mut content = String::from("---\n---\n");
-        if !summary.is_empty() {
-            content.push('\n');
-            content.push_str(summary);
-            content.push('\n');
+    let mut content = if releases.is_empty() {
+        String::from("---\n---\n")
+    } else {
+        let mut mapping = Mapping::new();
+        for (name, bump) in releases {
+            mapping.insert(
+                Yaml::Value(Scalar::String(name.as_str().into())),
+                Yaml::Value(Scalar::String(bump.as_str().into())),
+            );
         }
-        return Ok(content);
+        let mut frontmatter = String::new();
+        YamlEmitter::new(&mut frontmatter).dump(&Yaml::Mapping(mapping))?;
+        format!("{frontmatter}\n---\n")
+    };
+    if !summary.is_empty() {
+        content.push('\n');
+        content.push_str(summary);
+        content.push('\n');
     }
-    let mut mapping = Mapping::new();
-    for (name, bump) in releases {
-        mapping.insert(
-            Yaml::Value(Scalar::String(name.as_str().into())),
-            Yaml::Value(Scalar::String(bump.as_str().into())),
-        );
-    }
-    let mut frontmatter = String::new();
-    YamlEmitter::new(&mut frontmatter).dump(&Yaml::Mapping(mapping))?;
-    Ok(format!("{frontmatter}\n---\n\n{summary}\n"))
+    Ok(content)
 }
