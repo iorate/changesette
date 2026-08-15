@@ -1,7 +1,7 @@
 use semver::Version;
 
 /// A semver bump type, ordered so that `max` picks the widest one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Bump {
     Patch,
     Minor,
