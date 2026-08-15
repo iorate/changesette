@@ -1,4 +1,4 @@
-use std::process::ExitCode;
+use std::{path::PathBuf, process::ExitCode};
 
 use clap::Parser;
 
@@ -47,9 +47,18 @@ enum Command {
     Add(AddArgs),
     /// Consume changesets: bump each named package's version and update its CHANGELOG.md
     Version {
-        /// Print the plan without modifying any file
-        #[arg(short = 'n', long)]
-        dry_run: bool,
+        /// Write the release plan to the file as pretty-printed JSON
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
+    /// Print the packages to be bumped by `version`
+    Status {
+        /// Show the new versions and the changeset files
+        #[arg(short, long)]
+        verbose: bool,
+        /// Write the release plan to the file as pretty-printed JSON instead
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
     },
     /// Print the workspace packages as JSON
     GetPackages,
@@ -83,7 +92,8 @@ fn run() -> anyhow::Result<()> {
             message,
             empty,
         }) => commands::add::run(major, minor, patch, message, empty),
-        Command::Version { dry_run } => commands::version::run(dry_run),
+        Command::Version { output } => commands::version::run(output.as_deref()),
+        Command::Status { verbose, output } => commands::status::run(verbose, output.as_deref()),
         Command::GetPackages => commands::get_packages::run(),
         Command::GetChangelogEntry { package, version } => {
             commands::get_changelog_entry::run(&package, &version)

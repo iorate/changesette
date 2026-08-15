@@ -586,22 +586,32 @@ const ULID_A: &str = "changesette-01H455VB4PEX5VSKNK084SN02Q.md";
 const ULID_B: &str = "changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md";
 const ID_A: &str = "changesette-01H455VB4PEX5VSKNK084SN02Q";
 const ID_B: &str = "changesette-01H455WZ0H1X9PE0QB0MV1P1KG";
-const EMPTY_PLAN: &str = "{\"changesets\":[],\"releases\":[]}\n";
+const UPDATED: &str = "All files have been updated. Review them and commit at your leisure\n";
 
 #[test]
-fn version_with_zero_changesets_prints_an_empty_plan() {
+fn version_with_zero_changesets_prints_a_notice_and_touches_nothing() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
     let before = dir_snapshot(dir.path());
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), EMPTY_PLAN);
-    assert!(
-        stderr(&output).contains("no changesets found"),
-        "{}",
-        stderr(&output)
-    );
+    assert_eq!(stdout(&output), "No unreleased changesets found.\n");
+    assert_eq!(stderr(&output), "");
     assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_output_with_zero_changesets_writes_an_empty_plan() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    let output = changesette(dir.path(), &["version", "--output", "plan.json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("plan.json")).unwrap(),
+        "{\n  \"changesets\": [],\n  \"releases\": []\n}"
+    );
 }
 
 #[test]
@@ -628,12 +638,8 @@ fn version_bumps_and_writes_the_changelog() {
     fs::write(dir.path().join(".changeset/README.md"), "# Changesets\n").unwrap();
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        format!(
-            "{{\"changesets\":[{{\"id\":\"{ID_B}\",\"summary\":\"Add feature\",\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"minor\"}}]}}],\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"minor\",\"oldVersion\":\"1.2.3\",\"newVersion\":\"1.3.0\",\"changesets\":[\"{ID_B}\"],\"changelogEntry\":\"### Minor Changes\\n\\n- Add feature\"}}]}}\n"
-        )
-    );
+    assert_eq!(stdout(&output), UPDATED);
+    assert_eq!(stderr(&output), "");
     assert_eq!(
         fs::read_to_string(dir.path().join("package.json")).unwrap(),
         "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.3.0\"\n}\n"
@@ -691,14 +697,13 @@ fn version_uses_the_max_bump_across_changesets() {
         "Rework everything",
     );
     write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
-    let output = changesette(dir.path(), &["version"]);
+    let output = changesette(dir.path(), &["version", "--output", "plan.json"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        format!(
-            "{{\"changesets\":[{{\"id\":\"{ID_A}\",\"summary\":\"Rework everything\",\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"major\"}}]}},{{\"id\":\"{ID_B}\",\"summary\":\"Fix bug\",\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"patch\"}}]}}],\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"major\",\"oldVersion\":\"1.2.3\",\"newVersion\":\"2.0.0\",\"changesets\":[\"{ID_A}\",\"{ID_B}\"],\"changelogEntry\":\"### Major Changes\\n\\n- Rework everything\\n\\n### Patch Changes\\n\\n- Fix bug\"}}]}}\n"
-        )
-    );
+    assert_eq!(stdout(&output), "");
+    let plan = fs::read_to_string(dir.path().join("plan.json")).unwrap();
+    assert!(plan.contains(ID_A), "{plan}");
+    assert!(plan.contains(ID_B), "{plan}");
+    assert!(plan.contains("\"newVersion\": \"2.0.0\""), "{plan}");
     let changelog = fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
     assert!(changelog.contains("## 2.0.0"), "{changelog}");
     assert!(changelog.contains("### Major Changes"), "{changelog}");
@@ -725,12 +730,7 @@ fn version_bumps_only_the_named_workspace_members() {
     );
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        format!(
-            "{{\"changesets\":[{{\"id\":\"{ID_B}\",\"summary\":\"Improve things\",\"releases\":[{{\"name\":\"pkg-b\",\"type\":\"patch\"}},{{\"name\":\"pkg-a\",\"type\":\"minor\"}}]}}],\"releases\":[{{\"name\":\"pkg-a\",\"type\":\"minor\",\"oldVersion\":\"3.1.4\",\"newVersion\":\"3.2.0\",\"changesets\":[\"{ID_B}\"],\"changelogEntry\":\"### Minor Changes\\n\\n- Improve things\"}},{{\"name\":\"pkg-b\",\"type\":\"patch\",\"oldVersion\":\"2.0.0\",\"newVersion\":\"2.0.1\",\"changesets\":[\"{ID_B}\"],\"changelogEntry\":\"### Patch Changes\\n\\n- Improve things\"}}]}}\n"
-        )
-    );
+    assert_eq!(stdout(&output), UPDATED);
     assert_eq!(
         fs::read_to_string(dir.path().join("packages/a/package.json")).unwrap(),
         "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.2.0\"\n}\n"
@@ -761,14 +761,13 @@ fn version_consumes_a_none_only_changeset_without_bumping() {
     let dir = package_dir();
     write_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
     let before = dir_snapshot(dir.path());
-    let output = changesette(dir.path(), &["version"]);
+    let output = changesette(dir.path(), &["version", "-o", "plan.json"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        format!(
-            "{{\"changesets\":[{{\"id\":\"{ID_B}\",\"summary\":\"Note only\",\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"none\"}}]}}],\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"none\",\"oldVersion\":\"1.2.3\",\"newVersion\":\"1.2.3\",\"changesets\":[\"{ID_B}\"]}}]}}\n"
-        )
-    );
+    assert_eq!(stdout(&output), "");
+    let plan = fs::read_to_string(dir.path().join("plan.json")).unwrap();
+    assert!(plan.contains("\"type\": \"none\""), "{plan}");
+    assert!(plan.contains("\"newVersion\": \"1.2.3\""), "{plan}");
+    assert!(!plan.contains("changelogEntry"), "{plan}");
     assert_eq!(
         fs::read_to_string(dir.path().join("package.json")).unwrap(),
         String::from_utf8(before["package.json"].clone()).unwrap()
@@ -783,12 +782,7 @@ fn version_consumes_an_empty_changeset() {
     write_changeset(dir.path(), ULID_B, &[], "");
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        format!(
-            "{{\"changesets\":[{{\"id\":\"{ID_B}\",\"summary\":\"\",\"releases\":[]}}],\"releases\":[]}}\n"
-        )
-    );
+    assert_eq!(stdout(&output), UPDATED);
     assert!(!dir.path().join("CHANGELOG.md").exists());
     assert!(!dir.path().join(".changeset").join(ULID_B).exists());
 }
@@ -837,56 +831,182 @@ fn version_rerun_replaces_the_same_section() {
     );
 }
 
-#[test]
-fn version_dry_run_prints_the_same_plan_without_modifying_files() {
-    let dir = package_dir();
-    write_changeset(
-        dir.path(),
-        ULID_B,
-        &[("ublacklist", "minor")],
-        "Add feature",
-    );
-    let before = dir_snapshot(dir.path());
-    let dry = changesette(dir.path(), &["version", "--dry-run"]);
-    assert!(dry.status.success(), "{}", stderr(&dry));
-    assert_eq!(dir_snapshot(dir.path()), before);
-    assert_eq!(stderr(&dry), "dry run: no files will be modified\n");
-
-    let real = changesette(dir.path(), &["version"]);
-    assert!(real.status.success(), "{}", stderr(&real));
-    assert_eq!(stdout(&dry), stdout(&real));
+fn pretty_plan(id: &str) -> String {
+    format!(
+        concat!(
+            "{{\n",
+            "  \"changesets\": [\n",
+            "    {{\n",
+            "      \"id\": \"{0}\",\n",
+            "      \"summary\": \"Add feature\",\n",
+            "      \"releases\": [\n",
+            "        {{\n",
+            "          \"name\": \"ublacklist\",\n",
+            "          \"type\": \"minor\"\n",
+            "        }}\n",
+            "      ]\n",
+            "    }}\n",
+            "  ],\n",
+            "  \"releases\": [\n",
+            "    {{\n",
+            "      \"name\": \"ublacklist\",\n",
+            "      \"type\": \"minor\",\n",
+            "      \"oldVersion\": \"1.2.3\",\n",
+            "      \"newVersion\": \"1.3.0\",\n",
+            "      \"changesets\": [\n",
+            "        \"{0}\"\n",
+            "      ],\n",
+            "      \"changelogEntry\": \"### Minor Changes\\n\\n- Add feature\"\n",
+            "    }}\n",
+            "  ]\n",
+            "}}"
+        ),
+        id
+    )
 }
 
 #[test]
-fn version_dry_run_via_the_short_flag_leaves_multiple_changesets_in_place() {
+fn version_output_writes_the_pretty_plan_and_applies_the_changesets() {
     let dir = package_dir();
-    write_changeset(dir.path(), ULID_A, &[("ublacklist", "patch")], "Fix bug");
     write_changeset(
         dir.path(),
         ULID_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
-    let before = dir_snapshot(dir.path());
-    let output = changesette(dir.path(), &["version", "-n"]);
+    let output = changesette(dir.path(), &["version", "--output", "plan.json"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(dir_snapshot(dir.path()), before);
-    let out = stdout(&output);
-    assert!(
-        out.contains("\"oldVersion\":\"1.2.3\",\"newVersion\":\"1.3.0\""),
-        "{out}"
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("plan.json")).unwrap(),
+        pretty_plan(ID_B)
     );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("package.json")).unwrap(),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.3.0\"\n}\n"
+    );
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
 }
 
 #[test]
-fn version_dry_run_with_zero_changesets_prints_an_empty_plan() {
+fn version_rejects_the_removed_dry_run_flag() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    for flag in ["--dry-run", "-n"] {
+        let output = changesette(dir.path(), &["version", flag]);
+        assert!(!output.status.success(), "{flag} should be rejected");
+    }
+}
+
+#[test]
+fn status_lists_packages_grouped_by_bump_without_modifying_files() {
+    let dir = workspace_dir();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\"\n}\n",
+    )
+    .unwrap();
+    write_changeset(dir.path(), ULID_A, &[("pkg-b", "major")], "Rework");
+    write_changeset(dir.path(), ULID_B, &[("pkg-a", "minor")], "Add feature");
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["status"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "Packages to be bumped:\n- major\n  - pkg-b\n- minor\n  - pkg-a\n"
+    );
+    assert_eq!(stderr(&output), "");
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn status_verbose_adds_versions_and_changeset_files() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_A,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    write_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
+    for flag in ["--verbose", "-v"] {
+        let output = changesette(dir.path(), &["status", flag]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_eq!(
+            stdout(&output),
+            format!(
+                "Packages to be bumped:\n- minor\n  - ublacklist -> 1.3.0\n    - .changeset/{ULID_A}\n    - .changeset/{ULID_B}\n"
+            )
+        );
+    }
+}
+
+#[test]
+fn status_omits_none_only_packages_from_the_listing() {
+    let dir = package_dir();
+    write_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
+    let output = changesette(dir.path(), &["status"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Packages to be bumped:\n");
+}
+
+#[test]
+fn status_with_zero_changesets_prints_only_the_heading() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
-    let output = changesette(dir.path(), &["version", "--dry-run"]);
+    let output = changesette(dir.path(), &["status"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), EMPTY_PLAN);
+    assert_eq!(stdout(&output), "Packages to be bumped:\n");
+    assert_eq!(stderr(&output), "");
+}
+
+#[test]
+fn status_output_writes_the_pretty_plan_without_modifying_files() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["status", "--output", "plan.json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("plan.json")).unwrap(),
+        pretty_plan(ID_B)
+    );
+    fs::remove_file(dir.path().join("plan.json")).unwrap();
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn status_output_with_zero_changesets_writes_an_empty_plan() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    let output = changesette(dir.path(), &["status", "-o", "plan.json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("plan.json")).unwrap(),
+        "{\n  \"changesets\": [],\n  \"releases\": []\n}"
+    );
+}
+
+#[test]
+fn status_fails_without_the_changeset_directory() {
+    let dir = package_dir();
+    let output = changesette(dir.path(), &["status"]);
+    assert!(!output.status.success());
     assert!(
-        stderr(&output).contains("no changesets found"),
+        stderr(&output).contains(".changeset"),
         "{}",
         stderr(&output)
     );
@@ -913,6 +1033,7 @@ fn prints_help() {
         "init",
         "add",
         "version",
+        "status",
         "get-packages",
         "get-changelog-entry",
     ] {

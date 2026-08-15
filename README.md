@@ -80,8 +80,8 @@ jobs:
 
       - id: version
         run: |
-          plan="$(changesette version)"
-          if release="$(jq -e '[.releases[] | select(.type != "none")][0]' <<< "$plan")"; then
+          changesette version --output "$RUNNER_TEMP/plan.json"
+          if release="$(jq -e '[.releases[] | select(.type != "none")][0]' "$RUNNER_TEMP/plan.json")"; then
             version="$(jq -re '.newVersion' <<< "$release")"
             echo "title=Release v$version" >> "$GITHUB_OUTPUT"
             delim="$(openssl rand -hex 16)"
@@ -155,13 +155,13 @@ jobs:
 
       - id: version
         run: |
-          plan="$(changesette version)"
-          if jq -e 'any(.releases[]; .type != "none")' <<< "$plan" > /dev/null; then
+          changesette version --output "$RUNNER_TEMP/plan.json"
+          if jq -e 'any(.releases[]; .type != "none")' "$RUNNER_TEMP/plan.json" > /dev/null; then
             echo "title=Version packages" >> "$GITHUB_OUTPUT"
             delim="$(openssl rand -hex 16)"
             {
               echo "body<<$delim"
-              jq -r '[.releases[] | select(.type != "none") | "## \(.name)@\(.newVersion)\n\n\(.changelogEntry)"] | join("\n\n")' <<< "$plan"
+              jq -r '[.releases[] | select(.type != "none") | "## \(.name)@\(.newVersion)\n\n\(.changelogEntry)"] | join("\n\n")' "$RUNNER_TEMP/plan.json"
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
             pnpm install --lockfile-only
@@ -208,19 +208,56 @@ Creates the `.changeset/` directory with a README.md. Does nothing if the direct
 
 Creates a changeset file in `.changeset/` and prints its path (relative to the working directory). `--major`, `--minor`, and `--patch` each take a comma-separated list of package names and may be repeated; `--empty` creates a changeset that names no packages and conflicts with the bump flags; `--message` (short form `-m`) sets the summary. When run in a terminal, missing inputs are prompted for interactively: the affected packages and their bump types when no bump flag is given, and the summary when `--message` is not given (submitting an empty summary opens your editor for a multi-line one).
 
-### `changesette version [--dry-run]`
+### `changesette version [--output <file>]`
 
-Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. Prints the release plan to stdout as single-line JSON, mirroring the changesets `ReleasePlan` type:
+Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. On success prints a completion message to stdout. `--output` (short form `-o`) suppresses stdout and writes the release plan to the given file as pretty-printed JSON, mirroring the changesets `ReleasePlan` type:
 
 ```json
-{"changesets":[{"id":"changesette-01M02G4ZT0Q3D9WVK6XJ5R8YBN","summary":"Add feature","releases":[{"name":"my-package","type":"minor"}]}],"releases":[{"name":"my-package","type":"minor","oldVersion":"1.2.3","newVersion":"1.3.0","changesets":["changesette-01M02G4ZT0Q3D9WVK6XJ5R8YBN"],"changelogEntry":"### Minor Changes\n\n- Add feature"}]}
+{
+  "changesets": [
+    {
+      "id": "changesette-01M02G4ZT0Q3D9WVK6XJ5R8YBN",
+      "summary": "Add feature",
+      "releases": [
+        {
+          "name": "my-package",
+          "type": "minor"
+        }
+      ]
+    }
+  ],
+  "releases": [
+    {
+      "name": "my-package",
+      "type": "minor",
+      "oldVersion": "1.2.3",
+      "newVersion": "1.3.0",
+      "changesets": [
+        "changesette-01M02G4ZT0Q3D9WVK6XJ5R8YBN"
+      ],
+      "changelogEntry": "### Minor Changes\n\n- Add feature"
+    }
+  ]
+}
 ```
 
 - With pending bumps, `releases` lists every named package with its widest bump and new version. `changelogEntry` is the body of the package's new changelog section, without the `## <version>` heading.
 - Packages named only with the `none` type appear with `"type": "none"`, an unchanged version, and no `changelogEntry`; their files are still deleted, as are empty changesets.
-- With zero changesets, prints `{"changesets":[],"releases":[]}` and changes nothing.
+- With zero changesets, changes nothing: it prints `No unreleased changesets found.` instead of the completion message, or with `--output` writes an empty plan.
 
-`--dry-run` (short form `-n`) prints exactly the same JSON without changing any files. Lockfiles are not updated; if you use npm, run `npm install --package-lock-only` afterwards.
+Lockfiles are not updated; if you use npm, run `npm install --package-lock-only` afterwards.
+
+### `changesette status [--verbose] [--output <file>]`
+
+Prints the packages that `version` would bump, grouped by bump type, without changing any file:
+
+```
+Packages to be bumped:
+- minor
+  - my-package
+```
+
+`--verbose` (short form `-v`) appends each package's new version and lists the changeset files naming it. `--output` (short form `-o`) writes the release plan to the given file instead of printing the list — the same file `version --output` writes. Packages named only with the `none` type appear in the JSON but not in the list.
 
 ### `changesette get-packages`
 
@@ -252,9 +289,9 @@ The changeset files are format-compatible with changesets, but `version` deliber
 - No dependency management: dependents of a bumped package are never bumped, and dependency ranges are never rewritten (see [Workspaces](#workspaces)).
 - No configuration: `.changeset/config.json` is not read, and there is nothing to configure (no `fixed` / `linked` / `ignore`).
 - No pre-release mode (`pre.json`).
-- No changed-package detection: `add` does not inspect git to suggest packages.
+- No changed-package detection: `add` does not inspect git to suggest packages, and `status` has no `--since`.
 - Changelog entries are plain summaries: no auto-generated PR / commit / author links and no changelog plugins.
-- The CLI is not command-compatible with `changeset`; only the changeset files are interchangeable.
+- The CLI is not command-compatible with `changeset`; only the changeset files and the release plan JSON written by `--output` are interchangeable.
 
 ## License
 

@@ -9,7 +9,8 @@ Add npm and pnpm workspace support.
 - Dependencies are never bumped automatically; every bump must be named explicitly in a changeset.
 - Pre-release versions now bump as node-semver's `inc` does: 2.0.0-beta.1 graduates to 2.0.0 instead of being incremented past it.
 - Breaking: `add` takes `--major`, `--minor`, and `--patch` package list flags, plus `--empty`, instead of `-b, --bump`.
-- Breaking: `version` prints a JSON release plan to stdout.
+- Breaking: `version` prints a completion message instead of the new version; `--output <file>` suppresses stdout and writes the release plan to a file as pretty-printed JSON.
+- Breaking: `version --dry-run` is replaced by a new `status` command: it prints the packages to be bumped, `--verbose` adds the new versions and the changeset files, and `--output <file>` writes the release plan to a file as pretty-printed JSON.
 - Breaking: `changelog` is renamed to `get-changelog-entry <package> <version>`.
 - Breaking: `current` is replaced by `get-packages`, which prints the workspace packages as JSON.
 - Commands no longer panic when a consumer closes stdout early; a broken pipe ends the output quietly.
