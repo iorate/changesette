@@ -1,13 +1,23 @@
 use std::{collections::BTreeMap, fs, path::Path};
 
-/// Writes a changeset for the package `ublacklist` under `dir/.changeset/`,
-/// creating the directory if needed.
-pub(crate) fn write_changeset(dir: &Path, file_name: &str, bump: &str, summary: &str) {
+/// Writes a changeset naming the given packages under `dir/.changeset/`,
+/// creating the directory if needed. An empty `releases` produces an empty
+/// frontmatter.
+pub(crate) fn write_changeset(
+    dir: &Path,
+    file_name: &str,
+    releases: &[(&str, &str)],
+    summary: &str,
+) {
     let changeset_dir = dir.join(".changeset");
     fs::create_dir_all(&changeset_dir).unwrap();
+    let frontmatter: String = releases
+        .iter()
+        .map(|(name, bump)| format!("\"{name}\": {bump}\n"))
+        .collect();
     fs::write(
         changeset_dir.join(file_name),
-        format!("---\n\"ublacklist\": {bump}\n---\n\n{summary}\n"),
+        format!("---\n{frontmatter}---\n\n{summary}\n"),
     )
     .unwrap();
 }

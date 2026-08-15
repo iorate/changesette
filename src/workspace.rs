@@ -26,6 +26,7 @@ impl Member {
 /// directory.
 #[derive(Debug)]
 pub(crate) struct Workspace {
+    root: PathBuf,
     members: Vec<Member>,
 }
 
@@ -82,11 +83,17 @@ impl Workspace {
             .with_context(|| path.display().to_string())?
             .with_context(|| format!("{}: missing top-level \"name\"", path.display()))?;
         Ok(Self {
+            root: dir.to_owned(),
             members: vec![Member {
                 name,
                 dir: dir.to_owned(),
             }],
         })
+    }
+
+    /// The workspace root directory, holding the `.changeset` directory.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
     }
 
     /// Resolves the member declaring the given package name, erroring with
@@ -141,7 +148,10 @@ impl Workspace {
                 pair[1].dir.display()
             );
         }
-        Ok(Self { members })
+        Ok(Self {
+            root: root.to_owned(),
+            members,
+        })
     }
 }
 
@@ -447,6 +457,7 @@ mod tests {
             "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = Workspace::discover(&dir.path().join("packages/a")).unwrap();
+        assert_eq!(workspace.root(), dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [
@@ -466,6 +477,7 @@ mod tests {
         );
         fs::create_dir_all(dir.path().join("app/src")).unwrap();
         let workspace = Workspace::discover(&dir.path().join("app/src")).unwrap();
+        assert_eq!(workspace.root(), dir.path().join("app"));
         assert_eq!(
             names_and_dirs(&workspace),
             [("app", dir.path().join("app").as_path())]

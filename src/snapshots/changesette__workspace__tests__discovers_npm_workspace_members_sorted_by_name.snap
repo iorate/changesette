@@ -3,6 +3,7 @@ source: src/workspace.rs
 expression: "discover_ok(\"npm\")"
 ---
 Workspace {
+    root: "tests/fixtures/workspace/npm",
     members: [
         Member {
             name: "alpha",

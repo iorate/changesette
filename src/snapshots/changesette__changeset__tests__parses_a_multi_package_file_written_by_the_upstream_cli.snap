@@ -1,0 +1,24 @@
+---
+source: src/changeset.rs
+expression: "load_ok(\"upstream-multi-package\")"
+---
+[
+    LoadedChange {
+        file_name: "frank-cycles-follow.md",
+        releases: [
+            (
+                "ublacklist",
+                Some(
+                    Minor,
+                ),
+            ),
+            (
+                "ublacklist-docs",
+                Some(
+                    Patch,
+                ),
+            ),
+        ],
+        summary: "Touches two packages.",
+    },
+]

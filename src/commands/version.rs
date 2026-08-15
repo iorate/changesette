@@ -1,84 +1,131 @@
-use std::{fs, io, path::Path};
+use std::{env, fs, io, path::PathBuf};
 
 use anyhow::{Context, Result};
 
 use crate::{
-    bump,
+    bump::{self, Bump},
     changelog::{self, render_section},
-    changeset,
+    changeset::{self, LoadedChange},
     package_json::PackageJson,
+    release_plan::{ChangesetEntry, Release, ReleasePlan, ReleaseRef},
+    workspace::Workspace,
 };
 
-/// Consumes every changeset: bumps package.json, inserts the new section into
-/// CHANGELOG.md, deletes the consumed files, and prints the next version to
-/// stdout. With zero changesets, does nothing and prints nothing. With
-/// `dry_run`, computes everything but prints the plan to stderr instead of
-/// touching any file.
+/// Consumes every changeset in the workspace: bumps each named package's
+/// package.json, inserts the new section into its CHANGELOG.md, deletes the
+/// consumed files (`none`-only and empty changesets included), and prints the
+/// release plan to stdout as single-line JSON. Packages named only with
+/// `none` keep their version and changelog. With zero changesets, prints an
+/// empty plan and touches nothing. With `dry_run`, prints the same JSON but
+/// touches no file.
 pub(crate) fn run(dry_run: bool) -> Result<()> {
-    let dir = Path::new(".");
-    let changeset_dir = Path::new(".changeset");
+    let workspace = Workspace::discover(&env::current_dir()?)?;
+    let changeset_dir = workspace.root().join(".changeset");
+    let changes = changeset::load(&changeset_dir)?;
 
-    let mut package_json = PackageJson::load(dir)?;
-    let changes = changeset::load(changeset_dir, package_json.name())?;
-    if changes.is_empty() {
-        eprintln!("note: no changesets found; nothing to do");
-        return Ok(());
+    for change in &changes {
+        for (name, _) in &change.releases {
+            workspace
+                .member(name)
+                .with_context(|| changeset_dir.join(&change.file_name).display().to_string())?;
+        }
     }
 
-    let entries: Vec<(bump::Bump, &str)> = changes
-        .iter()
-        .map(|change| (change.bump, change.summary.as_str()))
-        .collect();
+    let mut releases = Vec::new();
+    let mut writes: Vec<(PackageJson, PathBuf, String)> = Vec::new();
+    for (name, max_bump) in changeset::max_bumps(&changes) {
+        let member = workspace.member(name)?;
+        let mut package_json = PackageJson::load(member.dir())?;
+        let old_version = package_json.version().clone();
+        let ids = changes
+            .iter()
+            .filter(|change| change.releases.iter().any(|(n, _)| n == name))
+            .map(id)
+            .collect();
 
-    let current = package_json.version().clone();
-    // max_bump is None only for zero changesets, which returned early above.
-    let next = bump::next_version(&current, changeset::max_bump(&changes).unwrap());
-    let section = render_section(&next, &entries);
+        let new_version = match max_bump {
+            Some(max_bump) => {
+                let next = bump::next_version(&old_version, max_bump);
+                let entries: Vec<(Bump, &str)> = changes
+                    .iter()
+                    .filter_map(|change| {
+                        change
+                            .releases
+                            .iter()
+                            .find(|(n, _)| n == name)
+                            .and_then(|(_, bump)| *bump)
+                            .map(|bump| (bump, change.summary.as_str()))
+                    })
+                    .collect();
+                let section = render_section(&next, &entries);
 
-    package_json.set_version(&next)?;
-    let changelog_path = Path::new("CHANGELOG.md");
-    let changelog_text = match fs::read_to_string(changelog_path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
-        Err(err) => return Err(err).context(changelog_path.display().to_string()),
+                package_json.set_version(&next)?;
+                let changelog_path = member.dir().join("CHANGELOG.md");
+                let changelog_text = match fs::read_to_string(&changelog_path) {
+                    Ok(text) => text,
+                    Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
+                    Err(err) => return Err(err).context(changelog_path.display().to_string()),
+                };
+                let new_changelog_text =
+                    changelog::upsert_section(&changelog_text, name, &next.to_string(), &section);
+                writes.push((package_json, changelog_path, new_changelog_text));
+                next
+            }
+            None => old_version.clone(),
+        };
+        releases.push(Release {
+            name: name.to_owned(),
+            bump: max_bump.map_or("none", Bump::as_str),
+            old_version: old_version.to_string(),
+            new_version: new_version.to_string(),
+            changesets: ids,
+        });
+    }
+
+    let plan = ReleasePlan {
+        changesets: changes
+            .iter()
+            .map(|change| ChangesetEntry {
+                id: id(change),
+                summary: change.summary.clone(),
+                releases: change
+                    .releases
+                    .iter()
+                    .map(|(name, bump)| ReleaseRef {
+                        name: name.clone(),
+                        bump: bump.map_or("none", Bump::as_str),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        releases,
     };
-    let new_changelog_text = changelog::upsert_section(
-        &changelog_text,
-        package_json.name(),
-        &next.to_string(),
-        &section,
-    );
 
+    if changes.is_empty() {
+        eprintln!("note: no changesets found; nothing to do");
+    }
     if dry_run {
         eprintln!("dry run: no files will be modified");
-        eprintln!(
-            "would consume {} {}:",
-            changes.len(),
-            if changes.len() == 1 {
-                "changeset"
-            } else {
-                "changesets"
-            }
-        );
-        for change in &changes {
-            eprintln!(
-                "  .changeset/{} ({})",
-                change.file_name,
-                change.bump.as_str()
-            );
-        }
-        eprintln!("would update package.json: {current} -> {next}");
-        eprintln!("would insert into CHANGELOG.md:\n\n{section}");
     } else {
-        package_json.save()?;
-        fs::write(changelog_path, new_changelog_text)
-            .with_context(|| changelog_path.display().to_string())?;
+        for (package_json, changelog_path, new_changelog_text) in writes {
+            package_json.save()?;
+            fs::write(&changelog_path, new_changelog_text)
+                .with_context(|| changelog_path.display().to_string())?;
+        }
         for change in &changes {
             let path = changeset_dir.join(&change.file_name);
             fs::remove_file(&path).with_context(|| path.display().to_string())?;
         }
     }
 
-    println!("{next}");
+    println!("{}", serde_json::to_string(&plan)?);
     Ok(())
+}
+
+fn id(change: &LoadedChange) -> String {
+    change
+        .file_name
+        .strip_suffix(".md")
+        .unwrap_or(&change.file_name)
+        .to_owned()
 }

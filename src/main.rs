@@ -7,6 +7,7 @@ mod changelog;
 mod changeset;
 mod commands;
 mod package_json;
+mod release_plan;
 mod workspace;
 
 #[derive(Parser)]

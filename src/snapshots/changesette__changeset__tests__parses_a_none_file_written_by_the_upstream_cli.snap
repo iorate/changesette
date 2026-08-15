@@ -1,0 +1,16 @@
+---
+source: src/changeset.rs
+expression: "load_ok(\"upstream-none\")"
+---
+[
+    LoadedChange {
+        file_name: "wild-candies-bet.md",
+        releases: [
+            (
+                "ublacklist",
+                None,
+            ),
+        ],
+        summary: "Declares no bump for the package.",
+    },
+]
