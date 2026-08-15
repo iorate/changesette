@@ -157,6 +157,7 @@ jobs:
         run: |
           plan="$(changesette version)"
           if jq -e 'any(.releases[]; .type != "none")' <<< "$plan" > /dev/null; then
+            echo "title=Version packages" >> "$GITHUB_OUTPUT"
             delim="$(openssl rand -hex 16)"
             {
               echo "body<<$delim"
@@ -164,14 +165,16 @@ jobs:
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
             pnpm install --lockfile-only
+          else
+            echo "title=Consume changesets" >> "$GITHUB_OUTPUT"
           fi
 
       - id: pr
         uses: peter-evans/create-pull-request@v8
         with:
           branch: changesette/release
-          commit-message: Version packages
-          title: Version packages
+          commit-message: ${{ steps.version.outputs.title }}
+          title: ${{ steps.version.outputs.title }}
           body: ${{ steps.version.outputs.body }}
           delete-branch: true
 
