@@ -120,7 +120,7 @@ fn load_one(changeset_dir: &Path, file_name: &str) -> Result<LoadedChange> {
                     Some("patch") => Some(Bump::Patch),
                     Some("none") => None,
                     Some(other) => bail!(
-                        "{}: unknown bump type `{other}`; expected major, minor, patch, or none",
+                        "{}: unknown bump type {other:?}; expected major, minor, patch, or none",
                         file_path.display()
                     ),
                     None => bail!(
