@@ -213,53 +213,125 @@ fn add_rejects_an_unknown_bump_type() {
     assert!(!output.status.success());
 }
 
+fn workspace_dir() -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"packages/*\"]\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("packages/a")).unwrap();
+    fs::write(
+        dir.path().join("packages/a/package.json"),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.1.4\"\n}\n",
+    )
+    .unwrap();
+    dir
+}
+
 #[test]
-fn current_prints_the_version() {
+fn get_version_prints_the_version() {
     let dir = package_dir();
-    let output = changesette(dir.path(), &["current"]);
+    let output = changesette(dir.path(), &["get-version", "ublacklist"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "1.2.3\n");
 }
 
 #[test]
-fn current_fails_without_package_json() {
+fn get_version_without_a_package_fails() {
+    let dir = package_dir();
+    let output = changesette(dir.path(), &["get-version"]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("<PACKAGE>"), "{}", stderr(&output));
+}
+
+#[test]
+fn get_version_fails_for_an_unknown_package() {
+    let dir = package_dir();
+    let output = changesette(dir.path(), &["get-version", "other"]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("`other`"), "{}", stderr(&output));
+}
+
+#[test]
+fn get_version_fails_without_package_json() {
     let dir = tempfile::tempdir().unwrap();
-    let output = changesette(dir.path(), &["current"]);
+    let output = changesette(dir.path(), &["get-version", "ublacklist"]);
     assert!(!output.status.success());
 }
 
 #[test]
-fn changelog_without_a_version_fails() {
-    let dir = tempfile::tempdir().unwrap();
+fn get_version_resolves_a_workspace_member() {
+    let dir = workspace_dir();
+    let output = changesette(dir.path(), &["get-version", "pkg-a"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "3.1.4\n");
+}
+
+#[test]
+fn get_version_resolves_the_workspace_root_from_a_subdirectory() {
+    let dir = workspace_dir();
+    let output = changesette(&dir.path().join("packages/a"), &["get-version", "pkg-a"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "3.1.4\n");
+}
+
+#[test]
+fn get_changelog_entry_without_a_version_fails() {
+    let dir = package_dir();
     fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
-    let output = changesette(dir.path(), &["changelog"]);
+    let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist"]);
     assert!(!output.status.success());
     assert!(stderr(&output).contains("<VERSION>"), "{}", stderr(&output));
 }
 
 #[test]
-fn changelog_prints_the_requested_version() {
-    let dir = tempfile::tempdir().unwrap();
+fn get_changelog_entry_prints_the_requested_version() {
+    let dir = package_dir();
     fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
-    let output = changesette(dir.path(), &["changelog", "1.0.0"]);
+    let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist", "1.0.0"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "### Patch Changes\n\n- Fix bug\n");
 }
 
 #[test]
-fn changelog_fails_for_a_missing_version() {
-    let dir = tempfile::tempdir().unwrap();
+fn get_changelog_entry_reads_a_workspace_member_changelog() {
+    let dir = workspace_dir();
+    fs::write(dir.path().join("packages/a/CHANGELOG.md"), CHANGELOG).unwrap();
+    let output = changesette(dir.path(), &["get-changelog-entry", "pkg-a", "1.0.0"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "### Patch Changes\n\n- Fix bug\n");
+}
+
+#[test]
+fn get_changelog_entry_fails_for_a_missing_version() {
+    let dir = package_dir();
     fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
-    let output = changesette(dir.path(), &["changelog", "9.9.9"]);
+    let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist", "9.9.9"]);
     assert!(!output.status.success());
 }
 
 #[test]
-fn changelog_fails_without_a_changelog_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let output = changesette(dir.path(), &["changelog", "1.0.0"]);
+fn get_changelog_entry_fails_without_a_changelog_file() {
+    let dir = package_dir();
+    let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist", "1.0.0"]);
     assert!(!output.status.success());
     assert!(stderr(&output).contains("CHANGELOG.md not found"));
+}
+
+#[test]
+fn the_old_current_subcommand_is_rejected() {
+    let dir = package_dir();
+    let output = changesette(dir.path(), &["current"]);
+    assert!(!output.status.success());
+}
+
+#[test]
+fn the_old_changelog_subcommand_is_rejected() {
+    let dir = package_dir();
+    fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
+    let output = changesette(dir.path(), &["changelog", "1.0.0"]);
+    assert!(!output.status.success());
 }
 
 const ULID_A: &str = "changesette-01H455VB4PEX5VSKNK084SN02Q.md";
@@ -454,7 +526,13 @@ fn prints_help() {
     let output = changesette(dir.path(), &["--help"]);
     assert!(output.status.success());
     let out = stdout(&output);
-    for subcommand in ["init", "add", "version", "current", "changelog"] {
+    for subcommand in [
+        "init",
+        "add",
+        "version",
+        "get-version",
+        "get-changelog-entry",
+    ] {
         assert!(out.contains(subcommand), "{out}");
     }
 }

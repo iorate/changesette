@@ -7,6 +7,7 @@ mod changelog;
 mod changeset;
 mod commands;
 mod package_json;
+mod workspace;
 
 #[derive(Parser)]
 #[command(version, args_conflicts_with_subcommands = true)]
@@ -39,10 +40,15 @@ enum Command {
         #[arg(short = 'n', long)]
         dry_run: bool,
     },
-    /// Print the current version from package.json
-    Current,
-    /// Print a version section from CHANGELOG.md
-    Changelog {
+    /// Print a package's version from its package.json
+    GetVersion {
+        /// The name of the package
+        package: String,
+    },
+    /// Print a version section from a package's CHANGELOG.md
+    GetChangelogEntry {
+        /// The name of the package
+        package: String,
         /// The version whose section to print
         version: String,
     },
@@ -64,7 +70,9 @@ fn run() -> anyhow::Result<()> {
         Command::Init => commands::init::run(),
         Command::Add(AddArgs { bump, message }) => commands::add::run(bump, message),
         Command::Version { dry_run } => commands::version::run(dry_run),
-        Command::Current => commands::current::run(),
-        Command::Changelog { version } => commands::changelog::run(&version),
+        Command::GetVersion { package } => commands::get_version::run(&package),
+        Command::GetChangelogEntry { package, version } => {
+            commands::get_changelog_entry::run(&package, &version)
+        }
     }
 }

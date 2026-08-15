@@ -1,0 +1,5 @@
+---
+source: src/workspace.rs
+expression: "discover_err(\"bad-glob\")"
+---
+invalid workspace pattern "packages/[": error parsing glob 'packages/[': unclosed character class; missing ']'

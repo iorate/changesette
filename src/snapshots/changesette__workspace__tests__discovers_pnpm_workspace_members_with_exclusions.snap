@@ -1,0 +1,12 @@
+---
+source: src/workspace.rs
+expression: "discover_ok(\"pnpm\")"
+---
+Workspace {
+    members: [
+        Member {
+            name: "pkg-a",
+            dir: "tests/fixtures/workspace/pnpm/packages/a",
+        },
+    ],
+}

@@ -1,0 +1,16 @@
+---
+source: src/workspace.rs
+expression: "discover_ok(\"npm\")"
+---
+Workspace {
+    members: [
+        Member {
+            name: "alpha",
+            dir: "tests/fixtures/workspace/npm/packages/two",
+        },
+        Member {
+            name: "zeta",
+            dir: "tests/fixtures/workspace/npm/packages/one",
+        },
+    ],
+}

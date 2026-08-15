@@ -1,0 +1,5 @@
+---
+source: src/workspace.rs
+expression: "discover_err(\"pnpm-bad-packages\")"
+---
+tests/fixtures/workspace/pnpm-bad-packages/pnpm-workspace.yaml: "packages" must be a list of strings

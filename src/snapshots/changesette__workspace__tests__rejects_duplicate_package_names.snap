@@ -1,0 +1,5 @@
+---
+source: src/workspace.rs
+expression: "discover_err(\"duplicate-names\")"
+---
+duplicate package name `dup` declared in both tests/fixtures/workspace/duplicate-names/packages/a and tests/fixtures/workspace/duplicate-names/packages/b
