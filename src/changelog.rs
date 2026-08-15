@@ -6,11 +6,11 @@ use semver::Version;
 
 use crate::bump::Bump;
 
-/// Renders a `## <version>` section, grouping the entry bodies (changeset
+/// Renders a version's changelog entry, grouping the release lines (changeset
 /// summaries) under Major/Minor/Patch headings and omitting empty groups. The
-/// result has no surrounding newlines.
-pub(crate) fn render_section(version: &Version, entries: &[(Bump, &str)]) -> String {
-    let mut blocks = vec![format!("## {version}")];
+/// result has no `## <version>` heading and no surrounding newlines.
+pub(crate) fn render_entry(entries: &[(Bump, &str)]) -> String {
+    let mut blocks = Vec::new();
     for (bump, heading) in [
         (Bump::Major, "### Major Changes"),
         (Bump::Minor, "### Minor Changes"),
@@ -23,13 +23,23 @@ pub(crate) fn render_section(version: &Version, entries: &[(Bump, &str)]) -> Str
                 blocks.push(heading.to_owned());
                 has_heading = true;
             }
-            blocks.push(render_entry(body));
+            blocks.push(render_release_line(body));
         }
     }
     blocks.join("\n\n")
 }
 
-fn render_entry(body: &str) -> String {
+/// Renders a `## <version>` section from a `render_entry` result. The result
+/// has no surrounding newlines.
+pub(crate) fn render_section(version: &Version, entry: &str) -> String {
+    if entry.is_empty() {
+        format!("## {version}")
+    } else {
+        format!("## {version}\n\n{entry}")
+    }
+}
+
+fn render_release_line(body: &str) -> String {
     let mut text = String::from("- ");
     let mut lines = body.lines();
     text.push_str(lines.next().unwrap_or_default());
@@ -213,7 +223,7 @@ mod tests {
     use crate::bump::Bump;
 
     fn render(entries: &[(Bump, &str)]) -> String {
-        render_section(&"10.1.0".parse().unwrap(), entries)
+        render_section(&"10.1.0".parse().unwrap(), &render_entry(entries))
     }
 
     fn read_fixture(area: &str, case: &str) -> String {
@@ -229,7 +239,7 @@ mod tests {
     fn upsert(case: &str, version: &str) -> String {
         let section = render_section(
             &version.parse().unwrap(),
-            &[(Bump::Minor, "Add SERPINFO satellites support")],
+            &render_entry(&[(Bump::Minor, "Add SERPINFO satellites support")]),
         );
         upsert_section(
             &read_fixture("changelog-insert", case),

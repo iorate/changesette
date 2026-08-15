@@ -35,17 +35,17 @@ jobs:
         id: version
         run: |
           plan="$(cargo run --release -- version)"
-          next="$(jq -r '[.releases[] | select(.type != "none")][0].newVersion // empty' <<< "$plan")"
-          if [[ -n "$next" ]]; then
-            echo "title=Release v$next" >> "$GITHUB_OUTPUT"
-            cargo set-version "$next"
-            cargo update -w
+          if release="$(jq -e '[.releases[] | select(.type != "none")][0]' <<< "$plan")"; then
+            version="$(jq -r '.newVersion' <<< "$release")"
+            echo "title=Release v$version" >> "$GITHUB_OUTPUT"
             delim="$(openssl rand -hex 16)"
             {
-              echo "changelog<<$delim"
-              cargo run --release -- get-changelog-entry changesette "$next"
+              echo "body<<$delim"
+              jq -r '.changelogEntry' <<< "$release"
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
+            cargo set-version "$version"
+            cargo update -w
           else
             echo "title=Consume changesets" >> "$GITHUB_OUTPUT"
           fi
@@ -67,7 +67,7 @@ jobs:
           branch: changesette/release
           commit-message: ${{ steps.version.outputs.title }}
           title: ${{ steps.version.outputs.title }}
-          body: ${{ steps.version.outputs.changelog }}
+          body: ${{ steps.version.outputs.body }}
           delete-branch: true
           sign-commits: true
 

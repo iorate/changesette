@@ -1,7 +1,8 @@
 use serde::Serialize;
 
 /// The JSON document that `version` prints to stdout, mirroring the upstream
-/// `ReleasePlan` type (without `preState`). Serialized as a single line.
+/// `ReleasePlan` type (without `preState`, plus `changelogEntry` on each
+/// release). Serialized as a single line.
 #[derive(Serialize)]
 pub(crate) struct ReleasePlan {
     /// The consumed changesets, in file-name order.
@@ -48,4 +49,8 @@ pub(crate) struct Release {
     /// The ids of the changesets naming this package (`none` entries
     /// included), in file-name order.
     pub(crate) changesets: Vec<String>,
+    /// The changelog entry written for this release: the body of the new
+    /// `## <new_version>` section, without the heading. Absent for `none`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) changelog_entry: Option<String>,
 }

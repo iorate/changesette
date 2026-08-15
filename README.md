@@ -78,13 +78,13 @@ jobs:
       - id: version
         run: |
           plan="$(changesette version)"
-          next="$(jq -r '[.releases[] | select(.type != "none")][0].newVersion // empty' <<< "$plan")"
-          if [[ -n "$next" ]]; then
-            echo "title=Release v$next" >> "$GITHUB_OUTPUT"
+          if release="$(jq -e '[.releases[] | select(.type != "none")][0]' <<< "$plan")"; then
+            version="$(jq -r '.newVersion' <<< "$release")"
+            echo "title=Release v$version" >> "$GITHUB_OUTPUT"
             delim="$(openssl rand -hex 16)"
             {
-              echo "changelog<<$delim"
-              changesette get-changelog-entry my-package "$next"
+              echo "body<<$delim"
+              jq -r '.changelogEntry' <<< "$release"
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
             npm install --package-lock-only # if you use npm
@@ -98,7 +98,7 @@ jobs:
           branch: changesette/release
           commit-message: ${{ steps.version.outputs.title }}
           title: ${{ steps.version.outputs.title }}
-          body: ${{ steps.version.outputs.changelog }}
+          body: ${{ steps.version.outputs.body }}
           delete-branch: true
 
       - if: steps.pr.outputs.pull-request-number == ''
@@ -128,11 +128,11 @@ Creates a changeset file in `.changeset/` and prints its path (relative to the w
 Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. Prints the release plan to stdout as single-line JSON, mirroring the changesets `ReleasePlan` type:
 
 ```json
-{"changesets":[{"id":"brave-lions-jump","summary":"Add feature","releases":[{"name":"my-package","type":"minor"}]}],"releases":[{"name":"my-package","type":"minor","oldVersion":"1.2.3","newVersion":"1.3.0","changesets":["brave-lions-jump"]}]}
+{"changesets":[{"id":"brave-lions-jump","summary":"Add feature","releases":[{"name":"my-package","type":"minor"}]}],"releases":[{"name":"my-package","type":"minor","oldVersion":"1.2.3","newVersion":"1.3.0","changesets":["brave-lions-jump"],"changelogEntry":"### Minor Changes\n\n- Add feature"}]}
 ```
 
-- With pending bumps, `releases` lists every named package with its widest bump and new version.
-- Packages named only with the `none` type appear with `"type": "none"` and an unchanged version; their files are still deleted, as are empty changesets.
+- With pending bumps, `releases` lists every named package with its widest bump and new version. `changelogEntry` is the body of the package's new changelog section, without the `## <version>` heading.
+- Packages named only with the `none` type appear with `"type": "none"`, an unchanged version, and no `changelogEntry`; their files are still deleted, as are empty changesets.
 - With zero changesets, prints `{"changesets":[],"releases":[]}` and changes nothing.
 
 `--dry-run` (short form `-n`) prints exactly the same JSON without changing any files. Lockfiles are not updated; if you use npm, run `npm install --package-lock-only` afterwards.

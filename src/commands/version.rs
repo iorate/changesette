@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 
 use crate::{
     bump::{self, Bump},
-    changelog::{self, render_section},
+    changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
     package_json::PackageJson,
     release_plan::{ChangesetEntry, Release, ReleasePlan, ReleaseRef},
@@ -14,7 +14,8 @@ use crate::{
 /// Consumes every changeset in the workspace: bumps each named package's
 /// package.json, inserts the new section into its CHANGELOG.md, deletes the
 /// consumed files (`none`-only and empty changesets included), and prints the
-/// release plan to stdout as single-line JSON. Packages named only with
+/// release plan to stdout as single-line JSON, each bumped release carrying
+/// its new changelog entry. Packages named only with
 /// `none` keep their version and changelog. With zero changesets, prints an
 /// empty plan and touches nothing. With `dry_run`, prints the same JSON but
 /// touches no file.
@@ -43,7 +44,7 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
             .map(id)
             .collect();
 
-        let new_version = match max_bump {
+        let (new_version, changelog_entry) = match max_bump {
             Some(max_bump) => {
                 let next = bump::next_version(&old_version, max_bump);
                 let entries: Vec<(Bump, &str)> = changes
@@ -57,7 +58,8 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
                             .map(|bump| (bump, change.summary.as_str()))
                     })
                     .collect();
-                let section = render_section(&next, &entries);
+                let entry = render_entry(&entries);
+                let section = render_section(&next, &entry);
 
                 package_json.set_version(&next)?;
                 let changelog_path = member.dir().join("CHANGELOG.md");
@@ -69,9 +71,9 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
                 let new_changelog_text =
                     changelog::upsert_section(&changelog_text, name, &next.to_string(), &section);
                 writes.push((package_json, changelog_path, new_changelog_text));
-                next
+                (next, Some(entry))
             }
-            None => old_version.clone(),
+            None => (old_version.clone(), None),
         };
         releases.push(Release {
             name: name.to_owned(),
@@ -79,6 +81,7 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
             old_version: old_version.to_string(),
             new_version: new_version.to_string(),
             changesets: ids,
+            changelog_entry,
         });
     }
 

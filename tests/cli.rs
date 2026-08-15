@@ -605,7 +605,7 @@ fn version_bumps_and_writes_the_changelog() {
     assert_eq!(
         stdout(&output),
         format!(
-            "{{\"changesets\":[{{\"id\":\"{ID_B}\",\"summary\":\"Add feature\",\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"minor\"}}]}}],\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"minor\",\"oldVersion\":\"1.2.3\",\"newVersion\":\"1.3.0\",\"changesets\":[\"{ID_B}\"]}}]}}\n"
+            "{{\"changesets\":[{{\"id\":\"{ID_B}\",\"summary\":\"Add feature\",\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"minor\"}}]}}],\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"minor\",\"oldVersion\":\"1.2.3\",\"newVersion\":\"1.3.0\",\"changesets\":[\"{ID_B}\"],\"changelogEntry\":\"### Minor Changes\\n\\n- Add feature\"}}]}}\n"
         )
     );
     assert_eq!(
@@ -658,7 +658,7 @@ fn version_uses_the_max_bump_across_changesets() {
     assert_eq!(
         stdout(&output),
         format!(
-            "{{\"changesets\":[{{\"id\":\"{ID_A}\",\"summary\":\"Rework everything\",\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"major\"}}]}},{{\"id\":\"{ID_B}\",\"summary\":\"Fix bug\",\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"patch\"}}]}}],\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"major\",\"oldVersion\":\"1.2.3\",\"newVersion\":\"2.0.0\",\"changesets\":[\"{ID_A}\",\"{ID_B}\"]}}]}}\n"
+            "{{\"changesets\":[{{\"id\":\"{ID_A}\",\"summary\":\"Rework everything\",\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"major\"}}]}},{{\"id\":\"{ID_B}\",\"summary\":\"Fix bug\",\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"patch\"}}]}}],\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"major\",\"oldVersion\":\"1.2.3\",\"newVersion\":\"2.0.0\",\"changesets\":[\"{ID_A}\",\"{ID_B}\"],\"changelogEntry\":\"### Major Changes\\n\\n- Rework everything\\n\\n### Patch Changes\\n\\n- Fix bug\"}}]}}\n"
         )
     );
     let changelog = fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
@@ -690,7 +690,7 @@ fn version_bumps_only_the_named_workspace_members() {
     assert_eq!(
         stdout(&output),
         format!(
-            "{{\"changesets\":[{{\"id\":\"{ID_B}\",\"summary\":\"Improve things\",\"releases\":[{{\"name\":\"pkg-b\",\"type\":\"patch\"}},{{\"name\":\"pkg-a\",\"type\":\"minor\"}}]}}],\"releases\":[{{\"name\":\"pkg-a\",\"type\":\"minor\",\"oldVersion\":\"3.1.4\",\"newVersion\":\"3.2.0\",\"changesets\":[\"{ID_B}\"]}},{{\"name\":\"pkg-b\",\"type\":\"patch\",\"oldVersion\":\"2.0.0\",\"newVersion\":\"2.0.1\",\"changesets\":[\"{ID_B}\"]}}]}}\n"
+            "{{\"changesets\":[{{\"id\":\"{ID_B}\",\"summary\":\"Improve things\",\"releases\":[{{\"name\":\"pkg-b\",\"type\":\"patch\"}},{{\"name\":\"pkg-a\",\"type\":\"minor\"}}]}}],\"releases\":[{{\"name\":\"pkg-a\",\"type\":\"minor\",\"oldVersion\":\"3.1.4\",\"newVersion\":\"3.2.0\",\"changesets\":[\"{ID_B}\"],\"changelogEntry\":\"### Minor Changes\\n\\n- Improve things\"}},{{\"name\":\"pkg-b\",\"type\":\"patch\",\"oldVersion\":\"2.0.0\",\"newVersion\":\"2.0.1\",\"changesets\":[\"{ID_B}\"],\"changelogEntry\":\"### Patch Changes\\n\\n- Improve things\"}}]}}\n"
         )
     );
     assert_eq!(
