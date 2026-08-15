@@ -191,7 +191,7 @@ Creates a changeset file in `.changeset/` and prints its path (relative to the w
 Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. Prints the release plan to stdout as single-line JSON, mirroring the changesets `ReleasePlan` type:
 
 ```json
-{"changesets":[{"id":"brave-lions-jump","summary":"Add feature","releases":[{"name":"my-package","type":"minor"}]}],"releases":[{"name":"my-package","type":"minor","oldVersion":"1.2.3","newVersion":"1.3.0","changesets":["brave-lions-jump"],"changelogEntry":"### Minor Changes\n\n- Add feature"}]}
+{"changesets":[{"id":"changesette-01M02G4ZT0Q3D9WVK6XJ5R8YBN","summary":"Add feature","releases":[{"name":"my-package","type":"minor"}]}],"releases":[{"name":"my-package","type":"minor","oldVersion":"1.2.3","newVersion":"1.3.0","changesets":["changesette-01M02G4ZT0Q3D9WVK6XJ5R8YBN"],"changelogEntry":"### Minor Changes\n\n- Add feature"}]}
 ```
 
 - With pending bumps, `releases` lists every named package with its widest bump and new version. `changelogEntry` is the body of the package's new changelog section, without the `## <version>` heading.
