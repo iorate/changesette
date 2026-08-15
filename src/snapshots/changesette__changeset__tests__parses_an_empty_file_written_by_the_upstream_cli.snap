@@ -1,0 +1,11 @@
+---
+source: src/changeset.rs
+expression: "load_ok(\"upstream-empty\")"
+---
+[
+    LoadedChange {
+        file_name: "tricky-roses-poke.md",
+        releases: [],
+        summary: "",
+    },
+]

@@ -1,6 +1,6 @@
-use std::{fs, io, path::Path, sync::LazyLock};
+use std::{collections::BTreeMap, fs, io, path::Path, sync::LazyLock};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, bail};
 use regex::Regex;
 use saphyr::{LoadableYamlNode, Yaml};
 
@@ -18,18 +18,22 @@ static FRONTMATTER: LazyLock<Regex> =
 pub(crate) struct LoadedChange {
     /// The file name within the changeset directory, e.g. `brave-lions-jump.md`.
     pub(crate) file_name: String,
-    /// The widest bump type declared in the frontmatter.
-    pub(crate) bump: Bump,
-    /// The summary text below the frontmatter, trimmed.
+    /// The packages named in the frontmatter, in frontmatter order, each with
+    /// its requested bump; `None` stands for the `none` type (no bump). Empty
+    /// for an empty changeset.
+    pub(crate) releases: Vec<(String, Option<Bump>)>,
+    /// The summary text below the frontmatter, trimmed. May be empty, as in
+    /// the upstream parser, which does not validate the summary.
     pub(crate) summary: String,
 }
 
-/// Loads every changeset in `changeset_dir` in file-name order, verifying
-/// that each targets `package_name`. Entries are selected by name alone, as
-/// in the upstream `@changesets/read`: dotfiles, non-`.md` names, README.md,
-/// and agent instruction files are skipped, symlinks are followed, and a
-/// directory with an adopted name is a read error.
-pub(crate) fn load(changeset_dir: &Path, package_name: &str) -> Result<Vec<LoadedChange>> {
+/// Loads every changeset in `changeset_dir` in file-name order. Package names
+/// are not validated here; callers match them against the workspace members.
+/// Entries are selected by name alone, as in the upstream `@changesets/read`:
+/// dotfiles, non-`.md` names, README.md, and agent instruction files are
+/// skipped, symlinks are followed, and a directory with an adopted name is a
+/// read error.
+pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
     let entries = match fs::read_dir(changeset_dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == io::ErrorKind::NotFound => bail!(
@@ -58,16 +62,25 @@ pub(crate) fn load(changeset_dir: &Path, package_name: &str) -> Result<Vec<Loade
 
     file_names
         .iter()
-        .map(|file_name| load_one(changeset_dir, file_name, package_name))
+        .map(|file_name| load_one(changeset_dir, file_name))
         .collect()
 }
 
-/// Returns the widest bump among `changes`, or `None` if there are none.
-pub(crate) fn max_bump(changes: &[LoadedChange]) -> Option<Bump> {
-    changes.iter().map(|change| change.bump).max()
+/// Groups `changes` by package name: each named package maps to the widest
+/// bump requested for it, or `None` when it is only ever named with the
+/// `none` type. Iteration order is the package name order.
+pub(crate) fn max_bumps(changes: &[LoadedChange]) -> BTreeMap<&str, Option<Bump>> {
+    let mut bumps = BTreeMap::new();
+    for change in changes {
+        for (name, bump) in &change.releases {
+            let entry = bumps.entry(name.as_str()).or_insert(None);
+            *entry = (*entry).max(*bump);
+        }
+    }
+    bumps
 }
 
-fn load_one(changeset_dir: &Path, file_name: &str, package_name: &str) -> Result<LoadedChange> {
+fn load_one(changeset_dir: &Path, file_name: &str) -> Result<LoadedChange> {
     let file_path = changeset_dir.join(file_name);
 
     let content =
@@ -89,7 +102,7 @@ fn load_one(changeset_dir: &Path, file_name: &str, package_name: &str) -> Result
         ),
     };
 
-    let mut bump = None;
+    let mut releases = Vec::new();
     match docs.into_iter().next() {
         None => {}
         Some(doc) if doc.is_null() => {}
@@ -101,25 +114,21 @@ fn load_one(changeset_dir: &Path, file_name: &str, package_name: &str) -> Result
                         file_path.display()
                     )
                 };
-                ensure!(
-                    name == package_name,
-                    "{}: changeset targets package `{name}`, but the manifest declares `{package_name}`",
-                    file_path.display()
-                );
-                let entry_bump = match value.as_str() {
-                    Some("major") => Bump::Major,
-                    Some("minor") => Bump::Minor,
-                    Some("patch") => Bump::Patch,
+                let bump = match value.as_str() {
+                    Some("major") => Some(Bump::Major),
+                    Some("minor") => Some(Bump::Minor),
+                    Some("patch") => Some(Bump::Patch),
+                    Some("none") => None,
                     Some(other) => bail!(
-                        "{}: unknown bump type `{other}`; expected major, minor, or patch",
+                        "{}: unknown bump type {other:?}; expected major, minor, patch, or none",
                         file_path.display()
                     ),
                     None => bail!(
-                        "{}: invalid bump type; expected major, minor, or patch",
+                        "{}: invalid bump type; expected major, minor, patch, or none",
                         file_path.display()
                     ),
                 };
-                bump = bump.max(Some(entry_bump));
+                releases.push((name.to_owned(), bump));
             }
         }
         Some(_) => bail!(
@@ -127,22 +136,10 @@ fn load_one(changeset_dir: &Path, file_name: &str, package_name: &str) -> Result
             file_path.display()
         ),
     }
-    let Some(bump) = bump else {
-        bail!(
-            "{}: empty changeset (no bump specified)",
-            file_path.display()
-        )
-    };
-
-    ensure!(
-        !summary.is_empty(),
-        "{}: empty changeset (the summary is empty)",
-        file_path.display()
-    );
 
     Ok(LoadedChange {
         file_name: file_name.to_owned(),
-        bump,
+        releases,
         summary: summary.to_owned(),
     })
 }
@@ -156,11 +153,11 @@ mod tests {
     }
 
     fn load_ok(case: &str) -> Vec<LoadedChange> {
-        load(&fixture(case), "ublacklist").unwrap()
+        load(&fixture(case)).unwrap()
     }
 
     fn load_err(case: &str) -> String {
-        format!("{:#}", load(&fixture(case), "ublacklist").unwrap_err())
+        format!("{:#}", load(&fixture(case)).unwrap_err())
     }
 
     #[test]
@@ -176,6 +173,31 @@ mod tests {
     #[test]
     fn parses_a_file_written_by_the_upstream_cli() {
         insta::assert_debug_snapshot!(load_ok("upstream-generated"));
+    }
+
+    #[test]
+    fn parses_a_multi_package_file_written_by_the_upstream_cli() {
+        insta::assert_debug_snapshot!(load_ok("upstream-multi-package"));
+    }
+
+    #[test]
+    fn parses_a_none_file_written_by_the_upstream_cli() {
+        insta::assert_debug_snapshot!(load_ok("upstream-none"));
+    }
+
+    #[test]
+    fn parses_an_empty_file_written_by_the_upstream_cli() {
+        insta::assert_debug_snapshot!(load_ok("upstream-empty"));
+    }
+
+    #[test]
+    fn parses_a_two_package_changeset() {
+        insta::assert_debug_snapshot!(load_ok("two-packages"));
+    }
+
+    #[test]
+    fn parses_an_empty_frontmatter_with_a_summary() {
+        insta::assert_debug_snapshot!(load_ok("empty-with-summary"));
     }
 
     #[test]
@@ -209,33 +231,60 @@ mod tests {
     }
 
     #[test]
-    fn max_bump_is_none_without_changesets() {
-        assert_eq!(max_bump(&[]), None);
+    fn max_bumps_is_empty_without_changesets() {
+        assert!(max_bumps(&[]).is_empty());
     }
 
     #[test]
-    fn max_bump_picks_the_highest() {
-        assert_eq!(max_bump(&load_ok("ordering")), Some(Bump::Major));
+    fn max_bumps_picks_the_highest_per_package() {
+        let changes = [
+            LoadedChange {
+                file_name: "a.md".into(),
+                releases: vec![
+                    ("one".into(), Some(Bump::Patch)),
+                    ("two".into(), Some(Bump::Major)),
+                ],
+                summary: "a".into(),
+            },
+            LoadedChange {
+                file_name: "b.md".into(),
+                releases: vec![("one".into(), Some(Bump::Minor)), ("three".into(), None)],
+                summary: "b".into(),
+            },
+        ];
+        assert_eq!(
+            max_bumps(&changes).into_iter().collect::<Vec<_>>(),
+            [
+                ("one", Some(Bump::Minor)),
+                ("three", None),
+                ("two", Some(Bump::Major)),
+            ]
+        );
     }
 
     #[test]
-    fn rejects_a_changeset_that_also_targets_another_package() {
-        insta::assert_snapshot!(load_err("two-packages"));
+    fn max_bumps_keeps_none_below_any_bump() {
+        let changes = [
+            LoadedChange {
+                file_name: "a.md".into(),
+                releases: vec![("one".into(), None)],
+                summary: "a".into(),
+            },
+            LoadedChange {
+                file_name: "b.md".into(),
+                releases: vec![("one".into(), Some(Bump::Patch))],
+                summary: "b".into(),
+            },
+        ];
+        assert_eq!(
+            max_bumps(&changes).into_iter().collect::<Vec<_>>(),
+            [("one", Some(Bump::Patch))]
+        );
     }
 
     #[test]
-    fn rejects_a_mismatched_package_name() {
-        insta::assert_snapshot!(load_err("name-mismatch"));
-    }
-
-    #[test]
-    fn rejects_a_frontmatter_only_file() {
-        insta::assert_snapshot!(load_err("frontmatter-only"));
-    }
-
-    #[test]
-    fn rejects_an_empty_frontmatter() {
-        insta::assert_snapshot!(load_err("no-bump"));
+    fn parses_a_frontmatter_only_file_with_an_empty_summary() {
+        insta::assert_debug_snapshot!(load_ok("frontmatter-only"));
     }
 
     #[test]

@@ -2,4 +2,4 @@
 source: src/package_json.rs
 expression: "load_err(\"version-not-string\")"
 ---
-package.json: top-level "version" must be a string
+tests/fixtures/package-json/version-not-string/package.json: top-level "version" must be a string

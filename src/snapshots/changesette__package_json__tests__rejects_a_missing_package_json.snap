@@ -2,4 +2,4 @@
 source: src/package_json.rs
 expression: "load_err(\"no-package-json\")"
 ---
-no package.json found in the current directory
+tests/fixtures/package-json/no-package-json/package.json not found

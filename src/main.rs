@@ -6,7 +6,10 @@ mod bump;
 mod changelog;
 mod changeset;
 mod commands;
+mod output;
 mod package_json;
+mod release_plan;
+mod workspace;
 
 #[derive(Parser)]
 #[command(version, args_conflicts_with_subcommands = true)]
@@ -19,12 +22,21 @@ struct Cli {
 
 #[derive(clap::Args)]
 struct AddArgs {
-    /// The bump type to record in the changeset
-    #[arg(short, long)]
-    bump: Option<bump::Bump>,
+    /// The packages to record a major bump for (comma-separated, repeatable)
+    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
+    major: Vec<String>,
+    /// The packages to record a minor bump for (comma-separated, repeatable)
+    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
+    minor: Vec<String>,
+    /// The packages to record a patch bump for (comma-separated, repeatable)
+    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
+    patch: Vec<String>,
     /// The summary text of the change
     #[arg(short, long)]
     message: Option<String>,
+    /// Create a changeset that names no packages
+    #[arg(long, conflicts_with_all = ["major", "minor", "patch"])]
+    empty: bool,
 }
 
 #[derive(clap::Subcommand)]
@@ -33,18 +45,20 @@ enum Command {
     Init,
     /// Create a changeset (the default command)
     Add(AddArgs),
-    /// Consume changesets: bump the package version and update CHANGELOG.md
+    /// Consume changesets: bump each named package's version and update its CHANGELOG.md
     Version {
-        /// Print the plan to stderr instead of modifying any file
+        /// Print the plan without modifying any file
         #[arg(short = 'n', long)]
         dry_run: bool,
     },
-    /// Print the current version from package.json
-    Current,
-    /// Print a version section from CHANGELOG.md
-    Changelog {
+    /// Print the workspace packages as JSON
+    GetPackages,
+    /// Print a version section from a package's CHANGELOG.md
+    GetChangelogEntry {
+        /// The name of the package
+        package: String,
         /// The version whose section to print
-        version: String,
+        version: semver::Version,
     },
 }
 
@@ -62,9 +76,17 @@ fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command.unwrap_or(Command::Add(cli.add)) {
         Command::Init => commands::init::run(),
-        Command::Add(AddArgs { bump, message }) => commands::add::run(bump, message),
+        Command::Add(AddArgs {
+            major,
+            minor,
+            patch,
+            message,
+            empty,
+        }) => commands::add::run(major, minor, patch, message, empty),
         Command::Version { dry_run } => commands::version::run(dry_run),
-        Command::Current => commands::current::run(),
-        Command::Changelog { version } => commands::changelog::run(&version),
+        Command::GetPackages => commands::get_packages::run(),
+        Command::GetChangelogEntry { package, version } => {
+            commands::get_changelog_entry::run(&package, &version)
+        }
     }
 }

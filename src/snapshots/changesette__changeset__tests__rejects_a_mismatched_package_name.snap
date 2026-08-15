@@ -1,5 +1,0 @@
----
-source: src/changeset.rs
-expression: "load_err(\"name-mismatch\")"
----
-tests/fixtures/changeset/name-mismatch/changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md: changeset targets package `ublacklist-docs`, but the manifest declares `ublacklist`

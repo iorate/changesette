@@ -5,7 +5,14 @@ expression: "load_ok(\"upstream-generated\")"
 [
     LoadedChange {
         file_name: "olive-pots-repeat.md",
-        bump: Minor,
+        releases: [
+            (
+                "ublacklist",
+                Some(
+                    Minor,
+                ),
+            ),
+        ],
         summary: "Add SERPINFO satellites support",
     },
 ]

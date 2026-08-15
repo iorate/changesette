@@ -27,11 +27,12 @@ impl PackageJson {
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                bail!("no package.json found in the current directory")
+                bail!("{} not found", path.display())
             }
             Err(err) => return Err(err).context(path.display().to_string()),
         };
-        Self::parse(path, &text).context("package.json")
+        let context = path.display().to_string();
+        Self::parse(path, &text).context(context)
     }
 
     fn parse(path: PathBuf, text: &str) -> Result<Self> {

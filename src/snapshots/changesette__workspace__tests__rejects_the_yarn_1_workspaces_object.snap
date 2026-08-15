@@ -1,0 +1,5 @@
+---
+source: src/workspace.rs
+expression: "discover_err(\"yarn1-object\")"
+---
+tests/fixtures/workspace/yarn1-object/package.json: "workspaces" must be an array of strings (the Yarn 1 object form is not supported)

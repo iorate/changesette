@@ -1,0 +1,18 @@
+---
+source: src/changeset.rs
+expression: "load_ok(\"frontmatter-only\")"
+---
+[
+    LoadedChange {
+        file_name: "changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md",
+        releases: [
+            (
+                "ublacklist",
+                Some(
+                    Minor,
+                ),
+            ),
+        ],
+        summary: "",
+    },
+]
