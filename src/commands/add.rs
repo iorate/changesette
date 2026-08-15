@@ -2,7 +2,6 @@ use std::{
     collections::BTreeMap,
     env, fs,
     io::{self, IsTerminal, Write},
-    path::PathBuf,
 };
 
 use anyhow::{Context, Result, bail, ensure};
@@ -17,8 +16,8 @@ use crate::{
 };
 
 /// Creates a changeset file under the workspace root's `.changeset/` and
-/// prints its path (relative to the working directory) to stdout; the
-/// directory must already exist (see `init`). With `empty`, the changeset
+/// reports it to stdout; the directory must already exist (see `init`).
+/// With `empty`, the changeset
 /// names no packages and nothing is prompted. Otherwise the releases come
 /// from the bump flags when any is given, and the summary from `message`;
 /// inputs missing from the flags are prompted for interactively when both
@@ -100,17 +99,10 @@ pub(crate) fn run(
         eprintln!("{confirmation}");
     }
 
-    let mut display_path = PathBuf::new();
-    if let Ok(suffix) = cwd.strip_prefix(workspace.root()) {
-        for _ in suffix.components() {
-            display_path.push("..");
-        }
-        display_path.push(".changeset");
-        display_path.push(&file_name);
-    } else {
-        display_path = path;
-    }
-    output::print_line(&display_path.display().to_string())?;
+    output::print_line(&format!(
+        "Added {}",
+        workspace.display_path(&cwd, &path).display()
+    ))?;
     Ok(())
 }
 

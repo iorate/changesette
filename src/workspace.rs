@@ -111,6 +111,23 @@ impl Workspace {
             .join(", ");
         bail!("package `{name}` not found; known packages: {known}")
     }
+
+    /// Renders `path` relative to `cwd` for display, climbing from `cwd` to
+    /// the workspace root with `..` components; returns `path` unchanged when
+    /// either path is not under the root.
+    pub(crate) fn display_path(&self, cwd: &Path, path: &Path) -> PathBuf {
+        match (cwd.strip_prefix(&self.root), path.strip_prefix(&self.root)) {
+            (Ok(cwd_rel), Ok(path_rel)) => {
+                let mut display = PathBuf::new();
+                for _ in cwd_rel.components() {
+                    display.push("..");
+                }
+                display.push(path_rel);
+                display
+            }
+            _ => path.to_path_buf(),
+        }
+    }
 }
 
 impl Member {
