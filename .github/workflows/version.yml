@@ -36,12 +36,12 @@ jobs:
         run: |
           plan="$(cargo run --release -- version)"
           if release="$(jq -e '[.releases[] | select(.type != "none")][0]' <<< "$plan")"; then
-            version="$(jq -r '.newVersion' <<< "$release")"
+            version="$(jq -re '.newVersion' <<< "$release")"
             echo "title=Release v$version" >> "$GITHUB_OUTPUT"
             delim="$(openssl rand -hex 16)"
             {
               echo "body<<$delim"
-              jq -r '.changelogEntry' <<< "$release"
+              jq -re '.changelogEntry' <<< "$release"
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
             cargo set-version "$version"
@@ -75,7 +75,7 @@ jobs:
         id: release
         if: steps.pr.outputs.pull-request-number == ''
         run: |
-          v="$(jq -r .version package.json)"
+          v="$(jq -re .version package.json)"
           if [[ -z "$(git ls-remote origin "refs/tags/changesette-v$v")" ]]; then
             echo "version=$v" >> "$GITHUB_OUTPUT"
           fi

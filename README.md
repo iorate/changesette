@@ -81,12 +81,12 @@ jobs:
         run: |
           plan="$(changesette version)"
           if release="$(jq -e '[.releases[] | select(.type != "none")][0]' <<< "$plan")"; then
-            version="$(jq -r '.newVersion' <<< "$release")"
+            version="$(jq -re '.newVersion' <<< "$release")"
             echo "title=Release v$version" >> "$GITHUB_OUTPUT"
             delim="$(openssl rand -hex 16)"
             {
               echo "body<<$delim"
-              jq -r '.changelogEntry' <<< "$release"
+              jq -re '.changelogEntry' <<< "$release"
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
             npm install --package-lock-only # if you use npm
@@ -105,7 +105,7 @@ jobs:
 
       - if: steps.pr.outputs.pull-request-number == ''
         run: |
-          version="$(jq -r .version package.json)"
+          version="$(jq -re .version package.json)"
           if ! gh release view "v$version" > /dev/null 2>&1; then
             notes="$(changesette get-changelog-entry my-package "$version")"
             gh release create "v$version" \
