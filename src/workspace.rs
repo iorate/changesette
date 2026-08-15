@@ -16,6 +16,11 @@ pub(crate) struct Member {
 }
 
 impl Member {
+    /// The package name declared in the member's `package.json`.
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
     /// The directory holding the member's `package.json`.
     pub(crate) fn dir(&self) -> &Path {
         &self.dir
@@ -94,6 +99,12 @@ impl Workspace {
     /// The workspace root directory, holding the `.changeset` directory.
     pub(crate) fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// The members in package name order. Empty only for a workspace whose
+    /// globs match nothing.
+    pub(crate) fn members(&self) -> &[Member] {
+        &self.members
     }
 
     /// Resolves the member declaring the given package name, erroring with
