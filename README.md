@@ -210,7 +210,11 @@ Creates a changeset file in `.changeset/`. `--empty` creates a changeset that na
 
 ### `changesette version [--ignore <pkgs>] [--output <file>]`
 
-Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. `--output` (short form `-o`) suppresses stdout and writes the release plan to the given file as pretty-printed JSON, mirroring the changesets `ReleasePlan` type:
+Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. Each package receives the widest bump across the changesets naming it. Packages named only with the `none` type keep their version and changelog, but their changesets are still deleted, as are empty changesets. With zero changesets, nothing changes. Lockfiles are not updated; if you use npm, run `npm install --package-lock-only` afterwards.
+
+`--ignore` takes a comma-separated list of package names and may be repeated. Each name must be a workspace member's package name. Changesets naming an ignored package are skipped: they are excluded from the release plan and left in place for a later run. A changeset naming both an ignored and a not-ignored package is an error.
+
+`--output` (short form `-o`) suppresses stdout and writes the release plan to the given file as pretty-printed JSON, mirroring the changesets `ReleasePlan` type (an empty plan when there are zero changesets):
 
 ```json
 {
@@ -241,13 +245,7 @@ Applies all pending changesets: bumps each named package's `package.json`, inser
 }
 ```
 
-- With pending bumps, `releases` lists every named package with its widest bump and new version. `changelogEntry` is the body of the package's new changelog section, without the `## <version>` heading.
-- Packages named only with the `none` type appear with `"type": "none"`, an unchanged version, and no `changelogEntry`; their files are still deleted, as are empty changesets.
-- With zero changesets, changes nothing; with `--output` it writes an empty plan.
-
-`--ignore` takes a comma-separated list of package names and may be repeated. Each name must be a workspace member's package name. Changesets naming an ignored package are skipped: they are excluded from the release plan and left in place for a later run. A changeset naming both an ignored and a not-ignored package is an error.
-
-Lockfiles are not updated; if you use npm, run `npm install --package-lock-only` afterwards.
+`releases` lists every named package. `changelogEntry` is the body of the package's new changelog section, without the `## <version>` heading; a `"none"`-type release has an unchanged version and no `changelogEntry`.
 
 ### `changesette status [--verbose] [--output <file>]`
 
