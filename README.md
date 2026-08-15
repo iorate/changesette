@@ -204,9 +204,9 @@ jobs:
 
 Creates the `.changeset/` directory with a README.md. Does nothing if the directory already exists.
 
-### `changesette [add] [--major <pkgs>] [--minor <pkgs>] [--patch <pkgs>] [--empty] [--message <text>]`
+### `changesette [add] [--empty] [--message <text>] [--major <pkgs>] [--minor <pkgs>] [--patch <pkgs>]`
 
-Creates a changeset file in `.changeset/`. `--major`, `--minor`, and `--patch` each take a comma-separated list of package names and may be repeated; `--empty` creates a changeset that names no packages and conflicts with the bump flags; `--message` (short form `-m`) sets the summary. When run in a terminal, missing inputs are prompted for interactively: the affected packages and their bump types when no bump flag is given, and the summary when `--message` is not given (submitting an empty summary opens your editor for a multi-line one).
+Creates a changeset file in `.changeset/`. `--empty` creates a changeset that names no packages and conflicts with the bump flags; `--message` (short form `-m`) sets the summary; `--major`, `--minor`, and `--patch` each take a comma-separated list of package names and may be repeated. When run in a terminal, missing inputs are prompted for interactively: the affected packages and their bump types when no bump flag is given, and the summary when `--message` is not given (submitting an empty summary opens your editor for a multi-line one).
 
 ### `changesette version [--ignore <pkgs>] [--output <file>]`
 
