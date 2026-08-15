@@ -48,7 +48,7 @@ cargo install changesette
 
 ## Example workflows
 
-### Single package
+### Single package (npm)
 
 On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the package to the npm registry and creates a GitHub Release (and its tag) with the changelog section as the notes. A version whose section is missing from the changelog (for example one released before adopting changesette) gets no release. Replace `my-package` with the `name` declared in your `package.json`.
 
@@ -90,7 +90,7 @@ jobs:
               jq -re '.changelogEntry' <<< "$release"
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
-            npm install --package-lock-only # if you use npm
+            npm install --package-lock-only
           else
             echo "title=Consume changesets" >> "$GITHUB_OUTPUT"
           fi
@@ -121,7 +121,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 ```
 
-### Workspace
+### Workspace (pnpm)
 
 On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the bumped packages to the npm registry with pnpm and creates a GitHub Release (and its tag, `<name>@<version>`) per package with the changelog section as the notes. `pnpm publish -r` publishes every workspace package whose version is not on the registry yet and skips the rest, so no per-package bookkeeping is needed; insert a build step before it if your packages need one. A package whose changelog has no section for its current version (for example a private package never named in a changeset) gets no release. With npm instead of pnpm, there is no equivalent of `pnpm publish -r`; iterate over `changesette get-packages` and publish each package whose version is not on the registry yet.
 
