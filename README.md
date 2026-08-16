@@ -70,8 +70,8 @@ jobs:
 
     permissions:
       contents: write
-      id-token: write
       pull-requests: write
+      id-token: write # npm trusted publishing (OIDC)
 
     steps:
       - uses: actions/checkout@v7
@@ -143,8 +143,8 @@ jobs:
 
     permissions:
       contents: write
-      id-token: write
       pull-requests: write
+      id-token: write # npm trusted publishing (OIDC)
 
     steps:
       - uses: actions/checkout@v7
