@@ -6,7 +6,9 @@
 
 A version and changelog manager using the same changeset file format as [changesets](https://github.com/changesets/changesets) and shipped as a single dependency-free Rust binary. The name is changeset + the diminutive suffix -ette (as in diskette).
 
-`changesette` reads changeset files, bumps the version in each named package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / pnpm workspaces. It never touches lockfiles; regenerating a lockfile such as `package-lock.json` is your package manager's job. `changesette` performs no git operations and no network access; commits, pull requests, tags, and releases belong to your workflows.
+`changesette` reads changeset files, bumps the version in each named package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / yarn / pnpm workspaces. It bumps only the packages named in changesets and never touches lockfiles; keeping internal dependency ranges valid and regenerating lockfiles such as `package-lock.json` belong to the package-manager layer (see [Workspaces](#workspaces)).
+
+`changesette` performs no git operations and no network access; commits, pull requests, tags, and releases belong to your workflows. The CLI feeds those workflows structured data: a machine-readable release plan (`version --output`), the workspace package list (`get-packages`), and per-version changelog sections (`get-changelog-entry`). The [example workflows](#example-workflows) build the whole release loop from these outputs — no changesets-specific action or bot required.
 
 ## Install
 
@@ -50,7 +52,7 @@ cargo install changesette
 
 ### Single package (npm)
 
-On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the package to the npm registry and creates a GitHub Release (and its tag) with the changelog section as the notes. A version whose section is missing from the changelog (for example one released before adopting changesette) gets no release. Replace `my-package` with the `name` declared in your `package.json`.
+On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the package to the npm registry and creates a GitHub Release (and its tag) with the changelog section as the notes. A version whose section is missing from the changelog (for example one released before adopting `changesette`) gets no GitHub Release. Replace `my-package` with the `name` declared in your `package.json`.
 
 ```yaml
 name: Version
@@ -123,7 +125,7 @@ jobs:
 
 ### Workspace (pnpm)
 
-On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the bumped packages to the npm registry with pnpm and creates a GitHub Release (and its tag, `<name>@<version>`) per package with the changelog section as the notes. `pnpm publish -r` publishes every workspace package whose version is not on the registry yet and skips the rest, so no per-package bookkeeping is needed; insert a build step before it if your packages need one. A package whose changelog has no section for its current version (for example a private package never named in a changeset) gets no release. With npm instead of pnpm, there is no equivalent of `pnpm publish -r`; iterate over `changesette get-packages` and publish each package whose version is not on the registry yet.
+On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the bumped packages to the npm registry with pnpm and creates a GitHub Release (and its tag, `<name>@<version>`) per package with the changelog section as the notes. `pnpm publish -r` publishes every workspace package whose version is not on the registry yet and skips the rest, so no per-package bookkeeping is needed; insert a build step before it if your packages need one. A package whose changelog has no section for its current version (for example a private package never named in a changeset) gets no GitHub Release. With npm instead of pnpm, there is no equivalent of `pnpm publish -r`; iterate over `changesette get-packages` and publish each package whose version is not on the registry yet.
 
 ```yaml
 name: Version
@@ -253,7 +255,7 @@ Prints the packages that `version` would bump, without changing any file. `--ver
 
 ### `changesette get-packages`
 
-Prints the workspace packages to stdout as a single-line JSON array in package name order. Each entry has the package's `name`, its `version`, and its `dir` relative to the workspace root (`"."` when the root's own `package.json` is the sole package):
+Prints the workspace packages to stdout as a single-line JSON array in package name order. Each entry has the package's `name`, its `version`, and its `dir` relative to the workspace root (`"."` when the package is the workspace root itself):
 
 ```json
 [{"name":"pkg-a","version":"3.1.4","dir":"packages/a"},{"name":"pkg-b","version":"1.0.0","dir":"packages/b"}]
@@ -265,14 +267,11 @@ Prints the body of the `## <version>` section of the named package's `CHANGELOG.
 
 ## Workspaces
 
-Every command resolves its workspace by walking up from the working directory. The first ancestor directory that is a workspace root wins:
+`changesette` works on npm / yarn / pnpm workspaces, and its changeset files are format-compatible with changesets — but `version` deliberately does not behave like `changeset version` in a workspace: **dependencies are never bumped automatically**. Only the packages explicitly named in changesets are bumped; internal dependency ranges are not rewritten, and no "Updated dependencies" changelog entries are generated.
 
-- a `pnpm-workspace.yaml` with a `packages` list (pnpm), or
-- otherwise, a `package.json` whose `workspaces` key is an array of globs (npm / Yarn; the Yarn 1 object form is not supported).
+This is a division of labor, and it works best with the `workspace:^` protocol of yarn and pnpm: range consistency is handled by the package manager. In development, `workspace:` dependencies always resolve to the local copy; at publish, `workspace:^` is replaced with a caret range on the dependency's current version, so every published range starts at the version the dependent was actually built against and keeps matching newer compatible releases. The one case that calls for a new dependent release — an incompatible bump of an internal dependency, typically a major — is exactly the case that needs a human decision anyway: verify the dependent against the new version and name it in a changeset of its own; `changesette` will not remind you.
 
-The workspace members are the directories matching those globs whose `package.json` has both a `name` and a `version`; the root itself is not a member. Without a workspace root, the nearest `package.json` acts as a single-package workspace. The `.changeset/` directory always lives at the resolved root.
-
-The changeset files are format-compatible with changesets, but `version` deliberately does not behave like `changeset version` in a workspace: **dependencies are never bumped automatically**. Only the packages explicitly named in changesets are bumped; internal dependency ranges are not rewritten, and no "Updated dependencies" changelog entries are generated. This assumes internal references use the `workspace:*` protocol or ranges loose enough to keep matching.
+Plain npm workspaces work too, but more is left to you: a literal range like `^1.2.0` is never rewritten at publish, so when a dependent starts relying on a newer feature of an internal dependency, raising the range's lower bound is also your job.
 
 ## Differences from changesets
 
@@ -282,8 +281,8 @@ The changeset files are format-compatible with changesets, but `version` deliber
 - No configuration: `.changeset/config.json` is not read, and there is nothing to configure (no `fixed` / `linked`; `ignore` exists only as the `version --ignore` flag).
 - No pre-release mode (`pre.json`).
 - No changed-package detection: `add` does not inspect git to suggest packages, and `status` has no `--since`.
-- Changelog entries are plain summaries: no auto-generated PR / commit / author links and no changelog plugins.
-- The CLI is not command-compatible with `changeset`; only the changeset files and the release plan JSON written by `--output` are interchangeable.
+- No changelog decoration: entries are the plain changeset summaries, without auto-generated PR / commit / author links, and there are no changelog plugins.
+- No command compatibility: the CLI is not a drop-in replacement for `changeset`; only the changeset files and the release plan JSON written by `--output` are interchangeable.
 
 ## License
 
