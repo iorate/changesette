@@ -6,7 +6,7 @@
 
 A version and changelog manager using the same changeset file format as [changesets](https://github.com/changesets/changesets) and shipped as a single dependency-free Rust binary. The name is changeset + the diminutive suffix -ette (as in diskette).
 
-`changesette` reads changeset files, bumps the version in each named package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / yarn / pnpm workspaces. It bumps only the packages named in changesets and never touches lockfiles or dependency ranges; regenerating lockfiles such as `package-lock.json` belongs to the package-manager layer, and internal dependency ranges are covered in [Workspaces](#workspaces).
+`changesette` reads changeset files, bumps the version in each named package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / yarn / pnpm workspaces. It bumps only the packages named in changesets, does no dependency management ([Workspaces](#workspaces) covers what happens instead), and never touches lockfiles; regenerating lockfiles such as `package-lock.json` belongs to the package-manager layer.
 
 `changesette` performs no git operations and no network access; commits, pull requests, tags, and releases belong to your workflows. The CLI feeds those workflows structured data: a machine-readable release plan (`version --output`), the workspace package list (`get-packages`), and per-version changelog sections (`get-changelog-entry`). The [example workflows](#example-workflows) build the whole release loop from these outputs — no changesets-specific action or bot required.
 
