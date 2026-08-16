@@ -6,7 +6,7 @@
 
 A version and changelog manager using the same changeset file format as [changesets](https://github.com/changesets/changesets) and shipped as a single dependency-free Rust binary. The name is changeset + the diminutive suffix -ette (as in diskette).
 
-`changesette` reads changeset files, bumps the version in each named package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / yarn / pnpm workspaces. It bumps only the packages named in changesets and never touches lockfiles; keeping internal dependency ranges valid and regenerating lockfiles such as `package-lock.json` belong to the package-manager layer (see [Workspaces](#workspaces)).
+`changesette` reads changeset files, bumps the version in each named package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / yarn / pnpm workspaces. It bumps only the packages named in changesets and never touches lockfiles or dependency ranges; regenerating lockfiles such as `package-lock.json` belongs to the package-manager layer, and internal dependency ranges are covered in [Workspaces](#workspaces).
 
 `changesette` performs no git operations and no network access; commits, pull requests, tags, and releases belong to your workflows. The CLI feeds those workflows structured data: a machine-readable release plan (`version --output`), the workspace package list (`get-packages`), and per-version changelog sections (`get-changelog-entry`). The [example workflows](#example-workflows) build the whole release loop from these outputs — no changesets-specific action or bot required.
 
@@ -70,8 +70,8 @@ jobs:
 
     permissions:
       contents: write
-      id-token: write
       pull-requests: write
+      id-token: write # npm trusted publishing (OIDC)
 
     steps:
       - uses: actions/checkout@v7
@@ -143,8 +143,8 @@ jobs:
 
     permissions:
       contents: write
-      id-token: write
       pull-requests: write
+      id-token: write # npm trusted publishing (OIDC)
 
     steps:
       - uses: actions/checkout@v7
@@ -269,9 +269,9 @@ Prints the body of the `## <version>` section of the named package's `CHANGELOG.
 
 `changesette` works on npm / yarn / pnpm workspaces, and its changeset files are format-compatible with changesets — but `version` deliberately does not behave like `changeset version` in a workspace: **dependencies are never bumped automatically**. Only the packages explicitly named in changesets are bumped; internal dependency ranges are not rewritten, and no "Updated dependencies" changelog entries are generated.
 
-This is a division of labor, and it works best with the `workspace:^` protocol of yarn and pnpm: range consistency is handled by the package manager. In development, `workspace:` dependencies always resolve to the local copy; at publish, `workspace:^` is replaced with a caret range on the dependency's current version, so every published range starts at the version the dependent was actually built against and keeps matching newer compatible releases. The one case that calls for a new dependent release — an incompatible bump of an internal dependency, typically a major — is exactly the case that needs a human decision anyway: verify the dependent against the new version and name it in a changeset of its own; `changesette` will not remind you.
+This is a division of labor, and it works well with the `workspace:` protocol of yarn and pnpm: range consistency is handled by the package manager. In development, `workspace:` dependencies always resolve to the local copy; at publish, the range is derived from the dependency's current version (`workspace:^` becomes a caret range, `workspace:*` an exact pin, and so on), so published ranges always reflect the versions the dependent was actually built against.
 
-Plain npm workspaces work too, but more is left to you: a literal range like `^1.2.0` is never rewritten at publish, so when a dependent starts relying on a newer feature of an internal dependency, raising the range's lower bound is also your job.
+Plain npm workspaces work too, but range upkeep is then your job: neither `changesette version` nor `npm publish` rewrites a literal range like `^1.2.0`, so it is up to you to rewrite it when the dependency moves to a new major (or npm stops linking the local copy) and to raise it when the dependent starts relying on newer behavior.
 
 ## Differences from changesets
 
