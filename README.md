@@ -214,6 +214,8 @@ Creates a changeset file in `.changeset/`. `--empty` creates a changeset that na
 
 Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. Each package receives the widest bump across the changesets naming it. Packages named only with the `none` type keep their version and changelog, but their changesets are still deleted, as are empty changesets. With zero changesets, nothing changes. Lockfiles are not updated; if you use npm, run `npm install --package-lock-only` afterwards.
 
+In pre-release mode, `version` bumps to `-<tag>.<n>` prereleases and moves the consumed changesets to `.changeset/pre/` instead of deleting them; see [Pre-release mode](#pre-release-mode).
+
 `--ignore` takes a comma-separated list of package names and may be repeated. Each name must be a workspace member's package name. Changesets naming an ignored package are skipped: they are excluded from the release plan and left in place for a later run. A changeset naming both an ignored and a not-ignored package is an error.
 
 `--output` (short form `-o`) suppresses stdout and writes the release plan to the given file as pretty-printed JSON, mirroring the changesets `ReleasePlan` type (an empty plan when there are zero changesets):
@@ -247,11 +249,19 @@ Applies all pending changesets: bumps each named package's `package.json`, inser
 }
 ```
 
-`releases` lists every named package. `changelogEntry` is the body of the package's new changelog section, without the `## <version>` heading; a `"none"`-type release has an unchanged version and no `changelogEntry`.
+`releases` lists every named package. `changelogEntry` is the body of the package's new changelog section, without the `## <version>` heading; a `"none"`-type release has an unchanged version and no `changelogEntry`. In pre-release mode, a top-level `"preState"` object (`{ "mode", "tag" }`) is included, and the ids of the changesets in `.changeset/pre/` carry a `pre/` prefix.
 
 ### `changesette status [--verbose] [--output <file>]`
 
 Prints the packages that `version` would bump, without changing any file. `--verbose` (short form `-v`) adds each package's new version and the changeset files naming it. `--output` (short form `-o`) writes the release plan to the given file instead of printing the list — the same file `version --output` writes. Packages named only with the `none` type appear in the JSON but not in the list.
+
+### `changesette pre enter <tag>`
+
+Enters pre-release mode by writing `.changeset/pre.json` with the given tag (the `beta` of `1.1.0-beta.0`), creating `.changeset/` if needed. The tag must be a valid semver pre-release identifier sequence, such as `beta`, `rc-1`, or `beta.2`. It is an error to already be in pre mode; a `pre.json` left in the exited state is rewritten in place.
+
+### `changesette pre exit`
+
+Leaves pre-release mode by flipping `.changeset/pre.json` to the exited state, so that the next `version` bumps to final versions and deletes the file. It is an error to have no `pre.json`; running it twice is harmless.
 
 ### `changesette get-packages`
 
@@ -264,6 +274,28 @@ Prints the workspace packages to stdout as a single-line JSON array in package n
 ### `changesette get-changelog-entry <package> <version>`
 
 Prints the body of the `## <version>` section of the named package's `CHANGELOG.md` — the text below that heading, without the heading itself.
+
+## Pre-release mode
+
+Pre-release mode publishes `1.3.0-beta.0`, `1.3.0-beta.1`, … from the pending changesets before releasing `1.3.0`. `pre enter` and `pre exit` maintain `.changeset/pre.json`, in the same format changesets uses:
+
+```sh
+changesette pre enter beta                    # write .changeset/pre.json
+changesette version                           # 1.2.3 -> 1.3.0-beta.0
+npm publish --tag beta
+
+changesette add --patch my-package -m "Fix bug"
+changesette version                           # 1.3.0-beta.0 -> 1.3.0-beta.1
+npm publish --tag beta
+
+changesette pre exit                          # flip pre.json to the exited state
+changesette version                           # 1.3.0-beta.1 -> 1.3.0, deletes pre.json
+npm publish
+```
+
+While in pre mode, `version` moves the changesets it consumes to `.changeset/pre/` instead of deleting them. Once pre mode is exited, the next `version` plans the parked changesets together with the new ones into the final version and deletes both the consumed changesets and `pre.json`. A package left on a prerelease version that no changeset names is given a patch bump too, which amounts to dropping its `-<tag>.<n>` suffix; `--ignore` exempts it.
+
+Choosing the npm dist-tag is up to you, as `changesette` never publishes: pass `--tag <tag>` while pre-releasing so that `latest` keeps pointing at the stable version.
 
 ## Workspaces
 
@@ -279,7 +311,6 @@ Dependent releases are a judgment, not bookkeeping. Already-published dependents
 
 - No dependency management: dependents of a bumped package are never bumped, and dependency ranges are never rewritten (see [Workspaces](#workspaces)).
 - No configuration: `.changeset/config.json` is not read, and there is nothing to configure (no `fixed` / `linked`; `ignore` exists only as the `version --ignore` flag).
-- No pre-release mode (`pre.json`).
 - No changed-package detection: `add` does not inspect git to suggest packages, and `status` has no `--since`.
 - No changelog decoration: entries are the plain changeset summaries, without auto-generated PR / commit / author links, and there are no changelog plugins.
 - No command compatibility: the CLI is not a drop-in replacement for `changeset`; only the changeset files and the release plan JSON written by `--output` are interchangeable.

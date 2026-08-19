@@ -1,0 +1,5 @@
+---
+source: src/pre.rs
+expression: "load_err(\"{\\n  \\\"mode\\\": \\\"pre\\\",\\n  \\\"tag\\\": null\\n}\\n\")"
+---
+.changeset/pre.json: "tag" must be a string

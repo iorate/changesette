@@ -1,0 +1,9 @@
+---
+source: src/pre.rs
+expression: loaded.pre.text()
+---
+{ // pre state
+	"tag":	"beta.2",
+	"mode": "pre",
+	"someday": [1, 2, 3]
+}

@@ -6,9 +6,11 @@ mod bump;
 mod changelog;
 mod changeset;
 mod commands;
+mod jsonc;
 mod output;
 mod package_json;
 mod plan;
+mod pre;
 mod release_plan;
 mod workspace;
 
@@ -55,6 +57,11 @@ enum Command {
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
     },
+    /// Enter or exit pre-release mode
+    Pre {
+        #[command(subcommand)]
+        command: PreCommand,
+    },
     /// Print the packages to be bumped by `version`
     Status {
         /// Show the new versions and the changeset files
@@ -73,6 +80,17 @@ enum Command {
         /// The version whose section to print
         version: semver::Version,
     },
+}
+
+#[derive(clap::Subcommand)]
+enum PreCommand {
+    /// Enter pre-release mode: `version` will bump to `-<tag>.<n>` prerelease versions
+    Enter {
+        /// The prerelease tag to use (the `beta` of `1.1.0-beta.0`)
+        tag: String,
+    },
+    /// Exit pre-release mode: the next `version` will bump to final versions
+    Exit,
 }
 
 fn main() -> ExitCode {
@@ -97,6 +115,10 @@ fn run() -> anyhow::Result<()> {
             empty,
         }) => commands::add::run(major, minor, patch, message, empty),
         Command::Version { ignore, output } => commands::version::run(&ignore, output.as_deref()),
+        Command::Pre { command } => match command {
+            PreCommand::Enter { tag } => commands::pre::enter(&tag),
+            PreCommand::Exit => commands::pre::exit(),
+        },
         Command::Status { verbose, output } => commands::status::run(verbose, output.as_deref()),
         Command::GetPackages => commands::get_packages::run(),
         Command::GetChangelogEntry { package, version } => {

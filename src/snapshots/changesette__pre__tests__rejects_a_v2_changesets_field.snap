@@ -1,0 +1,5 @@
+---
+source: src/pre.rs
+expression: "load_err(\"{\\n  \\\"mode\\\": \\\"pre\\\",\\n  \\\"tag\\\": \\\"beta\\\",\\n  \\\"changesets\\\": []\\n}\\n\")"
+---
+.changeset/pre.json: in the changesets v2 format; run a changesets v3 CLI command (e.g. `npx @changesets/cli@3 status`) once to migrate it

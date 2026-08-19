@@ -5,6 +5,7 @@ expression: "load_ok(\"upstream-multi-package\")"
 [
     LoadedChange {
         file_name: "frank-cycles-follow.md",
+        in_pre: false,
         releases: [
             (
                 "ublacklist",

@@ -1,0 +1,5 @@
+---
+source: src/pre.rs
+expression: "load_err(\"[]\\n\")"
+---
+.changeset/pre.json: the root value must be an object

@@ -1,0 +1,5 @@
+---
+source: src/pre.rs
+expression: "format!(\"{:#}\", validate_tag(\"beta 2\").unwrap_err())"
+---
+invalid pre tag "beta 2": unexpected character in pre-release identifier

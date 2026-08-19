@@ -1,4 +1,4 @@
-use semver::Version;
+use semver::{Prerelease, Version};
 
 /// A semver bump type, ordered so that `max` picks the widest one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -37,12 +37,35 @@ pub(crate) fn next_version(current: &Version, bump: Bump) -> Version {
     }
 }
 
+/// Returns `next_version(current, bump)` with the pre-release `-{tag}.{n}`
+/// attached, where `n` restarts at 0 unless `current`'s pre-release is exactly
+/// `{tag}.{m}` with a numeric `m`, in which case it is `m + 1`. `tag` must
+/// have passed `pre::validate_tag`.
+pub(crate) fn next_pre_version(current: &Version, bump: Bump, tag: &str) -> Version {
+    // Counting on the tag, rather than on the second pre-release identifier,
+    // keeps a dotted tag (`beta.2`) counting and restarts on a tag switch.
+    let counter = current
+        .pre
+        .as_str()
+        .strip_prefix(&format!("{tag}."))
+        .and_then(|rest| rest.parse::<u64>().ok())
+        .map_or(0, |number| number + 1);
+    let mut version = next_version(current, bump);
+    version.pre =
+        Prerelease::new(&format!("{tag}.{counter}")).expect("a validated tag stays valid");
+    version
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn next(current: &str, bump: Bump) -> String {
         next_version(&current.parse().unwrap(), bump).to_string()
+    }
+
+    fn next_pre(current: &str, bump: Bump, tag: &str) -> String {
+        next_pre_version(&current.parse().unwrap(), bump, tag).to_string()
     }
 
     #[test]
@@ -97,5 +120,67 @@ mod tests {
         assert_eq!(next("1.2.3+abc", Bump::Minor), "1.3.0");
         assert_eq!(next("1.2.3+abc", Bump::Patch), "1.2.4");
         assert_eq!(next("1.2.3-rc.1+abc", Bump::Patch), "1.2.3");
+    }
+
+    #[test]
+    fn pre_version_starts_at_zero() {
+        assert_eq!(next_pre("1.0.0", Bump::Minor, "beta"), "1.1.0-beta.0");
+        assert_eq!(next_pre("1.0.0", Bump::Major, "beta"), "2.0.0-beta.0");
+        assert_eq!(next_pre("1.0.0", Bump::Patch, "beta"), "1.0.1-beta.0");
+    }
+
+    #[test]
+    fn pre_version_increments_the_counter() {
+        assert_eq!(
+            next_pre("1.1.0-beta.0", Bump::Patch, "beta"),
+            "1.1.0-beta.1"
+        );
+    }
+
+    #[test]
+    fn pre_version_keeps_counting_across_base_bumps() {
+        assert_eq!(
+            next_pre("1.1.0-beta.1", Bump::Major, "beta"),
+            "2.0.0-beta.2"
+        );
+        assert_eq!(
+            next_pre("1.0.1-beta.0", Bump::Minor, "beta"),
+            "1.1.0-beta.1"
+        );
+    }
+
+    #[test]
+    fn pre_version_handles_a_dotted_tag() {
+        assert_eq!(
+            next_pre("1.1.0-beta.2.0", Bump::Patch, "beta.2"),
+            "1.1.0-beta.2.1"
+        );
+    }
+
+    #[test]
+    fn pre_version_restarts_on_a_tag_switch() {
+        assert_eq!(
+            next_pre("1.1.0-alpha.3", Bump::Patch, "beta"),
+            "1.1.0-beta.0"
+        );
+    }
+
+    #[test]
+    fn pre_version_restarts_on_a_non_numeric_counter() {
+        assert_eq!(
+            next_pre("1.0.0-alpha.beta", Bump::Patch, "alpha"),
+            "1.0.0-alpha.0"
+        );
+    }
+
+    #[test]
+    fn pre_version_with_a_numeric_tag() {
+        assert_eq!(next_pre("1.0.0", Bump::Patch, "1"), "1.0.1-1.0");
+        assert_eq!(next_pre("1.0.1-1.0", Bump::Patch, "1"), "1.0.1-1.1");
+    }
+
+    #[test]
+    fn pre_version_clears_build_metadata() {
+        assert_eq!(next_pre("1.2.3+abc", Bump::Minor, "beta"), "1.3.0-beta.0");
     }
 }

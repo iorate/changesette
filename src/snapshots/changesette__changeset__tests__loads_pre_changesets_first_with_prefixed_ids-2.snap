@@ -1,0 +1,18 @@
+---
+source: src/changeset.rs
+expression: "changes.iter().map(|change|\n(change.id(), change.rel_path())).collect::<Vec<_>>()"
+---
+[
+    (
+        "pre/atomic-pugs-smile",
+        "pre/atomic-pugs-smile.md",
+    ),
+    (
+        "pre/zany-moons-sing",
+        "pre/zany-moons-sing.md",
+    ),
+    (
+        "brave-lions-dance",
+        "brave-lions-dance.md",
+    ),
+]
