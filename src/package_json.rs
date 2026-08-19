@@ -6,8 +6,10 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use jsonc_parser::{
     ParseOptions,
-    cst::{CstObject, CstRootNode, CstStringLit},
+    cst::{CstRootNode, CstStringLit},
 };
+
+use crate::jsonc::{set_string_value, string_prop};
 
 /// A loaded `package.json`. Saving preserves the original formatting,
 /// changing only the rewritten values.
@@ -85,25 +87,6 @@ impl PackageJson {
     pub(crate) fn text(&self) -> String {
         self.root.to_string()
     }
-}
-
-// Returns the string literal at `object[key]`, or `Ok(None)` if the key is
-// absent; a non-string value is an error naming `location`.
-fn string_prop(object: &CstObject, key: &str, location: &str) -> Result<Option<CstStringLit>> {
-    let Some(prop) = object.get(key) else {
-        return Ok(None);
-    };
-    let lit = prop
-        .value()
-        .and_then(|value| value.as_string_lit())
-        .with_context(|| format!("{location} must be a string"))?;
-    Ok(Some(lit))
-}
-
-// Replaces the literal's raw text with `"<value>"`; `value` must not contain
-// characters that need escaping (semver versions never do).
-fn set_string_value(lit: &CstStringLit, value: &str) {
-    lit.set_raw_value(format!("\"{value}\""));
 }
 
 #[cfg(test)]

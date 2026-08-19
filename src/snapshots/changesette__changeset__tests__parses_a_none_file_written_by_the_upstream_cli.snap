@@ -5,6 +5,7 @@ expression: "load_ok(\"upstream-none\")"
 [
     LoadedChange {
         file_name: "wild-candies-bet.md",
+        in_pre: false,
         releases: [
             (
                 "ublacklist",

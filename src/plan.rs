@@ -1,4 +1,4 @@
-use std::{fs, io, path::PathBuf};
+use std::{collections::BTreeMap, fs, io, path::PathBuf};
 
 use anyhow::{Context, Result};
 use semver::Version;
@@ -8,6 +8,7 @@ use crate::{
     changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
     package_json::PackageJson,
+    pre::{PreJson, PreMode},
     workspace::Workspace,
 };
 
@@ -19,7 +20,7 @@ pub(crate) struct PlannedRelease {
     pub(crate) old_version: Version,
     pub(crate) new_version: Version,
     /// The ids of the changesets naming this package (`none` entries
-    /// included), in file-name order.
+    /// included), in load order (`pre/` changesets first).
     pub(crate) changeset_ids: Vec<String>,
     /// The body of the new `## <new_version>` section, without the heading.
     /// `None` for a `None` bump.
@@ -27,29 +28,39 @@ pub(crate) struct PlannedRelease {
 }
 
 /// Plans the release of each package named by `changes`, validating that
-/// every named package is a workspace member. Modifies nothing on disk.
+/// every named package is a workspace member. In pre mode the new versions
+/// are `-{tag}.{n}` pre-releases; with `pre` exiting, every workspace member
+/// left on a pre-release version is released too, unless `ignore` names it.
+/// Modifies nothing on disk.
 pub(crate) fn plan_releases(
     workspace: &Workspace,
     changes: &[LoadedChange],
+    pre: Option<&PreJson>,
+    ignore: &[String],
 ) -> Result<Vec<PlannedRelease>> {
     let changeset_dir = workspace.root().join(".changeset");
     for change in changes {
         for (name, _) in &change.releases {
             workspace
                 .member(name)
-                .with_context(|| changeset_dir.join(&change.file_name).display().to_string())?;
+                .with_context(|| changeset_dir.join(change.rel_path()).display().to_string())?;
         }
     }
 
+    let mut max_bumps = changeset::max_bumps(changes);
+    if matches!(pre, Some(pre) if pre.mode() == PreMode::Exit) {
+        rescue_prereleases(workspace, ignore, &mut max_bumps)?;
+    }
+
     let mut releases = Vec::new();
-    for (name, max_bump) in changeset::max_bumps(changes) {
+    for (name, max_bump) in max_bumps {
         let member = workspace.member(name)?;
         let package_json = PackageJson::load(member.dir())?;
         let old_version = package_json.version().clone();
         let changeset_ids = changes
             .iter()
             .filter(|change| change.releases.iter().any(|(n, _)| n == name))
-            .map(|change| change.id().to_owned())
+            .map(LoadedChange::id)
             .collect();
 
         let (new_version, changelog_entry) = match max_bump {
@@ -65,10 +76,13 @@ pub(crate) fn plan_releases(
                             .map(|bump| (bump, change.summary.as_str()))
                     })
                     .collect();
-                (
-                    bump::next_version(&old_version, max_bump),
-                    Some(render_entry(&summaries)),
-                )
+                let new_version = match pre {
+                    Some(pre) if pre.mode() == PreMode::Pre => {
+                        bump::next_pre_version(&old_version, max_bump, pre.tag())
+                    }
+                    _ => bump::next_version(&old_version, max_bump),
+                };
+                (new_version, Some(render_entry(&summaries)))
             }
             None => (old_version.clone(), None),
         };
@@ -82,6 +96,28 @@ pub(crate) fn plan_releases(
         });
     }
     Ok(releases)
+}
+
+// Forces a patch bump on every member left on a pre-release version that no
+// changeset releases. `next_version` then merely drops the pre-release, and
+// the empty summary list renders a heading-only changelog section.
+fn rescue_prereleases<'a>(
+    workspace: &'a Workspace,
+    ignore: &[String],
+    max_bumps: &mut BTreeMap<&'a str, Option<Bump>>,
+) -> Result<()> {
+    for member in workspace.members() {
+        if ignore.iter().any(|ignored| ignored == member.name())
+            || max_bumps.get(member.name()).is_some_and(Option::is_some)
+        {
+            continue;
+        }
+        let package_json = PackageJson::load(member.dir())?;
+        if !package_json.version().pre.is_empty() {
+            max_bumps.insert(member.name(), Some(Bump::Patch));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) struct StagedWrite {

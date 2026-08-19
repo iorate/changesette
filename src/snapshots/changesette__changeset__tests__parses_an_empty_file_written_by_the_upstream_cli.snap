@@ -5,6 +5,7 @@ expression: "load_ok(\"upstream-empty\")"
 [
     LoadedChange {
         file_name: "tricky-roses-poke.md",
+        in_pre: false,
         releases: [],
         summary: "",
     },

@@ -5,6 +5,7 @@ expression: "load_ok(\"upstream-generated\")"
 [
     LoadedChange {
         file_name: "olive-pots-repeat.md",
+        in_pre: false,
         releases: [
             (
                 "ublacklist",

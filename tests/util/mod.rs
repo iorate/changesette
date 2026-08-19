@@ -9,8 +9,25 @@ pub(crate) fn write_changeset(
     releases: &[(&str, &str)],
     summary: &str,
 ) {
-    let changeset_dir = dir.join(".changeset");
-    fs::create_dir_all(&changeset_dir).unwrap();
+    write_changeset_in(&dir.join(".changeset"), file_name, releases, summary);
+}
+
+pub(crate) fn write_pre_changeset(
+    dir: &Path,
+    file_name: &str,
+    releases: &[(&str, &str)],
+    summary: &str,
+) {
+    write_changeset_in(&dir.join(".changeset/pre"), file_name, releases, summary);
+}
+
+fn write_changeset_in(
+    changeset_dir: &Path,
+    file_name: &str,
+    releases: &[(&str, &str)],
+    summary: &str,
+) {
+    fs::create_dir_all(changeset_dir).unwrap();
     let frontmatter: String = releases
         .iter()
         .map(|(name, bump)| format!("\"{name}\": {bump}\n"))

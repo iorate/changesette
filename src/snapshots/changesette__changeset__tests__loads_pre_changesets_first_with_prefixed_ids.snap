@@ -1,10 +1,36 @@
 ---
 source: src/changeset.rs
-expression: "load_ok(\"ordering\")"
+expression: changes
 ---
 [
     LoadedChange {
-        file_name: "10-second.md",
+        file_name: "atomic-pugs-smile.md",
+        in_pre: true,
+        releases: [
+            (
+                "ublacklist",
+                Some(
+                    Patch,
+                ),
+            ),
+        ],
+        summary: "Parked first: file names are compared within the group",
+    },
+    LoadedChange {
+        file_name: "zany-moons-sing.md",
+        in_pre: true,
+        releases: [
+            (
+                "ublacklist",
+                Some(
+                    Major,
+                ),
+            ),
+        ],
+        summary: "Parked second",
+    },
+    LoadedChange {
+        file_name: "brave-lions-dance.md",
         in_pre: false,
         releases: [
             (
@@ -14,32 +40,6 @@ expression: "load_ok(\"ordering\")"
                 ),
             ),
         ],
-        summary: "Sorted first because file names are compared by bytes, not numerically",
-    },
-    LoadedChange {
-        file_name: "2-third.md",
-        in_pre: false,
-        releases: [
-            (
-                "ublacklist",
-                Some(
-                    Major,
-                ),
-            ),
-        ],
-        summary: "Sorted second",
-    },
-    LoadedChange {
-        file_name: "changesette-01H455VB4PEX5VSKNK084SN02Q.md",
-        in_pre: false,
-        releases: [
-            (
-                "ublacklist",
-                Some(
-                    Patch,
-                ),
-            ),
-        ],
-        summary: "Sorted last, and written without quotes the way knope writes them",
+        summary: "A new changeset, loaded after the pre ones",
     },
 ]

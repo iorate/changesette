@@ -3,15 +3,24 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::{bump::Bump, changeset::LoadedChange, plan::PlannedRelease};
+use crate::{bump::Bump, changeset::LoadedChange, plan::PlannedRelease, pre::PreJson};
 
 /// The JSON document that `version` and `status` write with `--output`,
-/// mirroring the upstream `ReleasePlan` type (without `preState`, plus
-/// `changelogEntry` on each release).
+/// mirroring the upstream `ReleasePlan` type (plus `changelogEntry` on each
+/// release).
 #[derive(Serialize)]
 pub(crate) struct ReleasePlan {
     pub(crate) changesets: Vec<ChangesetEntry>,
     pub(crate) releases: Vec<Release>,
+    /// The state of `.changeset/pre.json`, absent when there is no such file.
+    #[serde(rename = "preState", skip_serializing_if = "Option::is_none")]
+    pub(crate) pre_state: Option<PreState>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct PreState {
+    pub(crate) mode: &'static str,
+    pub(crate) tag: String,
 }
 
 #[derive(Serialize)]
@@ -37,7 +46,7 @@ pub(crate) struct Release {
     pub(crate) old_version: String,
     pub(crate) new_version: String,
     /// The ids of the changesets naming this package (`none` entries
-    /// included), in file-name order.
+    /// included), in load order (`pre/` changesets first).
     pub(crate) changesets: Vec<String>,
     /// The body of the new `## <new_version>` section, without the heading.
     /// Absent for `none`.
@@ -45,12 +54,16 @@ pub(crate) struct Release {
     pub(crate) changelog_entry: Option<String>,
 }
 
-pub(crate) fn build(changes: &[LoadedChange], releases: &[PlannedRelease]) -> ReleasePlan {
+pub(crate) fn build(
+    changes: &[LoadedChange],
+    releases: &[PlannedRelease],
+    pre: Option<&PreJson>,
+) -> ReleasePlan {
     ReleasePlan {
         changesets: changes
             .iter()
             .map(|change| ChangesetEntry {
-                id: change.id().to_owned(),
+                id: change.id(),
                 summary: change.summary.clone(),
                 releases: change
                     .releases
@@ -73,6 +86,10 @@ pub(crate) fn build(changes: &[LoadedChange], releases: &[PlannedRelease]) -> Re
                 changelog_entry: release.changelog_entry.clone(),
             })
             .collect(),
+        pre_state: pre.map(|pre| PreState {
+            mode: pre.mode().as_str(),
+            tag: pre.tag().to_owned(),
+        }),
     }
 }
 

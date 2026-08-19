@@ -7,7 +7,7 @@ use std::{
 };
 
 use tempfile::TempDir;
-use util::{dir_snapshot, write_changeset};
+use util::{dir_snapshot, write_changeset, write_pre_changeset};
 
 const CHANGELOG: &str = "# ublacklist\n\n## 1.1.0\n\n### Minor Changes\n\n- Add feature\n\n## 1.0.0\n\n### Patch Changes\n\n- Fix bug\n";
 
@@ -1158,6 +1158,606 @@ fn status_fails_without_the_changeset_directory() {
     );
 }
 
+const PRE_JSON: &str = "{\n  \"mode\": \"pre\",\n  \"tag\": \"beta\"\n}\n";
+const EXITED_PRE_JSON: &str = "{\n  \"mode\": \"exit\",\n  \"tag\": \"beta\"\n}\n";
+
+fn write_pre_json(dir: &Path, text: &str) {
+    let changeset_dir = dir.join(".changeset");
+    fs::create_dir_all(&changeset_dir).unwrap();
+    fs::write(changeset_dir.join("pre.json"), text).unwrap();
+}
+
+fn read_pre_json(dir: &Path) -> String {
+    fs::read_to_string(dir.join(".changeset/pre.json")).unwrap()
+}
+
+fn prerelease_package_dir(version: &str) -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        format!("{{\n  \"name\": \"ublacklist\",\n  \"version\": \"{version}\"\n}}\n"),
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn pre_enter_creates_pre_json() {
+    let dir = package_dir();
+    let output = changesette(dir.path(), &["pre", "enter", "beta"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "Entered pre mode with tag `beta`\nRun `changesette version` to bump to prerelease versions\n"
+    );
+    assert_eq!(stderr(&output), "");
+    assert_eq!(read_pre_json(dir.path()), PRE_JSON);
+}
+
+#[test]
+fn pre_enter_creates_pre_json_at_the_workspace_root() {
+    let dir = workspace_dir();
+    let output = changesette(&dir.path().join("packages/a"), &["pre", "enter", "beta"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(read_pre_json(dir.path()), PRE_JSON);
+    assert!(!dir.path().join("packages/a/.changeset").exists());
+}
+
+#[test]
+fn pre_enter_accepts_a_dotted_tag() {
+    let dir = package_dir();
+    let output = changesette(dir.path(), &["pre", "enter", "beta.2"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        read_pre_json(dir.path()),
+        "{\n  \"mode\": \"pre\",\n  \"tag\": \"beta.2\"\n}\n"
+    );
+}
+
+#[test]
+fn pre_enter_fails_when_already_in_pre_mode() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["pre", "enter", "alpha"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("already in pre mode"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn pre_enter_after_exit_rewrites_in_place() {
+    let dir = package_dir();
+    write_pre_json(
+        dir.path(),
+        "{ // pre state\n\t\"tag\":\t\"alpha\",\n\t\"mode\": \"exit\",\n\t\"someday\": [1, 2, 3]\n}",
+    );
+    let output = changesette(dir.path(), &["pre", "enter", "beta"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        read_pre_json(dir.path()),
+        "{ // pre state\n\t\"tag\":\t\"beta\",\n\t\"mode\": \"pre\",\n\t\"someday\": [1, 2, 3]\n}"
+    );
+}
+
+#[test]
+fn pre_enter_rejects_an_invalid_tag() {
+    for tag in ["", " ", "01", "beta 2"] {
+        let dir = package_dir();
+        let before = dir_snapshot(dir.path());
+        let output = changesette(dir.path(), &["pre", "enter", tag]);
+        assert!(!output.status.success(), "{tag:?} should be rejected");
+        assert!(
+            stderr(&output).contains("invalid pre tag"),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(dir_snapshot(dir.path()), before);
+    }
+}
+
+#[test]
+fn pre_enter_fails_on_a_v2_pre_json() {
+    let dir = package_dir();
+    write_pre_json(
+        dir.path(),
+        "{\n  \"mode\": \"pre\",\n  \"tag\": \"beta\",\n  \"initialVersions\": {},\n  \"changesets\": []\n}\n",
+    );
+    let output = changesette(dir.path(), &["pre", "enter", "beta"]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains("changesets v2 format"), "{err}");
+    assert!(err.contains("@changesets/cli@3"), "{err}");
+}
+
+#[test]
+fn pre_exit_fails_without_pre_json() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["pre", "exit"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("not in pre mode"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn pre_exit_flips_the_mode() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    let output = changesette(dir.path(), &["pre", "exit"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "Exited pre mode\nRun `changesette version` to bump to final versions\n"
+    );
+    assert_eq!(read_pre_json(dir.path()), EXITED_PRE_JSON);
+}
+
+#[test]
+fn pre_exit_is_idempotent() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    for _ in 0..2 {
+        let output = changesette(dir.path(), &["pre", "exit"]);
+        assert!(output.status.success(), "{}", stderr(&output));
+    }
+    assert_eq!(read_pre_json(dir.path()), EXITED_PRE_JSON);
+}
+
+#[test]
+fn pre_exit_ignores_an_invalid_tag() {
+    let dir = package_dir();
+    write_pre_json(
+        dir.path(),
+        "{\n  \"mode\": \"pre\",\n  \"tag\": \"not a tag\"\n}\n",
+    );
+    let output = changesette(dir.path(), &["pre", "exit"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        read_pre_json(dir.path()),
+        "{\n  \"mode\": \"exit\",\n  \"tag\": \"not a tag\"\n}\n"
+    );
+}
+
+#[test]
+fn version_in_pre_mode_bumps_to_a_prerelease() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Bumped ublacklist 1.2.3 -> 1.3.0-beta.0\n");
+    let err = stderr(&output);
+    assert!(err.contains("in pre mode with tag `beta`"), "{err}");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("package.json")).unwrap(),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.3.0-beta.0\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
+        "# ublacklist\n\n## 1.3.0-beta.0\n\n### Minor Changes\n\n- Add feature\n"
+    );
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(dir.path().join(".changeset/pre").join(ULID_B).is_file());
+    assert_eq!(read_pre_json(dir.path()), PRE_JSON);
+}
+
+#[test]
+fn version_in_pre_mode_increments_the_counter() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    write_changeset(
+        dir.path(),
+        ULID_A,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "Bumped ublacklist 1.3.0-beta.0 -> 1.3.0-beta.1\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
+        "# ublacklist\n\n## 1.3.0-beta.1\n\n### Patch Changes\n\n- Fix bug\n\n## 1.3.0-beta.0\n\n### Minor Changes\n\n- Add feature\n"
+    );
+    assert!(dir.path().join(".changeset/pre").join(ULID_A).is_file());
+    assert!(dir.path().join(".changeset/pre").join(ULID_B).is_file());
+}
+
+#[test]
+fn version_in_pre_mode_fails_on_a_move_collision() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    write_pre_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("refusing to overwrite"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_in_pre_mode_rejects_an_invalid_tag() {
+    let dir = package_dir();
+    write_pre_json(
+        dir.path(),
+        "{\n  \"mode\": \"pre\",\n  \"tag\": \"not a tag\"\n}\n",
+    );
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("invalid pre tag"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_in_pre_mode_leaves_ignored_changesets_in_place() {
+    let dir = two_package_workspace_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version", "--ignore", "pkg-b"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Bumped pkg-a 3.1.4 -> 3.2.0-beta.0\n");
+    assert!(dir.path().join(".changeset/pre").join(ULID_A).is_file());
+    assert!(dir.path().join(".changeset").join(ULID_B).is_file());
+    assert!(!dir.path().join(".changeset/pre").join(ULID_B).exists());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\"\n}\n"
+    );
+}
+
+#[test]
+fn version_in_pre_mode_keeps_a_none_only_package_unchanged() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    write_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("package.json")).unwrap(),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\"\n}\n"
+    );
+    assert!(!dir.path().join("CHANGELOG.md").exists());
+    assert!(dir.path().join(".changeset/pre").join(ULID_B).is_file());
+}
+
+#[test]
+fn version_in_pre_mode_with_no_new_changesets_prints_the_usual_message() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    write_pre_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "No unreleased changesets found.\n");
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_after_exit_finalizes() {
+    let dir = prerelease_package_dir("1.3.0-beta.0");
+    fs::write(
+        dir.path().join("CHANGELOG.md"),
+        "# ublacklist\n\n## 1.3.0-beta.0\n\n### Minor Changes\n\n- Add feature\n",
+    )
+    .unwrap();
+    write_pre_json(dir.path(), EXITED_PRE_JSON);
+    write_pre_changeset(
+        dir.path(),
+        ULID_A,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Bumped ublacklist 1.3.0-beta.0 -> 1.3.0\n");
+    assert_eq!(stderr(&output), "");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("package.json")).unwrap(),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.3.0\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
+        "# ublacklist\n\n## 1.3.0\n\n### Minor Changes\n\n- Add feature\n\n### Patch Changes\n\n- Fix bug\n\n## 1.3.0-beta.0\n\n### Minor Changes\n\n- Add feature\n"
+    );
+    assert!(!dir.path().join(".changeset/pre").join(ULID_A).exists());
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset/pre.json").exists());
+}
+
+#[test]
+fn version_after_exit_rescues_prerelease_packages() {
+    let dir = two_package_workspace_dir();
+    // The upstream rescues neither of these: `-beta.0` has the counter it
+    // starts at, and `-alpha.2` is left over from an earlier tag.
+    fs::write(
+        dir.path().join("packages/a/package.json"),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.2.0-beta.0\"\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.1-alpha.2\"\n}\n",
+    )
+    .unwrap();
+    write_pre_json(dir.path(), EXITED_PRE_JSON);
+    let output = changesette(dir.path(), &["version", "--ignore", "pkg-b"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Bumped pkg-a 3.2.0-beta.0 -> 3.2.0\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.2.0\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/CHANGELOG.md")).unwrap(),
+        "# pkg-a\n\n## 3.2.0\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.1-alpha.2\"\n}\n"
+    );
+    assert!(!dir.path().join("packages/b/CHANGELOG.md").exists());
+    assert!(!dir.path().join(".changeset/pre.json").exists());
+}
+
+#[test]
+fn version_after_exit_rescues_a_none_only_package() {
+    let dir = prerelease_package_dir("1.2.3-beta.1");
+    write_pre_json(dir.path(), EXITED_PRE_JSON);
+    write_pre_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Bumped ublacklist 1.2.3-beta.1 -> 1.2.3\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("package.json")).unwrap(),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
+        "# ublacklist\n\n## 1.2.3\n"
+    );
+    assert!(!dir.path().join(".changeset/pre").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset/pre.json").exists());
+}
+
+#[test]
+fn version_after_exit_succeeds_with_an_invalid_tag() {
+    let dir = package_dir();
+    write_pre_json(
+        dir.path(),
+        "{\n  \"mode\": \"pre\",\n  \"tag\": \"not a tag\"\n}\n",
+    );
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["pre", "exit"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Bumped ublacklist 1.2.3 -> 1.3.0\n");
+    assert!(!dir.path().join(".changeset/pre.json").exists());
+}
+
+#[test]
+fn version_after_exit_with_no_changesets_still_deletes_pre_json() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), EXITED_PRE_JSON);
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "");
+    assert!(!dir.path().join(".changeset/pre.json").exists());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("package.json")).unwrap(),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\"\n}\n"
+    );
+}
+
+#[test]
+fn version_consumes_pre_changesets_without_pre_json() {
+    let dir = package_dir();
+    write_pre_changeset(
+        dir.path(),
+        ULID_A,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Bumped ublacklist 1.2.3 -> 1.3.0\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
+        "# ublacklist\n\n## 1.3.0\n\n### Minor Changes\n\n- Add feature\n\n### Patch Changes\n\n- Fix bug\n"
+    );
+    assert!(!dir.path().join(".changeset/pre").join(ULID_A).exists());
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_output_omits_pre_state_without_pre_json() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["version", "-o", "plan.json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let plan = fs::read_to_string(dir.path().join("plan.json")).unwrap();
+    assert!(!plan.contains("preState"), "{plan}");
+}
+
+#[test]
+fn status_in_pre_mode_shows_prerelease_versions() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    write_pre_changeset(dir.path(), ULID_A, &[("ublacklist", "major")], "Rework");
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["status", "--verbose"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        format!(
+            "Packages to be bumped:\n- minor\n  - ublacklist -> 1.3.0-beta.0\n    - .changeset/{ULID_B}\n"
+        )
+    );
+    assert_eq!(stderr(&output), "");
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn status_in_pre_mode_rejects_an_invalid_tag() {
+    let dir = package_dir();
+    write_pre_json(
+        dir.path(),
+        "{\n  \"mode\": \"pre\",\n  \"tag\": \"not a tag\"\n}\n",
+    );
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["status"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("invalid pre tag"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn status_output_in_pre_mode_includes_pre_state() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["status", "-o", "plan.json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let plan = fs::read_to_string(dir.path().join("plan.json")).unwrap();
+    assert!(
+        plan.contains("\"preState\": {\n    \"mode\": \"pre\",\n    \"tag\": \"beta\"\n  }"),
+        "{plan}"
+    );
+    assert!(plan.contains("\"newVersion\": \"1.3.0-beta.0\""), "{plan}");
+}
+
+#[test]
+fn status_output_includes_pre_state_and_prefixed_ids() {
+    let dir = prerelease_package_dir("1.3.0-beta.0");
+    write_pre_json(dir.path(), EXITED_PRE_JSON);
+    write_pre_changeset(
+        dir.path(),
+        ULID_A,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["status", "-o", "plan.json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let plan = fs::read_to_string(dir.path().join("plan.json")).unwrap();
+    assert!(
+        plan.contains("\"preState\": {\n    \"mode\": \"exit\",\n    \"tag\": \"beta\"\n  }"),
+        "{plan}"
+    );
+    assert!(plan.contains(&format!("\"id\": \"pre/{ID_A}\"")), "{plan}");
+    assert!(plan.contains(&format!("\"pre/{ID_A}\"")), "{plan}");
+    assert!(plan.contains("\"newVersion\": \"1.3.0\""), "{plan}");
+}
+
+#[test]
+fn get_changelog_entry_reads_a_prerelease_section() {
+    let dir = package_dir();
+    fs::write(
+        dir.path().join("CHANGELOG.md"),
+        "# ublacklist\n\n## 1.3.0-beta.0\n\n### Minor Changes\n\n- Add feature\n",
+    )
+    .unwrap();
+    let output = changesette(
+        dir.path(),
+        &["get-changelog-entry", "ublacklist", "1.3.0-beta.0"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "### Minor Changes\n\n- Add feature\n");
+}
+
+#[test]
+fn get_changelog_entry_returns_an_empty_rescued_section() {
+    let dir = package_dir();
+    fs::write(
+        dir.path().join("CHANGELOG.md"),
+        "# ublacklist\n\n## 1.3.0\n\n## 1.3.0-beta.0\n\n### Minor Changes\n\n- Add feature\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist", "1.3.0"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "\n");
+}
+
 #[test]
 fn prints_the_crate_version() {
     let dir = tempfile::tempdir().unwrap();
@@ -1179,6 +1779,7 @@ fn prints_help() {
         "init",
         "add",
         "version",
+        "pre",
         "status",
         "get-packages",
         "get-changelog-entry",

@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, fs, io, path::Path, sync::LazyLock};
+use std::{
+    collections::BTreeMap,
+    fs, io,
+    path::{Path, PathBuf},
+    sync::LazyLock,
+};
 
 use anyhow::{Context, Result, bail};
 use regex::Regex;
@@ -16,6 +21,8 @@ static FRONTMATTER: LazyLock<Regex> =
 #[derive(Debug)]
 pub(crate) struct LoadedChange {
     pub(crate) file_name: String,
+    /// Whether the file was loaded from `pre/` in the changeset directory.
+    pub(crate) in_pre: bool,
     /// The packages named in the frontmatter, in frontmatter order, each with
     /// its requested bump; `None` stands for the `none` type. Empty for an
     /// empty changeset.
@@ -26,29 +33,67 @@ pub(crate) struct LoadedChange {
 }
 
 impl LoadedChange {
-    pub(crate) fn id(&self) -> &str {
-        self.file_name
+    /// The file name without its `.md` suffix, prefixed with `pre/` for a
+    /// `pre/` changeset, as in the upstream ids.
+    pub(crate) fn id(&self) -> String {
+        let stem = self
+            .file_name
             .strip_suffix(".md")
-            .unwrap_or(&self.file_name)
+            .unwrap_or(&self.file_name);
+        if self.in_pre {
+            format!("pre/{stem}")
+        } else {
+            stem.to_owned()
+        }
+    }
+
+    /// The path of the file relative to the changeset directory.
+    pub(crate) fn rel_path(&self) -> PathBuf {
+        if self.in_pre {
+            Path::new("pre").join(&self.file_name)
+        } else {
+            PathBuf::from(&self.file_name)
+        }
     }
 }
 
-/// Loads every changeset in `changeset_dir`, in file-name order. Package
-/// names are not validated here; callers match them against the workspace
-/// members.
+/// Loads every changeset in `changeset_dir`: the ones in its `pre/`
+/// subdirectory first, then the ones directly in it, each group in file-name
+/// order. Package names are not validated here; callers match them against
+/// the workspace members.
 pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
-    let entries = match fs::read_dir(changeset_dir) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => bail!(
+    let Some(file_names) = scan(changeset_dir)? else {
+        bail!(
             "{}: changeset directory not found; run `changesette init` to create it",
             changeset_dir.display()
-        ),
-        Err(err) => return Err(err).context(changeset_dir.display().to_string()),
+        )
+    };
+    let pre_dir = changeset_dir.join("pre");
+    let pre_file_names = scan(&pre_dir)?.unwrap_or_default();
+
+    pre_file_names
+        .iter()
+        .map(|file_name| load_one(&pre_dir, file_name, true))
+        .chain(
+            file_names
+                .iter()
+                .map(|file_name| load_one(changeset_dir, file_name, false)),
+        )
+        .collect()
+}
+
+// Returns the names of the changeset files directly in `dir`, sorted, or
+// `Ok(None)` if `dir` does not exist.
+fn scan(dir: &Path) -> Result<Option<Vec<String>>> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).context(dir.display().to_string()),
     };
 
     let mut file_names = Vec::new();
     for entry in entries {
-        let entry = entry.with_context(|| changeset_dir.display().to_string())?;
+        let entry = entry.with_context(|| dir.display().to_string())?;
         let Ok(file_name) = entry.file_name().into_string() else {
             continue;
         };
@@ -66,11 +111,7 @@ pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
         file_names.push(file_name);
     }
     file_names.sort();
-
-    file_names
-        .iter()
-        .map(|file_name| load_one(changeset_dir, file_name))
-        .collect()
+    Ok(Some(file_names))
 }
 
 /// Groups `changes` by package name: each named package maps to the widest
@@ -87,8 +128,8 @@ pub(crate) fn max_bumps(changes: &[LoadedChange]) -> BTreeMap<&str, Option<Bump>
     bumps
 }
 
-fn load_one(changeset_dir: &Path, file_name: &str) -> Result<LoadedChange> {
-    let file_path = changeset_dir.join(file_name);
+fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
+    let file_path = dir.join(file_name);
 
     let content =
         fs::read_to_string(&file_path).with_context(|| file_path.display().to_string())?;
@@ -146,6 +187,7 @@ fn load_one(changeset_dir: &Path, file_name: &str) -> Result<LoadedChange> {
 
     Ok(LoadedChange {
         file_name: file_name.to_owned(),
+        in_pre,
         releases,
         summary: summary.to_owned(),
     })
@@ -175,6 +217,18 @@ mod tests {
     #[test]
     fn sorts_by_file_name_and_skips_ignored_files() {
         insta::assert_debug_snapshot!(load_ok("ordering"));
+    }
+
+    #[test]
+    fn loads_pre_changesets_first_with_prefixed_ids() {
+        let changes = load_ok("with-pre");
+        insta::assert_debug_snapshot!(changes);
+        insta::assert_debug_snapshot!(
+            changes
+                .iter()
+                .map(|change| (change.id(), change.rel_path()))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -247,6 +301,7 @@ mod tests {
         let changes = [
             LoadedChange {
                 file_name: "a.md".into(),
+                in_pre: false,
                 releases: vec![
                     ("one".into(), Some(Bump::Patch)),
                     ("two".into(), Some(Bump::Major)),
@@ -255,6 +310,7 @@ mod tests {
             },
             LoadedChange {
                 file_name: "b.md".into(),
+                in_pre: false,
                 releases: vec![("one".into(), Some(Bump::Minor)), ("three".into(), None)],
                 summary: "b".into(),
             },
@@ -274,11 +330,13 @@ mod tests {
         let changes = [
             LoadedChange {
                 file_name: "a.md".into(),
+                in_pre: false,
                 releases: vec![("one".into(), None)],
                 summary: "a".into(),
             },
             LoadedChange {
                 file_name: "b.md".into(),
+                in_pre: false,
                 releases: vec![("one".into(), Some(Bump::Patch))],
                 summary: "b".into(),
             },
