@@ -27,6 +27,15 @@ pub(crate) struct LoadedChange {
     pub(crate) summary: String,
 }
 
+impl LoadedChange {
+    /// The changeset id: the file name without the `.md` extension.
+    pub(crate) fn id(&self) -> &str {
+        self.file_name
+            .strip_suffix(".md")
+            .unwrap_or(&self.file_name)
+    }
+}
+
 /// Loads every changeset in `changeset_dir` in file-name order. Package names
 /// are not validated here; callers match them against the workspace members.
 /// Entries are selected by name alone, as in the upstream `@changesets/read`:
