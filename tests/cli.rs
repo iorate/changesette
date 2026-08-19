@@ -898,6 +898,23 @@ fn version_output_writes_the_pretty_plan_and_applies_the_changesets() {
     assert!(!dir.path().join(".changeset").join(ULID_B).exists());
 }
 
+#[test]
+fn version_output_dash_writes_the_pretty_plan_to_stdout() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["version", "--output", "-"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), pretty_plan(ID_B) + "\n");
+    assert_eq!(stderr(&output), "");
+    assert!(!dir.path().join("-").exists());
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+}
+
 fn two_package_workspace_dir() -> TempDir {
     let dir = workspace_dir();
     fs::create_dir_all(dir.path().join("packages/b")).unwrap();
@@ -1130,6 +1147,23 @@ fn status_output_writes_the_pretty_plan_without_modifying_files() {
         pretty_plan(ID_B)
     );
     fs::remove_file(dir.path().join("plan.json")).unwrap();
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn status_output_dash_writes_the_pretty_plan_to_stdout() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["status", "-o", "-"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), pretty_plan(ID_B) + "\n");
+    assert_eq!(stderr(&output), "");
     assert_eq!(dir_snapshot(dir.path()), before);
 }
 

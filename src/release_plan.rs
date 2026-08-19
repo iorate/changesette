@@ -3,7 +3,7 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::{bump::Bump, changeset::LoadedChange, plan::PlannedRelease, pre::PreJson};
+use crate::{bump::Bump, changeset::LoadedChange, output, plan::PlannedRelease, pre::PreJson};
 
 /// The JSON document that `version` and `status` write with `--output`,
 /// mirroring the upstream `ReleasePlan` type (plus `changelogEntry` on each
@@ -94,5 +94,9 @@ pub(crate) fn build(
 }
 
 pub(crate) fn write_file(path: &Path, plan: &ReleasePlan) -> Result<()> {
-    fs::write(path, serde_json::to_string_pretty(plan)?).with_context(|| path.display().to_string())
+    let json = serde_json::to_string_pretty(plan)?;
+    if path == Path::new("-") {
+        return output::print_line(&json);
+    }
+    fs::write(path, json).with_context(|| path.display().to_string())
 }

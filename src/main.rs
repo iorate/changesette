@@ -53,7 +53,7 @@ enum Command {
         /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
         #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
         ignore: Vec<String>,
-        /// Write the release plan to the file as pretty-printed JSON
+        /// Write the release plan to the file (or stdout with `-`) as pretty-printed JSON
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
     },
@@ -67,7 +67,7 @@ enum Command {
         /// Show the new versions and the changeset files
         #[arg(short, long)]
         verbose: bool,
-        /// Write the release plan to the file as pretty-printed JSON instead
+        /// Write the release plan to the file (or stdout with `-`) as pretty-printed JSON instead
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
     },
