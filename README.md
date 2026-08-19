@@ -222,7 +222,7 @@ Applies all pending changesets: bumps each named package's `package.json`, inser
 {
   "changesets": [
     {
-      "id": "changesette-01M02G4ZT0Q3D9WVK6XJ5R8YBN",
+      "id": "lovely-notable-rooster",
       "summary": "Add feature",
       "releases": [
         {
@@ -239,7 +239,7 @@ Applies all pending changesets: bumps each named package's `package.json`, inser
       "oldVersion": "1.2.3",
       "newVersion": "1.3.0",
       "changesets": [
-        "changesette-01M02G4ZT0Q3D9WVK6XJ5R8YBN"
+        "lovely-notable-rooster"
       ],
       "changelogEntry": "### Minor Changes\n\n- Add feature"
     }

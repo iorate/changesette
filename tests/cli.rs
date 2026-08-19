@@ -9,8 +9,6 @@ use std::{
 use tempfile::TempDir;
 use util::{dir_snapshot, write_changeset};
 
-const CROCKFORD_ALPHABET: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
 const CHANGELOG: &str = "# ublacklist\n\n## 1.1.0\n\n### Minor Changes\n\n- Add feature\n\n## 1.0.0\n\n### Patch Changes\n\n- Fix bug\n";
 
 fn changesette(dir: &Path, args: &[&str]) -> Output {
@@ -46,14 +44,17 @@ fn added_path(out: &str) -> &str {
 }
 
 fn assert_changeset_path(line: &str) {
-    let ulid = line
-        .strip_prefix(".changeset/changesette-")
+    let name = line
+        .strip_prefix(".changeset/")
         .and_then(|rest| rest.strip_suffix(".md"))
         .unwrap_or_else(|| panic!("unexpected path: {line}"));
-    assert_eq!(ulid.len(), 26, "unexpected ULID length: {ulid}");
+    let words: Vec<&str> = name.split('-').collect();
+    assert_eq!(words.len(), 3, "unexpected word count: {name}");
     assert!(
-        ulid.chars().all(|c| CROCKFORD_ALPHABET.contains(c)),
-        "unexpected ULID characters: {ulid}"
+        words
+            .iter()
+            .all(|word| !word.is_empty() && word.chars().all(|c| c.is_ascii_lowercase())),
+        "unexpected name characters: {name}"
     );
 }
 
@@ -413,7 +414,7 @@ fn add_from_a_subdirectory_targets_the_workspace_root() {
     let out = stdout(&output);
     let line = added_path(&out);
     let rest = line
-        .strip_prefix("../../.changeset/changesette-")
+        .strip_prefix("../../.changeset/")
         .unwrap_or_else(|| panic!("unexpected path: {line}"));
     assert!(rest.ends_with(".md"), "{line}");
     let content = fs::read_to_string(dir.path().join("packages/a").join(line)).unwrap();

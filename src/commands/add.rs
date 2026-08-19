@@ -6,7 +6,6 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
-use ulid::Ulid;
 
 use crate::{
     bump::Bump,
@@ -74,7 +73,14 @@ pub(crate) fn run(
         (releases, summary)
     };
 
-    let file_name = format!("changesette-{}.md", Ulid::generate());
+    let file_name = format!(
+        "{}.md",
+        petname::Petnames::small()
+            .namer(3, "-")
+            .iter(&mut rand::rng())
+            .next()
+            .context("failed to generate a changeset name")?
+    );
     let path = changeset_dir.join(&file_name);
     let content = render(&releases, &summary)?;
     fs::OpenOptions::new()
