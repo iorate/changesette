@@ -1,18 +1,9 @@
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::{
-    bump::{self, Bump},
-    changelog::{self, render_entry, render_section},
-    changeset::{self, LoadedChange},
-    package_json::PackageJson,
-    workspace::Workspace,
-};
+use crate::{bump::Bump, changeset::LoadedChange, plan::PlannedRelease};
 
 /// The JSON document that `version` and `status` write with `--output`,
 /// mirroring the upstream `ReleasePlan` type (without `preState`, plus
@@ -69,96 +60,14 @@ pub(crate) struct Release {
     pub(crate) changelog_entry: Option<String>,
 }
 
-/// A file update staged by [`compute`]: applying the plan writes the bumped
-/// package.json back and replaces the member's CHANGELOG.md content.
-pub(crate) struct PlannedWrite {
-    /// The member's package.json with the new version already set.
-    pub(crate) package_json: PackageJson,
-    /// The member's CHANGELOG.md path.
-    pub(crate) changelog_path: PathBuf,
-    /// The full new CHANGELOG.md content.
-    pub(crate) changelog_text: String,
-}
-
-/// Builds the release plan for the given changesets, validating that every
-/// package they name is a workspace member, and stages the file writes that
-/// would apply it. Reads each named member's package.json and CHANGELOG.md
-/// but modifies nothing on disk.
-pub(crate) fn compute(
-    workspace: &Workspace,
-    changes: &[LoadedChange],
-) -> Result<(ReleasePlan, Vec<PlannedWrite>)> {
-    let changeset_dir = workspace.root().join(".changeset");
-    for change in changes {
-        for (name, _) in &change.releases {
-            workspace
-                .member(name)
-                .with_context(|| changeset_dir.join(&change.file_name).display().to_string())?;
-        }
-    }
-
-    let mut releases = Vec::new();
-    let mut writes = Vec::new();
-    for (name, max_bump) in changeset::max_bumps(changes) {
-        let member = workspace.member(name)?;
-        let mut package_json = PackageJson::load(member.dir())?;
-        let old_version = package_json.version().clone();
-        let ids = changes
-            .iter()
-            .filter(|change| change.releases.iter().any(|(n, _)| n == name))
-            .map(id)
-            .collect();
-
-        let (new_version, changelog_entry) = match max_bump {
-            Some(max_bump) => {
-                let next = bump::next_version(&old_version, max_bump);
-                let entries: Vec<(Bump, &str)> = changes
-                    .iter()
-                    .filter_map(|change| {
-                        change
-                            .releases
-                            .iter()
-                            .find(|(n, _)| n == name)
-                            .and_then(|(_, bump)| *bump)
-                            .map(|bump| (bump, change.summary.as_str()))
-                    })
-                    .collect();
-                let entry = render_entry(&entries);
-                let section = render_section(&next, &entry);
-
-                package_json.set_version(&next)?;
-                let changelog_path = member.dir().join("CHANGELOG.md");
-                let changelog_text = match fs::read_to_string(&changelog_path) {
-                    Ok(text) => text,
-                    Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
-                    Err(err) => return Err(err).context(changelog_path.display().to_string()),
-                };
-                let new_changelog_text =
-                    changelog::upsert_section(&changelog_text, name, &next.to_string(), &section);
-                writes.push(PlannedWrite {
-                    package_json,
-                    changelog_path,
-                    changelog_text: new_changelog_text,
-                });
-                (next, Some(entry))
-            }
-            None => (old_version.clone(), None),
-        };
-        releases.push(Release {
-            name: name.to_owned(),
-            bump: max_bump.map_or("none", Bump::as_str),
-            old_version: old_version.to_string(),
-            new_version: new_version.to_string(),
-            changesets: ids,
-            changelog_entry,
-        });
-    }
-
-    let plan = ReleasePlan {
+/// Builds the JSON document from the consumed changesets and their planned
+/// releases.
+pub(crate) fn build(changes: &[LoadedChange], releases: &[PlannedRelease]) -> ReleasePlan {
+    ReleasePlan {
         changesets: changes
             .iter()
             .map(|change| ChangesetEntry {
-                id: id(change),
+                id: change.id().to_owned(),
                 summary: change.summary.clone(),
                 releases: change
                     .releases
@@ -170,20 +79,21 @@ pub(crate) fn compute(
                     .collect(),
             })
             .collect(),
-        releases,
-    };
-    Ok((plan, writes))
+        releases: releases
+            .iter()
+            .map(|release| Release {
+                name: release.name.clone(),
+                bump: release.bump.map_or("none", Bump::as_str),
+                old_version: release.old_version.to_string(),
+                new_version: release.new_version.to_string(),
+                changesets: release.changeset_ids.clone(),
+                changelog_entry: release.changelog_entry.clone(),
+            })
+            .collect(),
+    }
 }
 
 /// Writes `plan` to `path` as pretty-printed JSON without a trailing newline.
 pub(crate) fn write_file(path: &Path, plan: &ReleasePlan) -> Result<()> {
     fs::write(path, serde_json::to_string_pretty(plan)?).with_context(|| path.display().to_string())
-}
-
-fn id(change: &LoadedChange) -> String {
-    change
-        .file_name
-        .strip_suffix(".md")
-        .unwrap_or(&change.file_name)
-        .to_owned()
 }

@@ -83,10 +83,14 @@ impl PackageJson {
         Ok(())
     }
 
-    /// Writes the possibly modified text back to the file it was loaded from.
-    pub(crate) fn save(&self) -> Result<()> {
-        fs::write(&self.path, self.root.to_string())
-            .with_context(|| self.path.display().to_string())
+    /// The path of the file this was loaded from.
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Renders the possibly modified document text.
+    pub(crate) fn text(&self) -> String {
+        self.root.to_string()
     }
 }
 
@@ -128,7 +132,7 @@ mod tests {
         package_json
             .set_version(&semver::Version::new(10, 1, 0))
             .unwrap();
-        package_json.save().unwrap();
+        fs::write(package_json.path(), package_json.text()).unwrap();
         fs::read_to_string(dir.path().join("package.json")).unwrap()
     }
 

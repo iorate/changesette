@@ -9,14 +9,14 @@ use crate::bump::Bump;
 /// Renders a version's changelog entry, grouping the release lines (changeset
 /// summaries) under Major/Minor/Patch headings and omitting empty groups. The
 /// result has no `## <version>` heading and no surrounding newlines.
-pub(crate) fn render_entry(entries: &[(Bump, &str)]) -> String {
+pub(crate) fn render_entry(summaries: &[(Bump, &str)]) -> String {
     let mut blocks = Vec::new();
     for (bump, heading) in [
         (Bump::Major, "### Major Changes"),
         (Bump::Minor, "### Minor Changes"),
         (Bump::Patch, "### Patch Changes"),
     ] {
-        let group = entries.iter().filter(|(b, _)| *b == bump);
+        let group = summaries.iter().filter(|(b, _)| *b == bump);
         let mut has_heading = false;
         for (_, body) in group {
             if !has_heading {
@@ -222,8 +222,8 @@ mod tests {
     use super::*;
     use crate::bump::Bump;
 
-    fn render(entries: &[(Bump, &str)]) -> String {
-        render_section(&"10.1.0".parse().unwrap(), &render_entry(entries))
+    fn render(summaries: &[(Bump, &str)]) -> String {
+        render_section(&"10.1.0".parse().unwrap(), &render_entry(summaries))
     }
 
     fn read_fixture(area: &str, case: &str) -> String {

@@ -2,7 +2,7 @@ use std::{env, fs, path::Path};
 
 use anyhow::{Context, Result, bail};
 
-use crate::{changeset, output, release_plan, workspace::Workspace};
+use crate::{changeset, output, plan, release_plan, workspace::Workspace};
 
 /// Consumes every changeset in the workspace: bumps each named package's
 /// package.json, inserts the new section into its CHANGELOG.md, and deletes
@@ -43,12 +43,11 @@ pub(crate) fn run(ignore: &[String], output_path: Option<&Path>) -> Result<()> {
         }
     }
 
-    let (plan, writes) = release_plan::compute(&workspace, &consumed)?;
+    let releases = plan::plan_releases(&workspace, &consumed)?;
+    let writes = plan::stage_writes(&workspace, &releases)?;
 
-    for write in writes {
-        write.package_json.save()?;
-        fs::write(&write.changelog_path, write.changelog_text)
-            .with_context(|| write.changelog_path.display().to_string())?;
+    for write in &writes {
+        write.apply()?;
     }
     for change in &consumed {
         let path = changeset_dir.join(&change.file_name);
@@ -56,13 +55,13 @@ pub(crate) fn run(ignore: &[String], output_path: Option<&Path>) -> Result<()> {
     }
 
     match output_path {
-        Some(path) => release_plan::write_file(path, &plan),
+        Some(path) => release_plan::write_file(path, &release_plan::build(&consumed, &releases)),
         None => {
             if no_changes {
                 return output::print_line("No unreleased changesets found.");
             }
-            for release in &plan.releases {
-                if release.bump != "none" {
+            for release in &releases {
+                if release.bump.is_some() {
                     output::print_line(&format!(
                         "Bumped {} {} -> {}",
                         release.name, release.old_version, release.new_version
