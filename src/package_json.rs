@@ -20,8 +20,6 @@ pub(crate) struct PackageJson {
 }
 
 impl PackageJson {
-    /// Loads `package.json` under `dir`, validating its top-level `name` and
-    /// `version`.
     pub(crate) fn load(dir: &Path) -> Result<Self> {
         let path = dir.join("package.json");
         let text = match fs::read_to_string(&path) {
@@ -66,29 +64,24 @@ impl PackageJson {
         })
     }
 
-    /// The top-level `name`.
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
-    /// The current top-level `version`.
     pub(crate) fn version(&self) -> &semver::Version {
         &self.version
     }
 
-    /// Sets the top-level `version`.
     pub(crate) fn set_version(&mut self, version: &semver::Version) -> Result<()> {
         set_string_value(&self.version_lit, &version.to_string());
         self.version = version.clone();
         Ok(())
     }
 
-    /// The path of the file this was loaded from.
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Renders the possibly modified document text.
     pub(crate) fn text(&self) -> String {
         self.root.to_string()
     }
