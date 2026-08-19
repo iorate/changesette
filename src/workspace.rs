@@ -15,15 +15,12 @@ const MATCH_OPTIONS: MatchOptions = MatchOptions {
     require_literal_leading_dot: true,
 };
 
-/// A discovered workspace: the root directory that holds the `.changeset`
-/// directory, and the member packages it declares.
 #[derive(Debug)]
 pub(crate) struct Workspace {
     root: PathBuf,
     members: Vec<Member>,
 }
 
-/// A member package of a workspace.
 #[derive(Debug)]
 pub(crate) struct Member {
     name: String,
@@ -31,9 +28,9 @@ pub(crate) struct Member {
 }
 
 impl Workspace {
-    /// Discovers the workspace containing `cwd`: the nearest ancestor that is
-    /// a pnpm or npm workspace root wins, and without one the nearest ancestor
-    /// with a `package.json` becomes a single-package workspace.
+    /// Discovers the workspace containing `cwd`: the nearest ancestor that
+    /// is a pnpm or npm workspace root wins, and without one the nearest
+    /// ancestor with a `package.json` becomes a single-package workspace.
     pub(crate) fn discover(cwd: &Path) -> Result<Workspace> {
         let mut fallback = None;
         for dir in cwd.ancestors() {
@@ -84,18 +81,16 @@ impl Workspace {
         })
     }
 
-    /// The workspace root directory.
     pub(crate) fn root(&self) -> &Path {
         &self.root
     }
 
-    /// The members in package-name order; empty only for a workspace whose
-    /// globs match nothing.
+    /// In package-name order; empty only for a workspace whose globs match
+    /// nothing.
     pub(crate) fn members(&self) -> &[Member] {
         &self.members
     }
 
-    /// Resolves a member by package name.
     pub(crate) fn member(&self, name: &str) -> Result<&Member> {
         if let Some(member) = self.members.iter().find(|member| member.name == name) {
             return Ok(member);
@@ -112,9 +107,8 @@ impl Workspace {
         bail!("package `{name}` not found; known packages: {known}")
     }
 
-    /// Renders `path` relative to `cwd` for display, climbing from `cwd` to
-    /// the workspace root with `..` components; returns `path` unchanged when
-    /// either path is not under the root.
+    /// Renders `path` relative to `cwd` for display; returns `path`
+    /// unchanged when either path is not under the workspace root.
     pub(crate) fn display_path(&self, cwd: &Path, path: &Path) -> PathBuf {
         match (cwd.strip_prefix(&self.root), path.strip_prefix(&self.root)) {
             (Ok(cwd_rel), Ok(path_rel)) => {
@@ -131,12 +125,10 @@ impl Workspace {
 }
 
 impl Member {
-    /// The package name from the member's `package.json`.
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
-    /// The member's directory.
     pub(crate) fn dir(&self) -> &Path {
         &self.dir
     }

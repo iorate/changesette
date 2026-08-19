@@ -6,9 +6,10 @@ use semver::Version;
 
 use crate::bump::Bump;
 
-/// Renders a version's changelog entry, grouping the release lines (changeset
-/// summaries) under Major/Minor/Patch headings and omitting empty groups. The
-/// result has no `## <version>` heading and no surrounding newlines.
+/// Renders a version's changelog entry, grouping the release lines
+/// (changeset summaries) under Major/Minor/Patch headings and omitting empty
+/// groups. The result has no `## <version>` heading and no surrounding
+/// newlines.
 pub(crate) fn render_entry(summaries: &[(Bump, &str)]) -> String {
     let mut blocks = Vec::new();
     for (bump, heading) in [

@@ -11,31 +11,23 @@ use crate::{
     workspace::Workspace,
 };
 
-/// The version change planned for one package: the widest bump requested by
-/// the changesets naming it, with the resulting version and changelog entry.
 pub(crate) struct PlannedRelease {
-    /// The package name.
     pub(crate) name: String,
     /// The widest bump requested for the package; `None` when it is only
     /// ever named with the `none` type.
     pub(crate) bump: Option<Bump>,
-    /// The package version before this run.
     pub(crate) old_version: Version,
-    /// The package version after this run; equals `old_version` for a `None`
-    /// bump.
     pub(crate) new_version: Version,
     /// The ids of the changesets naming this package (`none` entries
     /// included), in file-name order.
     pub(crate) changeset_ids: Vec<String>,
-    /// The changelog entry for this release: the body of the new
-    /// `## <new_version>` section, without the heading. `None` for a `None`
-    /// bump.
+    /// The body of the new `## <new_version>` section, without the heading.
+    /// `None` for a `None` bump.
     pub(crate) changelog_entry: Option<String>,
 }
 
-/// Plans the release of each package named by `changes`, in package-name
-/// order, validating that every named package is a workspace member. Reads
-/// each named member's package.json but modifies nothing on disk.
+/// Plans the release of each package named by `changes`, validating that
+/// every named package is a workspace member. Modifies nothing on disk.
 pub(crate) fn plan_releases(
     workspace: &Workspace,
     changes: &[LoadedChange],
@@ -92,25 +84,20 @@ pub(crate) fn plan_releases(
     Ok(releases)
 }
 
-/// A single file update staged by [`stage_writes`]: applying it replaces the
-/// file at `path` with `content`.
 pub(crate) struct StagedWrite {
-    /// The file to replace.
     pub(crate) path: PathBuf,
-    /// The full new content of the file.
     pub(crate) content: String,
 }
 
 impl StagedWrite {
-    /// Writes `content` to `path`.
     pub(crate) fn apply(&self) -> Result<()> {
         fs::write(&self.path, &self.content).with_context(|| self.path.display().to_string())
     }
 }
 
-/// Stages the file writes that apply `releases`: for each bumped package, its
+/// Stages the writes that apply `releases`: each bumped package's
 /// package.json with the new version set and its CHANGELOG.md with the new
-/// section upserted. Reads those files but modifies nothing on disk.
+/// section upserted. Modifies nothing on disk.
 pub(crate) fn stage_writes(
     workspace: &Workspace,
     releases: &[PlannedRelease],

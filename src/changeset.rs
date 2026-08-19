@@ -13,14 +13,12 @@ const IGNORED_FILE_NAMES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "GEMINI.md"];
 static FRONTMATTER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)\s*---(.*?)\r?\n\s*---(\s*(?:\n|$).*)").unwrap());
 
-/// A changeset parsed from one `.changeset/*.md` file.
 #[derive(Debug)]
 pub(crate) struct LoadedChange {
-    /// The file name within the changeset directory, e.g. `brave-lions-jump.md`.
     pub(crate) file_name: String,
     /// The packages named in the frontmatter, in frontmatter order, each with
-    /// its requested bump; `None` stands for the `none` type (no bump). Empty
-    /// for an empty changeset.
+    /// its requested bump; `None` stands for the `none` type. Empty for an
+    /// empty changeset.
     pub(crate) releases: Vec<(String, Option<Bump>)>,
     /// The summary text below the frontmatter, trimmed. May be empty, as in
     /// the upstream parser, which does not validate the summary.
@@ -28,7 +26,6 @@ pub(crate) struct LoadedChange {
 }
 
 impl LoadedChange {
-    /// The changeset id: the file name without the `.md` extension.
     pub(crate) fn id(&self) -> &str {
         self.file_name
             .strip_suffix(".md")
@@ -36,12 +33,9 @@ impl LoadedChange {
     }
 }
 
-/// Loads every changeset in `changeset_dir` in file-name order. Package names
-/// are not validated here; callers match them against the workspace members.
-/// Entries are selected by name alone, as in the upstream `@changesets/read`:
-/// dotfiles, non-`.md` names, README.md, and agent instruction files are
-/// skipped, symlinks are followed, and a directory with an adopted name is a
-/// read error.
+/// Loads every changeset in `changeset_dir`, in file-name order. Package
+/// names are not validated here; callers match them against the workspace
+/// members.
 pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
     let entries = match fs::read_dir(changeset_dir) {
         Ok(entries) => entries,
@@ -58,6 +52,10 @@ pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
         let Ok(file_name) = entry.file_name().into_string() else {
             continue;
         };
+        // Entries are selected by name alone, as in the upstream
+        // `@changesets/read`: dotfiles, non-`.md` names, README.md, and agent
+        // instruction files are skipped, symlinks are followed, and a
+        // directory with an adopted name is a read error.
         if file_name.starts_with('.')
             || !file_name.ends_with(".md")
             || file_name.eq_ignore_ascii_case("README.md")
@@ -77,7 +75,7 @@ pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
 
 /// Groups `changes` by package name: each named package maps to the widest
 /// bump requested for it, or `None` when it is only ever named with the
-/// `none` type. Iteration order is the package name order.
+/// `none` type.
 pub(crate) fn max_bumps(changes: &[LoadedChange]) -> BTreeMap<&str, Option<Bump>> {
     let mut bumps = BTreeMap::new();
     for change in changes {
