@@ -82,8 +82,8 @@ jobs:
 
       - id: version
         run: |
-          changesette version --output "$RUNNER_TEMP/plan.json"
-          if release="$(jq -e '[.releases[] | select(.type != "none")][0]' "$RUNNER_TEMP/plan.json")"; then
+          plan="$(changesette version --output -)"
+          if release="$(jq -e '[.releases[] | select(.type != "none")][0]' <<< "$plan")"; then
             version="$(jq -re '.newVersion' <<< "$release")"
             echo "title=Release v$version" >> "$GITHUB_OUTPUT"
             delim="$(openssl rand -hex 16)"
@@ -157,13 +157,13 @@ jobs:
 
       - id: version
         run: |
-          changesette version --output "$RUNNER_TEMP/plan.json"
-          if jq -e 'any(.releases[]; .type != "none")' "$RUNNER_TEMP/plan.json" > /dev/null; then
+          plan="$(changesette version --output -)"
+          if jq -e 'any(.releases[]; .type != "none")' <<< "$plan" > /dev/null; then
             echo "title=Version packages" >> "$GITHUB_OUTPUT"
             delim="$(openssl rand -hex 16)"
             {
               echo "body<<$delim"
-              jq -r '[.releases[] | select(.type != "none") | "## \(.name)@\(.newVersion)\n\n\(.changelogEntry)"] | join("\n\n")' "$RUNNER_TEMP/plan.json"
+              jq -r '[.releases[] | select(.type != "none") | "## \(.name)@\(.newVersion)\n\n\(.changelogEntry)"] | join("\n\n")' <<< "$plan"
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
             pnpm install --lockfile-only
@@ -218,7 +218,7 @@ In pre-release mode, `version` bumps to `-<tag>.<n>` prereleases and moves the c
 
 `--ignore` takes a comma-separated list of package names and may be repeated. Each name must be a workspace member's package name. Changesets naming an ignored package are skipped: they are excluded from the release plan and left in place for a later run. A changeset naming both an ignored and a not-ignored package is an error.
 
-`--output` (short form `-o`) suppresses stdout and writes the release plan to the given file as pretty-printed JSON, mirroring the changesets `ReleasePlan` type (an empty plan when there are zero changesets):
+`--output` (short form `-o`) suppresses the report and writes the release plan to the given file (`-` for stdout) as pretty-printed JSON, mirroring the changesets `ReleasePlan` type (an empty plan when there are zero changesets):
 
 ```json
 {
@@ -253,7 +253,7 @@ In pre-release mode, `version` bumps to `-<tag>.<n>` prereleases and moves the c
 
 ### `changesette status [--verbose] [--output <file>]`
 
-Prints the packages that `version` would bump, without changing any file. `--verbose` (short form `-v`) adds each package's new version and the changeset files naming it. `--output` (short form `-o`) writes the release plan to the given file instead of printing the list — the same file `version --output` writes. Packages named only with the `none` type appear in the JSON but not in the list.
+Prints the packages that `version` would bump, without changing any file. `--verbose` (short form `-v`) adds each package's new version and the changeset files naming it. `--output` (short form `-o`) writes the release plan to the given file (`-` for stdout) instead of printing the list — the same JSON `version --output` writes. Packages named only with the `none` type appear in the JSON but not in the list.
 
 ### `changesette pre enter <tag>`
 

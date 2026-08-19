@@ -13,9 +13,9 @@ use crate::{
 /// Prints the packages to be bumped by `version` to stdout; packages named
 /// only with `none` are omitted. With `verbose`, also shows each package's
 /// new version and the changeset files naming it. With `output_path`, writes
-/// the release plan to that file as pretty-printed JSON instead and prints
-/// nothing. Follows the same plan as `version`, pre mode included. Modifies
-/// no file other than `output_path`.
+/// the release plan as pretty-printed JSON to that file (or to stdout when
+/// the path is `-`) instead. Follows the same plan as `version`, pre mode
+/// included. Modifies no file other than `output_path`.
 pub(crate) fn run(verbose: bool, output_path: Option<&Path>) -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
     let changeset_dir = workspace.root().join(".changeset");

@@ -24,9 +24,9 @@ use crate::{
 /// the parked files are replanned along with the new ones into final versions
 /// and pre.json is deleted, even when there is nothing to release.
 ///
-/// Reports the applied bumps to stdout; with `output_path`, prints nothing
-/// and instead writes the release plan, each bumped release carrying its new
-/// changelog entry, to that file as pretty-printed JSON.
+/// Reports the applied bumps to stdout; with `output_path`, instead writes
+/// the release plan, each bumped release carrying its new changelog entry,
+/// as pretty-printed JSON to that file (or to stdout when the path is `-`).
 pub(crate) fn run(ignore: &[String], output_path: Option<&Path>) -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
     for name in ignore {
