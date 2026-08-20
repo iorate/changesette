@@ -15,7 +15,7 @@ A version and changelog manager using the same changeset file format as [changes
 GitHub Actions (verifies the build provenance of the downloaded archive; GitHub-hosted runners are assumed):
 
 ```yaml
-uses: iorate/changesette/setup@v3
+uses: iorate/changesette/setup@v4
 ```
 
 Shell script (macOS / Linux):
@@ -78,7 +78,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: iorate/changesette/setup@v3
+      - uses: iorate/changesette/setup@v4
 
       - id: version
         run: |
@@ -153,7 +153,7 @@ jobs:
 
       - uses: pnpm/action-setup@v6
 
-      - uses: iorate/changesette/setup@v3
+      - uses: iorate/changesette/setup@v4
 
       - id: version
         run: |
