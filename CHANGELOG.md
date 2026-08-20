@@ -1,5 +1,11 @@
 # changesette
 
+## 4.0.1
+
+### Patch Changes
+
+- Update the setup action references in the README to v4.
+
 ## 4.0.0
 
 ### Major Changes
