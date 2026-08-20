@@ -15,7 +15,7 @@ use crate::{
 };
 
 /// Creates a changeset file under the workspace root's `.changeset/` and
-/// reports it to stdout; the directory must already exist (see `init`).
+/// reports it to stderr; the directory must already exist (see `init`).
 /// With `empty`, the changeset names no packages and nothing is prompted.
 /// Otherwise the releases come from the bump flags when any is given, and the
 /// summary from `message`; inputs missing from the flags are prompted for
@@ -102,10 +102,10 @@ pub(crate) fn run(
                 confirmation.push_str(&format!("\n{}:  {}", bump.as_str(), names.join(", ")));
             }
         }
-        eprintln!("{confirmation}");
+        output::eprint_line(&confirmation)?;
     }
 
-    output::print_line(&format!(
+    output::eprint_line(&format!(
         "Added {}",
         workspace.display_path(&cwd, &path).display()
     ))?;

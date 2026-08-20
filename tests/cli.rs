@@ -37,10 +37,10 @@ fn package_dir() -> TempDir {
     dir
 }
 
-fn added_path(out: &str) -> &str {
-    out.strip_suffix('\n')
-        .and_then(|line| line.strip_prefix("Added "))
-        .unwrap_or_else(|| panic!("unexpected output: {out:?}"))
+fn added_path(err: &str) -> &str {
+    err.lines()
+        .find_map(|line| line.strip_prefix("Added "))
+        .unwrap_or_else(|| panic!("unexpected output: {err:?}"))
 }
 
 fn assert_changeset_path(line: &str) {
@@ -63,8 +63,8 @@ fn init_creates_the_changeset_directory_with_a_readme() {
     let dir = package_dir();
     let output = changesette(dir.path(), &["init"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Initialized .changeset\n");
-    assert_eq!(stderr(&output), "");
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "Initialized .changeset\n");
     let readme = fs::read_to_string(dir.path().join(".changeset/README.md")).unwrap();
     assert!(readme.starts_with("# Changesets\n"), "{readme}");
 }
@@ -74,7 +74,7 @@ fn init_creates_the_directory_at_the_workspace_root() {
     let dir = workspace_dir();
     let output = changesette(&dir.path().join("packages/a"), &["init"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Initialized ../../.changeset\n");
+    assert_eq!(stderr(&output), "Initialized ../../.changeset\n");
     assert!(dir.path().join(".changeset/README.md").is_file());
     assert!(!dir.path().join("packages/a/.changeset").exists());
 }
@@ -101,16 +101,12 @@ fn add_with_flags_creates_a_changeset() {
         &["add", "--minor", "ublacklist", "--message", "Add feature"],
     );
     assert!(output.status.success(), "{}", stderr(&output));
-    let out = stdout(&output);
-    let line = added_path(&out);
-    assert!(
-        !line.contains('\n'),
-        "stdout must be a single `Added` line: {out:?}"
-    );
+    assert_eq!(stdout(&output), "");
+    let err = stderr(&output);
+    let line = added_path(&err);
     assert_changeset_path(line);
     let content = fs::read_to_string(dir.path().join(line)).unwrap();
     assert_eq!(content, "---\nublacklist: minor\n---\n\nAdd feature\n");
-    let err = stderr(&output);
     assert!(err.contains("Summary of changesets:"), "{err}");
     assert!(err.contains("minor:  ublacklist"), "{err}");
 }
@@ -135,8 +131,8 @@ fn add_quotes_a_scoped_package_name() {
         ],
     );
     assert!(output.status.success(), "{}", stderr(&output));
-    let out = stdout(&output);
-    let content = fs::read_to_string(dir.path().join(added_path(&out))).unwrap();
+    let err = stderr(&output);
+    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
     assert_eq!(
         content,
         "---\n\"@iorate/ublacklist\": minor\n---\n\nAdd feature\n"
@@ -152,9 +148,9 @@ fn add_is_the_default_command() {
         &["--minor", "ublacklist", "--message", "Add feature"],
     );
     assert!(output.status.success(), "{}", stderr(&output));
-    let out = stdout(&output);
-    assert_changeset_path(added_path(&out));
-    let content = fs::read_to_string(dir.path().join(added_path(&out))).unwrap();
+    let err = stderr(&output);
+    assert_changeset_path(added_path(&err));
+    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
     assert_eq!(content, "---\nublacklist: minor\n---\n\nAdd feature\n");
 }
 
@@ -182,8 +178,8 @@ fn add_accepts_a_multi_line_message_via_the_short_flag() {
         &["add", "--patch", "ublacklist", "-m", "line1\nline2"],
     );
     assert!(output.status.success(), "{}", stderr(&output));
-    let out = stdout(&output);
-    let content = fs::read_to_string(dir.path().join(added_path(&out))).unwrap();
+    let err = stderr(&output);
+    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
     assert_eq!(content, "---\nublacklist: patch\n---\n\nline1\nline2\n");
 }
 
@@ -213,8 +209,8 @@ fn add_records_multiple_packages_in_flag_order() {
         ],
     );
     assert!(output.status.success(), "{}", stderr(&output));
-    let out = stdout(&output);
-    let content = fs::read_to_string(dir.path().join(added_path(&out))).unwrap();
+    let err = stderr(&output);
+    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
     assert_eq!(
         content,
         "---\npkg-a: minor\npkg-c: patch\npkg-b: patch\n---\n\nImprove things\n"
@@ -239,8 +235,8 @@ fn add_accumulates_repeated_bump_flags() {
         ],
     );
     assert!(output.status.success(), "{}", stderr(&output));
-    let out = stdout(&output);
-    let content = fs::read_to_string(dir.path().join(added_path(&out))).unwrap();
+    let err = stderr(&output);
+    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
     assert_eq!(
         content,
         "---\npkg-a: patch\npkg-b: patch\n---\n\nFix bugs\n"
@@ -324,8 +320,8 @@ fn add_accepts_an_empty_message() {
     fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(dir.path(), &["add", "--minor", "ublacklist", "-m", ""]);
     assert!(output.status.success(), "{}", stderr(&output));
-    let out = stdout(&output);
-    let content = fs::read_to_string(dir.path().join(added_path(&out))).unwrap();
+    let err = stderr(&output);
+    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
     assert_eq!(content, "---\nublacklist: minor\n---\n");
 }
 
@@ -345,15 +341,11 @@ fn add_empty_creates_an_empty_changeset() {
     fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(dir.path(), &["add", "--empty"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    let out = stdout(&output);
-    assert_changeset_path(added_path(&out));
-    let content = fs::read_to_string(dir.path().join(added_path(&out))).unwrap();
+    let err = stderr(&output);
+    assert_changeset_path(added_path(&err));
+    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
     assert_eq!(content, "---\n---\n");
-    assert!(
-        !stderr(&output).contains("Summary of changesets:"),
-        "{}",
-        stderr(&output)
-    );
+    assert!(!err.contains("Summary of changesets:"), "{err}");
 }
 
 #[test]
@@ -362,8 +354,8 @@ fn add_empty_with_a_message_appends_the_summary() {
     fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(dir.path(), &["add", "--empty", "-m", "Note only"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    let out = stdout(&output);
-    let content = fs::read_to_string(dir.path().join(added_path(&out))).unwrap();
+    let err = stderr(&output);
+    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
     assert_eq!(content, "---\n---\n\nNote only\n");
 }
 
@@ -411,8 +403,8 @@ fn add_from_a_subdirectory_targets_the_workspace_root() {
         &["add", "--minor", "pkg-a", "-m", "Add feature"],
     );
     assert!(output.status.success(), "{}", stderr(&output));
-    let out = stdout(&output);
-    let line = added_path(&out);
+    let err = stderr(&output);
+    let line = added_path(&err);
     let rest = line
         .strip_prefix("../../.changeset/")
         .unwrap_or_else(|| panic!("unexpected path: {line}"));
@@ -596,22 +588,47 @@ const ID_A: &str = "changesette-01H455VB4PEX5VSKNK084SN02Q";
 const ID_B: &str = "changesette-01H455WZ0H1X9PE0QB0MV1P1KG";
 
 #[test]
-fn version_with_zero_changesets_prints_a_notice_and_touches_nothing() {
+fn version_with_zero_changesets_fails_and_touches_nothing() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
     let before = dir_snapshot(dir.path());
     let output = changesette(dir.path(), &["version"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "No unreleased changesets found.\n");
-    assert_eq!(stderr(&output), "");
+    assert!(!output.status.success());
+    assert_eq!(stdout(&output), "");
+    assert!(
+        stderr(&output).contains("no unreleased changesets found"),
+        "{}",
+        stderr(&output)
+    );
     assert_eq!(dir_snapshot(dir.path()), before);
 }
 
 #[test]
-fn version_output_with_zero_changesets_writes_an_empty_plan() {
+fn version_allow_no_changesets_prints_a_notice_and_touches_nothing() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "--allow-no-changesets"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "No unreleased changesets found.\n");
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_output_with_zero_changesets_fails_without_writing_the_plan() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(dir.path(), &["version", "--output", "plan.json"]);
+    assert!(!output.status.success());
+    assert!(!dir.path().join("plan.json").exists());
+}
+
+#[test]
+fn version_allow_no_changesets_output_writes_an_empty_plan() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    let output = changesette(dir.path(), &["version", "-a", "--output", "plan.json"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
     assert_eq!(stderr(&output), "");
@@ -645,8 +662,8 @@ fn version_bumps_and_writes_the_changelog() {
     fs::write(dir.path().join(".changeset/README.md"), "# Changesets\n").unwrap();
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Bumped ublacklist 1.2.3 -> 1.3.0\n");
-    assert_eq!(stderr(&output), "");
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "Bumped ublacklist 1.2.3 -> 1.3.0\n");
     assert_eq!(
         fs::read_to_string(dir.path().join("package.json")).unwrap(),
         "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.3.0\"\n}\n"
@@ -738,7 +755,7 @@ fn version_bumps_only_the_named_workspace_members() {
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
-        stdout(&output),
+        stderr(&output),
         "Bumped pkg-a 3.1.4 -> 3.2.0\nBumped pkg-b 2.0.0 -> 2.0.1\n"
     );
     assert_eq!(
@@ -933,7 +950,7 @@ fn version_ignore_skips_the_package_and_keeps_its_changeset() {
     write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
     let output = changesette(dir.path(), &["version", "--ignore", "pkg-b"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Bumped pkg-a 3.1.4 -> 3.2.0\n");
+    assert_eq!(stderr(&output), "Bumped pkg-a 3.1.4 -> 3.2.0\n");
     assert_eq!(
         fs::read_to_string(dir.path().join("packages/a/package.json")).unwrap(),
         "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.2.0\"\n}\n"
@@ -1220,11 +1237,11 @@ fn pre_enter_creates_pre_json() {
     let dir = package_dir();
     let output = changesette(dir.path(), &["pre", "enter", "beta"]);
     assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
     assert_eq!(
-        stdout(&output),
+        stderr(&output),
         "Entered pre mode with tag `beta`\nRun `changesette version` to bump to prerelease versions\n"
     );
-    assert_eq!(stderr(&output), "");
     assert_eq!(read_pre_json(dir.path()), PRE_JSON);
 }
 
@@ -1330,7 +1347,7 @@ fn pre_exit_flips_the_mode() {
     let output = changesette(dir.path(), &["pre", "exit"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
-        stdout(&output),
+        stderr(&output),
         "Exited pre mode\nRun `changesette version` to bump to final versions\n"
     );
     assert_eq!(read_pre_json(dir.path()), EXITED_PRE_JSON);
@@ -1374,9 +1391,13 @@ fn version_in_pre_mode_bumps_to_a_prerelease() {
     );
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Bumped ublacklist 1.2.3 -> 1.3.0-beta.0\n");
+    assert_eq!(stdout(&output), "");
     let err = stderr(&output);
     assert!(err.contains("in pre mode with tag `beta`"), "{err}");
+    assert!(
+        err.contains("Bumped ublacklist 1.2.3 -> 1.3.0-beta.0\n"),
+        "{err}"
+    );
     assert_eq!(
         fs::read_to_string(dir.path().join("package.json")).unwrap(),
         "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.3.0-beta.0\"\n}\n"
@@ -1406,9 +1427,10 @@ fn version_in_pre_mode_increments_the_counter() {
     write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        "Bumped ublacklist 1.3.0-beta.0 -> 1.3.0-beta.1\n"
+    assert!(
+        stderr(&output).contains("Bumped ublacklist 1.3.0-beta.0 -> 1.3.0-beta.1\n"),
+        "{}",
+        stderr(&output)
     );
     assert_eq!(
         fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
@@ -1472,7 +1494,11 @@ fn version_in_pre_mode_leaves_ignored_changesets_in_place() {
     write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
     let output = changesette(dir.path(), &["version", "--ignore", "pkg-b"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Bumped pkg-a 3.1.4 -> 3.2.0-beta.0\n");
+    assert!(
+        stderr(&output).contains("Bumped pkg-a 3.1.4 -> 3.2.0-beta.0\n"),
+        "{}",
+        stderr(&output)
+    );
     assert!(dir.path().join(".changeset/pre").join(ULID_A).is_file());
     assert!(dir.path().join(".changeset").join(ULID_B).is_file());
     assert!(!dir.path().join(".changeset/pre").join(ULID_B).exists());
@@ -1499,7 +1525,7 @@ fn version_in_pre_mode_keeps_a_none_only_package_unchanged() {
 }
 
 #[test]
-fn version_in_pre_mode_with_no_new_changesets_prints_the_usual_message() {
+fn version_in_pre_mode_with_no_new_changesets_fails() {
     let dir = package_dir();
     write_pre_json(dir.path(), PRE_JSON);
     write_pre_changeset(
@@ -1510,8 +1536,12 @@ fn version_in_pre_mode_with_no_new_changesets_prints_the_usual_message() {
     );
     let before = dir_snapshot(dir.path());
     let output = changesette(dir.path(), &["version"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "No unreleased changesets found.\n");
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("no unreleased changesets found"),
+        "{}",
+        stderr(&output)
+    );
     assert_eq!(dir_snapshot(dir.path()), before);
 }
 
@@ -1533,8 +1563,8 @@ fn version_after_exit_finalizes() {
     write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Bumped ublacklist 1.3.0-beta.0 -> 1.3.0\n");
-    assert_eq!(stderr(&output), "");
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "Bumped ublacklist 1.3.0-beta.0 -> 1.3.0\n");
     assert_eq!(
         fs::read_to_string(dir.path().join("package.json")).unwrap(),
         "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.3.0\"\n}\n"
@@ -1566,7 +1596,7 @@ fn version_after_exit_rescues_prerelease_packages() {
     write_pre_json(dir.path(), EXITED_PRE_JSON);
     let output = changesette(dir.path(), &["version", "--ignore", "pkg-b"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Bumped pkg-a 3.2.0-beta.0 -> 3.2.0\n");
+    assert_eq!(stderr(&output), "Bumped pkg-a 3.2.0-beta.0 -> 3.2.0\n");
     assert_eq!(
         fs::read_to_string(dir.path().join("packages/a/package.json")).unwrap(),
         "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.2.0\"\n}\n"
@@ -1590,7 +1620,7 @@ fn version_after_exit_rescues_a_none_only_package() {
     write_pre_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Bumped ublacklist 1.2.3-beta.1 -> 1.2.3\n");
+    assert_eq!(stderr(&output), "Bumped ublacklist 1.2.3-beta.1 -> 1.2.3\n");
     assert_eq!(
         fs::read_to_string(dir.path().join("package.json")).unwrap(),
         "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\"\n}\n"
@@ -1620,7 +1650,7 @@ fn version_after_exit_succeeds_with_an_invalid_tag() {
     assert!(output.status.success(), "{}", stderr(&output));
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Bumped ublacklist 1.2.3 -> 1.3.0\n");
+    assert_eq!(stderr(&output), "Bumped ublacklist 1.2.3 -> 1.3.0\n");
     assert!(!dir.path().join(".changeset/pre.json").exists());
 }
 
@@ -1651,7 +1681,7 @@ fn version_consumes_pre_changesets_without_pre_json() {
     write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Bumped ublacklist 1.2.3 -> 1.3.0\n");
+    assert_eq!(stderr(&output), "Bumped ublacklist 1.2.3 -> 1.3.0\n");
     assert_eq!(
         fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
         "# ublacklist\n\n## 1.3.0\n\n### Minor Changes\n\n- Add feature\n\n### Patch Changes\n\n- Fix bug\n"

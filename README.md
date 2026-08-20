@@ -82,7 +82,7 @@ jobs:
 
       - id: version
         run: |
-          plan="$(changesette version --output -)"
+          plan="$(changesette version --allow-no-changesets --output -)"
           if release="$(jq -e '[.releases[] | select(.type != "none")][0]' <<< "$plan")"; then
             version="$(jq -re '.newVersion' <<< "$release")"
             echo "title=Release v$version" >> "$GITHUB_OUTPUT"
@@ -157,7 +157,7 @@ jobs:
 
       - id: version
         run: |
-          plan="$(changesette version --output -)"
+          plan="$(changesette version --allow-no-changesets --output -)"
           if jq -e 'any(.releases[]; .type != "none")' <<< "$plan" > /dev/null; then
             echo "title=Version packages" >> "$GITHUB_OUTPUT"
             delim="$(openssl rand -hex 16)"
@@ -210,15 +210,15 @@ Creates the `.changeset/` directory with a README.md. Does nothing if the direct
 
 Creates a changeset file in `.changeset/`. `--empty` creates a changeset that names no packages and conflicts with the bump flags; `--message` (short form `-m`) sets the summary; `--major`, `--minor`, and `--patch` each take a comma-separated list of package names and may be repeated. When run in a terminal, missing inputs are prompted for interactively: the affected packages and their bump types when no bump flag is given, and the summary when `--message` is not given (submitting an empty summary opens your editor for a multi-line one).
 
-### `changesette version [--ignore <pkgs>] [--output <file>]`
+### `changesette version [--ignore <pkgs>] [--allow-no-changesets] [--output <file>]`
 
-Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. Each package receives the widest bump across the changesets naming it. Packages named only with the `none` type keep their version and changelog, but their changesets are still deleted, as are empty changesets. With zero changesets, nothing changes. Lockfiles are not updated; if you use npm, run `npm install --package-lock-only` afterwards.
+Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. Each package receives the widest bump across the changesets naming it. Packages named only with the `none` type keep their version and changelog, but their changesets are still deleted, as are empty changesets. With zero changesets, nothing changes and the command fails; `--allow-no-changesets` (short form `-a`) makes it succeed instead, and exiting pre-release mode always succeeds. Lockfiles are not updated; if you use npm, run `npm install --package-lock-only` afterwards.
 
 In pre-release mode, `version` bumps to `-<tag>.<n>` prereleases and moves the consumed changesets to `.changeset/pre/` instead of deleting them; see [Pre-release mode](#pre-release-mode).
 
 `--ignore` takes a comma-separated list of package names and may be repeated. Each name must be a workspace member's package name. Changesets naming an ignored package are skipped: they are excluded from the release plan and left in place for a later run. A changeset naming both an ignored and a not-ignored package is an error.
 
-`--output` (short form `-o`) suppresses the report and writes the release plan to the given file (`-` for stdout) as pretty-printed JSON, mirroring the changesets `ReleasePlan` type (an empty plan when there are zero changesets):
+`--output` (short form `-o`) suppresses the report and writes the release plan to the given file (`-` for stdout) as pretty-printed JSON, extending the changesets `ReleasePlan` type with `changelogEntry` (with `--allow-no-changesets`, an empty plan when there are zero changesets):
 
 ```json
 {
@@ -313,7 +313,7 @@ Dependent releases are a judgment, not bookkeeping. Already-published dependents
 - No configuration: `.changeset/config.json` is not read, and there is nothing to configure (no `fixed` / `linked`; `ignore` exists only as the `version --ignore` flag).
 - No changed-package detection: `add` does not inspect git to suggest packages, and `status` has no `--since`.
 - No changelog decoration: entries are the plain changeset summaries, without auto-generated PR / commit / author links, and there are no changelog plugins.
-- No command compatibility: the CLI is not a drop-in replacement for `changeset`; only the changeset files and the release plan JSON written by `--output` are interchangeable.
+- No drop-in command compatibility: the implemented commands follow `changeset`'s flags and exit codes, but coverage is partial and terminal output differs; the changeset files are fully interchangeable, and the release plan JSON written by `--output` extends the changesets `ReleasePlan` type with `changelogEntry`.
 
 ## License
 

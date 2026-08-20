@@ -34,7 +34,7 @@ jobs:
       - name: Bump version
         id: version
         run: |
-          plan="$(cargo run --release -- version --output -)"
+          plan="$(cargo run --release -- version --allow-no-changesets --output -)"
           if release="$(jq -e '[.releases[] | select(.type != "none")][0]' <<< "$plan")"; then
             version="$(jq -re '.newVersion' <<< "$release")"
             echo "title=Release v$version" >> "$GITHUB_OUTPUT"

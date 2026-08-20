@@ -13,7 +13,7 @@ pending changesets to bump the version and update CHANGELOG.md.
 ";
 
 /// Creates the `.changeset/` directory at the workspace root with a README.md
-/// describing it, and reports the creation to stdout; does nothing and prints
+/// describing it, and reports the creation to stderr; does nothing and prints
 /// nothing if the directory already exists.
 pub(crate) fn run() -> Result<()> {
     let cwd = env::current_dir()?;
@@ -25,7 +25,7 @@ pub(crate) fn run() -> Result<()> {
     fs::create_dir(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
     let readme_path = changeset_dir.join("README.md");
     fs::write(&readme_path, README).with_context(|| readme_path.display().to_string())?;
-    output::print_line(&format!(
+    output::eprint_line(&format!(
         "Initialized {}",
         workspace.display_path(&cwd, &changeset_dir).display()
     ))?;
