@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// Enters pre-release mode by writing `.changeset/pre.json` with `tag`,
-/// creating the changeset directory if needed, and reports it to stdout. It
+/// creating the changeset directory if needed, and reports it to stderr. It
 /// is an error to already be in pre mode; a pre.json left in the exited state
 /// is rewritten in place.
 pub(crate) fn enter(tag: &str) -> Result<()> {
@@ -37,13 +37,13 @@ pub(crate) fn enter(tag: &str) -> Result<()> {
         }
     }
 
-    output::print_line(&format!(
+    output::eprint_line(&format!(
         "Entered pre mode with tag `{tag}`\nRun `changesette version` to bump to prerelease versions"
     ))
 }
 
 /// Exits pre-release mode by flipping `.changeset/pre.json` to the exited
-/// state, and reports it to stdout. It is an error not to have a pre.json;
+/// state, and reports it to stderr. It is an error not to have a pre.json;
 /// exiting twice succeeds.
 pub(crate) fn exit() -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
@@ -55,5 +55,5 @@ pub(crate) fn exit() -> Result<()> {
     pre.set_mode(PreMode::Exit);
     fs::write(pre.path(), pre.text()).with_context(|| pre.path().display().to_string())?;
 
-    output::print_line("Exited pre mode\nRun `changesette version` to bump to final versions")
+    output::eprint_line("Exited pre mode\nRun `changesette version` to bump to final versions")
 }

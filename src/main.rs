@@ -53,6 +53,9 @@ enum Command {
         /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
         #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
         ignore: Vec<String>,
+        /// Succeed even when there are no unreleased changesets
+        #[arg(short, long)]
+        allow_no_changesets: bool,
         /// Write the release plan to the file (or stdout with `-`) as pretty-printed JSON
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
@@ -114,7 +117,11 @@ fn run() -> anyhow::Result<()> {
             message,
             empty,
         }) => commands::add::run(major, minor, patch, message, empty),
-        Command::Version { ignore, output } => commands::version::run(&ignore, output.as_deref()),
+        Command::Version {
+            ignore,
+            allow_no_changesets,
+            output,
+        } => commands::version::run(&ignore, allow_no_changesets, output.as_deref()),
         Command::Pre { command } => match command {
             PreCommand::Enter { tag } => commands::pre::enter(&tag),
             PreCommand::Exit => commands::pre::exit(),

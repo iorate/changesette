@@ -12,8 +12,10 @@ use crate::{
 /// Consumes every changeset in the workspace: bumps each named package's
 /// package.json, inserts the new section into its CHANGELOG.md, and deletes
 /// the consumed files (`none`-only and empty changesets included). Packages
-/// named only with `none` keep their version and changelog; with zero
-/// changesets, nothing changes. Each name in `ignore` must be a workspace
+/// named only with `none` keep their version and changelog. With zero
+/// changesets it is an error unless `allow_no_changesets` is set, and nothing
+/// changes either way; exiting pre mode is exempt from the error. Each name
+/// in `ignore` must be a workspace
 /// member; a changeset naming an ignored package is skipped — excluded from
 /// the release plan and left on disk — and it is an error for such a
 /// changeset to also name a package that is not ignored.
@@ -24,10 +26,14 @@ use crate::{
 /// the parked files are replanned along with the new ones into final versions
 /// and pre.json is deleted, even when there is nothing to release.
 ///
-/// Reports the applied bumps to stdout; with `output_path`, instead writes
+/// Reports the applied bumps to stderr; with `output_path`, instead writes
 /// the release plan, each bumped release carrying its new changelog entry,
 /// as pretty-printed JSON to that file (or to stdout when the path is `-`).
-pub(crate) fn run(ignore: &[String], output_path: Option<&Path>) -> Result<()> {
+pub(crate) fn run(
+    ignore: &[String],
+    allow_no_changesets: bool,
+    output_path: Option<&Path>,
+) -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
     for name in ignore {
         workspace.member(name).context("invalid `--ignore` value")?;
@@ -38,10 +44,10 @@ pub(crate) fn run(ignore: &[String], output_path: Option<&Path>) -> Result<()> {
     let in_pre = match &pre {
         Some(pre) if pre.mode() == PreMode::Pre => {
             pre::validate_tag(pre.tag())?;
-            eprintln!(
+            output::eprint_line(&format!(
                 "warning: in pre mode with tag `{}`; versions will be prereleases. Run `changesette pre exit` first for a normal release.",
                 pre.tag()
-            );
+            ))?;
             true
         }
         _ => false,
@@ -53,6 +59,9 @@ pub(crate) fn run(ignore: &[String], output_path: Option<&Path>) -> Result<()> {
         changes.retain(|change| !change.in_pre);
     }
     let no_changes = changes.is_empty();
+    if no_changes && !exiting && !allow_no_changesets {
+        bail!("no unreleased changesets found");
+    }
 
     let mut consumed = Vec::new();
     for change in changes {
@@ -124,11 +133,11 @@ pub(crate) fn run(ignore: &[String], output_path: Option<&Path>) -> Result<()> {
         ),
         None => {
             if no_changes && !exiting {
-                return output::print_line("No unreleased changesets found.");
+                return output::eprint_line("No unreleased changesets found.");
             }
             for release in &releases {
                 if release.bump.is_some() {
-                    output::print_line(&format!(
+                    output::eprint_line(&format!(
                         "Bumped {} {} -> {}",
                         release.name, release.old_version, release.new_version
                     ))?;
