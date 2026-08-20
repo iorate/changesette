@@ -1,5 +1,25 @@
 # changesette
 
+## 4.0.0
+
+### Major Changes
+
+- `version` now fails when there are no unreleased changesets, matching `changeset version`; the new `--allow-no-changesets` (`-a`) flag restores the previous success, and exiting pre-release mode is exempt.
+
+- `init`, `add`, `pre`, and `version` now write their status messages to stderr, leaving stdout for machine-readable output.
+
+### Minor Changes
+
+- Add pre-release mode: `pre enter <tag>` and `pre exit` manage `.changeset/pre.json`, and `version` bumps to `-<tag>.<n>` prerelease versions while in pre mode.
+
+- Accept `-` as the `--output` value of `status` and `version` to write the release plan to stdout.
+
+### Patch Changes
+
+- The status command no longer reads CHANGELOG.md files, so an unreadable changelog no longer makes it fail.
+
+- Name new changeset files with three-word petnames instead of ULIDs.
+
 ## 3.0.0
 
 ### Major Changes
