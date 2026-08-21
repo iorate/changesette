@@ -7,6 +7,7 @@ use crate::{
     changeset, config, output, plan,
     pre::{self, PreJson, PreMode},
     release_plan,
+    skip::SkipSet,
     workspace::Workspace,
 };
 
@@ -19,7 +20,8 @@ use crate::{
 pub(crate) fn run(verbose: bool, output_path: Option<&Path>) -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
     let changeset_dir = workspace.root().join(".changeset");
-    config::validate(&changeset_dir)?;
+    let config = config::load(&changeset_dir)?;
+    let skip = SkipSet::build(&workspace, &config, &[])?;
 
     let pre = PreJson::load(&changeset_dir)?;
     let in_pre = match &pre {
@@ -34,7 +36,8 @@ pub(crate) fn run(verbose: bool, output_path: Option<&Path>) -> Result<()> {
     if in_pre {
         changes.retain(|change| !change.in_pre);
     }
-    let releases = plan::plan_releases(&workspace, &changes, pre.as_ref(), &[])?;
+    let changes = skip.filter_changes(&workspace, &changeset_dir, changes)?;
+    let releases = plan::plan_releases(&workspace, &changes, pre.as_ref(), &skip)?;
 
     if let Some(path) = output_path {
         return release_plan::write_file(

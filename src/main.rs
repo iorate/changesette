@@ -13,6 +13,7 @@ mod package_json;
 mod plan;
 mod pre;
 mod release_plan;
+mod skip;
 mod workspace;
 
 #[derive(Parser)]
@@ -76,7 +77,11 @@ enum Command {
         output: Option<PathBuf>,
     },
     /// Print the workspace packages as JSON
-    GetPackages,
+    GetPackages {
+        /// List every workspace member, including the packages `version` skips
+        #[arg(long)]
+        all: bool,
+    },
     /// Print a version section from a package's CHANGELOG.md
     GetChangelogEntry {
         /// The name of the package
@@ -128,7 +133,7 @@ fn run() -> anyhow::Result<()> {
             PreCommand::Exit => commands::pre::exit(),
         },
         Command::Status { verbose, output } => commands::status::run(verbose, output.as_deref()),
-        Command::GetPackages => commands::get_packages::run(),
+        Command::GetPackages { all } => commands::get_packages::run(all),
         Command::GetChangelogEntry { package, version } => {
             commands::get_changelog_entry::run(&package, &version)
         }

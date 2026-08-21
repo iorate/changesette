@@ -9,6 +9,7 @@ use crate::{
     changeset::{self, LoadedChange},
     package_json::PackageJson,
     pre::{PreJson, PreMode},
+    skip::SkipSet,
     workspace::Workspace,
 };
 
@@ -30,13 +31,13 @@ pub(crate) struct PlannedRelease {
 /// Plans the release of each package named by `changes`, validating that
 /// every named package is a workspace member. In pre mode the new versions
 /// are `-{tag}.{n}` pre-releases; with `pre` exiting, every workspace member
-/// left on a pre-release version is released too, unless `ignore` names it.
+/// left on a pre-release version is released too, unless `skip` contains it.
 /// Modifies nothing on disk.
 pub(crate) fn plan_releases(
     workspace: &Workspace,
     changes: &[LoadedChange],
     pre: Option<&PreJson>,
-    ignore: &[String],
+    skip: &SkipSet,
 ) -> Result<Vec<PlannedRelease>> {
     let changeset_dir = workspace.root().join(".changeset");
     for change in changes {
@@ -49,7 +50,7 @@ pub(crate) fn plan_releases(
 
     let mut max_bumps = changeset::max_bumps(changes);
     if matches!(pre, Some(pre) if pre.mode() == PreMode::Exit) {
-        rescue_prereleases(workspace, ignore, &mut max_bumps)?;
+        rescue_prereleases(workspace, skip, &mut max_bumps)?;
     }
 
     let mut releases = Vec::new();
@@ -111,12 +112,11 @@ pub(crate) fn plan_releases(
 // the empty summary list renders a heading-only changelog section.
 fn rescue_prereleases<'a>(
     workspace: &'a Workspace,
-    ignore: &[String],
+    skip: &SkipSet,
     max_bumps: &mut BTreeMap<&'a str, Option<Bump>>,
 ) -> Result<()> {
     for member in workspace.members() {
-        if ignore.iter().any(|ignored| ignored == member.name())
-            || max_bumps.get(member.name()).is_some_and(Option::is_some)
+        if skip.contains(member.name()) || max_bumps.get(member.name()).is_some_and(Option::is_some)
         {
             continue;
         }

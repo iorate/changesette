@@ -7,20 +7,16 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
 
-use crate::{
-    bump::Bump,
-    config, output,
-    package_json::PackageJson,
-    workspace::{Member, Workspace},
-};
+use crate::{bump::Bump, config, output, package_json::PackageJson, skip, workspace::Workspace};
 
 /// Creates a changeset file under the workspace root's `.changeset/`,
 /// creating the directory if needed, and reports the file to stderr.
 /// With `empty`, the changeset names no packages and nothing is prompted.
-/// Otherwise the releases come from the bump flags when any is given, and the
-/// summary from `message`; inputs missing from the flags are prompted for
-/// interactively when both stdin and stderr are terminals, and reported as an
-/// error otherwise.
+/// Otherwise only the versionable packages — the ones `version` does not
+/// skip — may be named: the releases come from the bump flags when any is
+/// given, and the summary from `message`; inputs missing from the flags are
+/// prompted for interactively when both stdin and stderr are terminals, and
+/// reported as an error otherwise.
 pub(crate) fn run(
     major: Vec<String>,
     minor: Vec<String>,
@@ -36,12 +32,24 @@ pub(crate) fn run(
     );
 
     let changeset_dir = workspace.root().join(".changeset");
-    config::validate(&changeset_dir)?;
+    let config = config::load(&changeset_dir)?;
     fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
 
     let (releases, summary) = if empty {
         (Vec::new(), message.unwrap_or_default())
     } else {
+        let mut packages = Vec::new();
+        for member in workspace.members() {
+            let package_json = PackageJson::load(member.dir())?;
+            if !skip::should_skip(&package_json, &config, &[]) {
+                packages.push(package_json);
+            }
+        }
+        ensure!(
+            !packages.is_empty(),
+            "no versionable packages found; ensure the packages are not private or ignored and have a version field in package.json"
+        );
+
         let flags_given = !(major.is_empty() && minor.is_empty() && patch.is_empty());
         if !(io::stdin().is_terminal() && io::stderr().is_terminal()) {
             let mut missing = Vec::new();
@@ -59,9 +67,9 @@ pub(crate) fn run(
             }
         }
         let releases = if flags_given {
-            releases_from_flags(&workspace, &major, &minor, &patch)?
+            releases_from_flags(&workspace, &packages, &major, &minor, &patch)?
         } else {
-            prompt_releases(&workspace)?
+            prompt_releases(&packages)?
         };
         let summary = match message {
             Some(message) => message,
@@ -111,6 +119,7 @@ pub(crate) fn run(
 
 fn releases_from_flags(
     workspace: &Workspace,
+    packages: &[PackageJson],
     major: &[String],
     minor: &[String],
     patch: &[String],
@@ -127,6 +136,13 @@ fn releases_from_flags(
             if workspace.member(name).is_err() {
                 errors.push(format!(
                     "the package `{name}` is passed to `{flag}` but is not a workspace member"
+                ));
+            } else if !packages
+                .iter()
+                .any(|package_json| package_json.name() == name)
+            {
+                errors.push(format!(
+                    "the package `{name}` is passed to `{flag}` but is skipped (private, ignored, or without a version)"
                 ));
             }
         }
@@ -161,10 +177,8 @@ fn releases_from_flags(
     Ok(releases)
 }
 
-fn prompt_releases(workspace: &Workspace) -> Result<Vec<(String, Bump)>> {
-    let members = workspace.members();
-    if let [member] = members {
-        let package_json = PackageJson::load(member.dir())?;
+fn prompt_releases(packages: &[PackageJson]) -> Result<Vec<(String, Bump)>> {
+    if let [package_json] = packages {
         const ITEMS: [Bump; 3] = [Bump::Patch, Bump::Minor, Bump::Major];
         let prompt = match package_json.version() {
             Some(version) => format!(
@@ -181,8 +195,8 @@ fn prompt_releases(workspace: &Workspace) -> Result<Vec<(String, Bump)>> {
         return Ok(vec![(package_json.name().to_owned(), ITEMS[index])]);
     }
 
-    let names: Vec<&str> = members.iter().map(Member::name).collect();
-    let affected: Vec<&Member> = loop {
+    let names: Vec<&str> = packages.iter().map(PackageJson::name).collect();
+    let affected: Vec<&PackageJson> = loop {
         let indexes = dialoguer::MultiSelect::new()
             .with_prompt("Which packages were affected by the changes you made?")
             .items(&names)
@@ -191,18 +205,16 @@ fn prompt_releases(workspace: &Workspace) -> Result<Vec<(String, Bump)>> {
             eprintln!("You must select at least one package");
             continue;
         }
-        break indexes.into_iter().map(|index| &members[index]).collect();
+        break indexes.into_iter().map(|index| &packages[index]).collect();
     };
 
-    let labels = affected
+    let labels: Vec<String> = affected
         .iter()
-        .map(|member| {
-            Ok(match PackageJson::load(member.dir())?.version() {
-                Some(version) => format!("{}@{version}", member.name()),
-                None => member.name().to_owned(),
-            })
+        .map(|package_json| match package_json.version() {
+            Some(version) => format!("{}@{version}", package_json.name()),
+            None => package_json.name().to_owned(),
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect();
 
     let mut releases = Vec::new();
     let mut remaining: Vec<usize> = (0..affected.len()).collect();

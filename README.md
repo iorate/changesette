@@ -208,7 +208,7 @@ Creates the `.changeset/` directory with a README.md and a config.json holding t
 
 ### `changesette [add] [--empty] [--message <text>] [--major <pkgs>] [--minor <pkgs>] [--patch <pkgs>]`
 
-Creates a changeset file in `.changeset/`, creating the directory if needed. `--empty` creates a changeset that names no packages and conflicts with the bump flags; `--message` (short form `-m`) sets the summary; `--major`, `--minor`, and `--patch` each take a comma-separated list of package names and may be repeated. When run in a terminal, missing inputs are prompted for interactively: the affected packages and their bump types when no bump flag is given, and the summary when `--message` is not given (submitting an empty summary opens your editor for a multi-line one).
+Creates a changeset file in `.changeset/`, creating the directory if needed. `--empty` creates a changeset that names no packages and conflicts with the bump flags; `--message` (short form `-m`) sets the summary; `--major`, `--minor`, and `--patch` each take a comma-separated list of package names and may be repeated. Only the packages `version` manages can be named: a [skipped](#configuration) package is rejected in the bump flags and not offered by the prompts. When run in a terminal, missing inputs are prompted for interactively: the affected packages and their bump types when no bump flag is given, and the summary when `--message` is not given (submitting an empty summary opens your editor for a multi-line one).
 
 ### `changesette version [--ignore <pkgs>] [--allow-no-changesets] [--output <file>]`
 
@@ -216,7 +216,7 @@ Applies all pending changesets: bumps each named package's `package.json`, inser
 
 In pre-release mode, `version` bumps to `-<tag>.<n>` prereleases and moves the consumed changesets to `.changeset/pre/` instead of deleting them; see [Pre-release mode](#pre-release-mode).
 
-`--ignore` takes a comma-separated list of package names and may be repeated. Each name must be a workspace member's package name. Changesets naming an ignored package are skipped: they are excluded from the release plan and left in place for a later run. A changeset naming both an ignored and a not-ignored package is an error.
+A package is skipped when `--ignore` names it, when it is a private package not versioned by the [configuration](#configuration), or when its package.json has no `version` field. A changeset naming only skipped packages is excluded from the release plan and left in place for a later run; a changeset mixing skipped and not skipped packages is an error. `--ignore` takes a comma-separated list of package names and may be repeated, and each name must be a workspace member's package name.
 
 `--output` (short form `-o`) suppresses the report and writes the release plan to the given file (`-` for stdout) as pretty-printed JSON, extending the changesets `ReleasePlan` type with `changelogEntry` (with `--allow-no-changesets`, an empty plan when there are zero changesets):
 
@@ -263,13 +263,15 @@ Enters pre-release mode by writing `.changeset/pre.json` with the given tag (the
 
 Leaves pre-release mode by flipping `.changeset/pre.json` to the exited state, so that the next `version` bumps to final versions and deletes the file. It is an error to have no `pre.json`; running it twice is harmless.
 
-### `changesette get-packages`
+### `changesette get-packages [--all]`
 
-Prints the workspace packages to stdout as a single-line JSON array in package name order. Each entry has the package's `name`, its `version` (omitted when its package.json has no version field), a boolean `private`, and its `dir` relative to the workspace root (`"."` when the package is the workspace root itself):
+Prints the packages managed by `version` — the workspace members it does not [skip](#configuration) — to stdout as a single-line JSON array in package name order. Each entry has the package's `name`, its `version`, a boolean `private`, and its `dir` relative to the workspace root (`"."` when the package is the workspace root itself):
 
 ```json
 [{"name":"pkg-a","version":"3.1.4","private":false,"dir":"packages/a"},{"name":"pkg-b","version":"1.0.0","private":true,"dir":"packages/b"}]
 ```
+
+With `--all`, every workspace member is printed instead; only then may `version` be omitted, when the package.json has no version field.
 
 ### `changesette get-changelog-entry <package> <version>`
 
@@ -297,6 +299,14 @@ While in pre mode, `version` moves the changesets it consumes to `.changeset/pre
 
 Choosing the npm dist-tag is up to you, as `changesette` never publishes: pass `--tag <tag>` while pre-releasing so that `latest` keeps pointing at the stable version.
 
+## Configuration
+
+`.changeset/config.json` is read when present and is format-compatible with the changesets config; a missing file means the defaults, and unknown keys are ignored. The supported subset:
+
+- `privatePackages` (default `{"version": false}`): whether private packages (`"private": true` in package.json) are versioned. By default they are skipped: `add` does not offer them, `version` leaves their changesets in place, and `get-packages` omits them. Set `{"privatePackages": {"version": true}}` (or the shorthand `"privatePackages": true`) to version private packages. In particular, a single-package repository whose package.json is private — which changesette v4 versioned without any configuration — needs this setting since v5.
+
+Packages whose package.json has no `version` field are always skipped, independent of the configuration.
+
 ## Workspaces
 
 `changesette` works on npm / yarn / pnpm workspaces, and its changeset files are format-compatible with changesets — but `version` deliberately does not behave like `changeset version` in a workspace. The dependency management changesets performs is two separate jobs, and `changesette` does neither: **internal dependency ranges are never rewritten, and dependents of a bumped package are never bumped** (so no "Updated dependencies" changelog entries either). Only the packages explicitly named in changesets are bumped.
@@ -310,7 +320,7 @@ Dependent releases are a judgment, not bookkeeping. Already-published dependents
 `changesette` shares the changeset file format with changesets, but is deliberately much smaller. Coming from changesets, expect the following:
 
 - No dependency management: dependents of a bumped package are never bumped, and dependency ranges are never rewritten (see [Workspaces](#workspaces)).
-- No configuration: `.changeset/config.json` is not read, and there is nothing to configure (no `fixed` / `linked`; `ignore` exists only as the `version --ignore` flag).
+- Minimal configuration: `.changeset/config.json` is read, but only `privatePackages` is supported (no `fixed` / `linked`; `ignore` exists only as the `version --ignore` flag). See [Configuration](#configuration).
 - No changed-package detection: `add` does not inspect git to suggest packages, and `status` has no `--since`.
 - No changelog decoration: entries are the plain changeset summaries, without auto-generated PR / commit / author links, and there are no changelog plugins.
 - No drop-in command compatibility: the implemented commands follow `changeset`'s flags and exit codes, but coverage is partial and terminal output differs; the changeset files are fully interchangeable, and the release plan JSON written by `--output` extends the changesets `ReleasePlan` type with `changelogEntry`.

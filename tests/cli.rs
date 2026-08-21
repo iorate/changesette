@@ -303,6 +303,53 @@ fn add_rejects_an_unknown_package_name() {
 }
 
 #[test]
+fn add_rejects_a_skipped_package_in_flags() {
+    let dir = private_two_package_workspace_dir();
+    let output = changesette(dir.path(), &["add", "--patch", "pkg-b", "-m", "Fix bug"]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains("`pkg-b`"), "{err}");
+    assert!(err.contains("skipped"), "{err}");
+    assert_eq!(
+        fs::read_dir(dir.path().join(".changeset")).unwrap().count(),
+        0
+    );
+}
+
+#[test]
+fn add_accepts_a_private_package_when_the_config_versions_it() {
+    let dir = private_two_package_workspace_dir();
+    fs::create_dir_all(dir.path().join(".changeset")).unwrap();
+    fs::write(
+        dir.path().join(".changeset/config.json"),
+        "{ \"privatePackages\": { \"version\": true } }\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["add", "--patch", "pkg-b", "-m", "Fix bug"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+}
+
+#[test]
+fn add_fails_without_versionable_packages() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\",\n  \"private\": true\n}\n",
+    )
+    .unwrap();
+    let output = changesette(
+        dir.path(),
+        &["add", "--patch", "ublacklist", "-m", "Fix bug"],
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("no versionable packages found"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn add_rejects_a_package_passed_to_multiple_bump_flags() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
@@ -592,7 +639,7 @@ fn get_packages_keeps_dirs_relative_to_the_root_from_a_subdirectory() {
 }
 
 #[test]
-fn version_fails_for_a_changeset_naming_a_versionless_package() {
+fn version_skips_a_versionless_package_and_keeps_its_changeset() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("package.json"),
@@ -600,17 +647,14 @@ fn version_fails_for_a_changeset_naming_a_versionless_package() {
     )
     .unwrap();
     write_changeset(dir.path(), "a.md", &[("ublacklist", "patch")], "Fix bug");
+    let before = dir_snapshot(dir.path());
     let output = changesette(dir.path(), &["version"]);
-    assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains("missing top-level \"version\""),
-        "{}",
-        stderr(&output)
-    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "No packages to bump.\n");
+    assert_eq!(dir_snapshot(dir.path()), before);
 }
 
-#[test]
-fn get_packages_reports_private_and_omits_a_missing_version() {
+fn mixed_workspace_dir() -> TempDir {
     let dir = workspace_dir();
     fs::create_dir_all(dir.path().join("packages/b")).unwrap();
     fs::write(
@@ -624,11 +668,73 @@ fn get_packages_reports_private_and_omits_a_missing_version() {
         "{\n  \"name\": \"pkg-c\",\n  \"version\": \"2.0.0\",\n  \"private\": false\n}\n",
     )
     .unwrap();
+    dir
+}
+
+#[test]
+fn get_packages_excludes_skipped_packages_by_default() {
+    let dir = mixed_workspace_dir();
     let output = changesette(dir.path(), &["get-packages"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"pkg-c\",\"version\":\"2.0.0\",\"private\":false,\"dir\":\"packages/c\"}]\n"
+    );
+}
+
+#[test]
+fn get_packages_all_lists_every_member_and_omits_a_missing_version() {
+    let dir = mixed_workspace_dir();
+    let output = changesette(dir.path(), &["get-packages", "--all"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
         "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"pkg-b\",\"private\":true,\"dir\":\"packages/b\"},{\"name\":\"pkg-c\",\"version\":\"2.0.0\",\"private\":false,\"dir\":\"packages/c\"}]\n"
+    );
+}
+
+#[test]
+fn get_packages_includes_private_packages_when_the_config_versions_them() {
+    let dir = private_two_package_workspace_dir();
+    fs::create_dir_all(dir.path().join(".changeset")).unwrap();
+    fs::write(
+        dir.path().join(".changeset/config.json"),
+        "{ \"privatePackages\": { \"version\": true } }\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("pkg-b"), "{}", stdout(&output));
+}
+
+#[test]
+fn get_packages_prints_an_empty_array_when_every_member_is_skipped() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\",\n  \"private\": true\n}\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "[]\n");
+}
+
+#[test]
+fn get_packages_fails_on_an_invalid_config() {
+    let dir = package_dir();
+    fs::create_dir_all(dir.path().join(".changeset")).unwrap();
+    fs::write(
+        dir.path().join(".changeset/config.json"),
+        "{ \"privatePackages\": \"all\" }\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("privatePackages"),
+        "{}",
+        stderr(&output)
     );
 }
 
@@ -1057,6 +1163,17 @@ fn two_package_workspace_dir() -> TempDir {
     dir
 }
 
+fn private_two_package_workspace_dir() -> TempDir {
+    let dir = workspace_dir();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\",\n  \"private\": true\n}\n",
+    )
+    .unwrap();
+    dir
+}
+
 #[test]
 fn version_ignore_skips_the_package_and_keeps_its_changeset() {
     let dir = two_package_workspace_dir();
@@ -1180,6 +1297,130 @@ fn version_ignore_rejects_a_mixed_changeset() {
     assert!(err.contains("pkg-a"), "{err}");
     assert!(err.contains("pkg-b"), "{err}");
     assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_skips_a_private_package_and_keeps_its_changeset() {
+    let dir = private_two_package_workspace_dir();
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "Bumped pkg-a 3.1.4 -> 3.2.0\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\",\n  \"private\": true\n}\n"
+    );
+    assert!(!dir.path().join(".changeset").join(ULID_A).exists());
+    assert!(dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_bumps_a_private_package_when_the_config_versions_it() {
+    let dir = private_two_package_workspace_dir();
+    fs::create_dir_all(dir.path().join(".changeset")).unwrap();
+    fs::write(
+        dir.path().join(".changeset/config.json"),
+        "{ \"privatePackages\": true }\n",
+    )
+    .unwrap();
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "Bumped pkg-b 2.0.0 -> 2.0.1\n");
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_rejects_a_changeset_mixing_skipped_and_not_skipped_packages() {
+    let dir = private_two_package_workspace_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("pkg-a", "minor"), ("pkg-b", "patch")],
+        "Improve things",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version"]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains("cannot mix skipped packages"), "{err}");
+    assert!(err.contains("`pkg-a`"), "{err}");
+    assert!(err.contains("`pkg-b`"), "{err}");
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_succeeds_when_every_changeset_is_skipped() {
+    let dir = private_two_package_workspace_dir();
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "No packages to bump.\n");
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_in_pre_mode_leaves_a_skipped_changeset_in_place() {
+    let dir = private_two_package_workspace_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(dir.path().join(".changeset/pre").join(ULID_A).exists());
+    assert!(dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset/pre").join(ULID_B).exists());
+}
+
+#[test]
+fn version_after_exit_does_not_rescue_a_skipped_prerelease() {
+    let dir = private_two_package_workspace_dir();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.1.0-beta.0\",\n  \"private\": true\n}\n",
+    )
+    .unwrap();
+    write_pre_json(dir.path(), EXITED_PRE_JSON);
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.1.0-beta.0\",\n  \"private\": true\n}\n"
+    );
+    assert!(!dir.path().join(".changeset/pre.json").exists());
+}
+
+#[test]
+fn status_omits_skipped_packages() {
+    let dir = private_two_package_workspace_dir();
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["status"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "Packages to be bumped:\n- minor\n  - pkg-a\n"
+    );
+}
+
+#[test]
+fn status_rejects_a_changeset_mixing_skipped_and_not_skipped_packages() {
+    let dir = private_two_package_workspace_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("pkg-a", "minor"), ("pkg-b", "patch")],
+        "Improve things",
+    );
+    let output = changesette(dir.path(), &["status"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("cannot mix skipped packages"),
+        "{}",
+        stderr(&output)
+    );
 }
 
 #[test]

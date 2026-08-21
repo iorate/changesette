@@ -6,6 +6,7 @@ use crate::{
     changeset, config, output, plan,
     pre::{self, PreJson, PreMode},
     release_plan,
+    skip::SkipSet,
     workspace::Workspace,
 };
 
@@ -14,11 +15,12 @@ use crate::{
 /// the consumed files (`none`-only and empty changesets included). Packages
 /// named only with `none` keep their version and changelog. With zero
 /// changesets it is an error unless `allow_no_changesets` is set, and nothing
-/// changes either way; exiting pre mode is exempt from the error. Each name
-/// in `ignore` must be a workspace
-/// member; a changeset naming an ignored package is skipped — excluded from
-/// the release plan and left on disk — and it is an error for such a
-/// changeset to also name a package that is not ignored.
+/// changes either way; exiting pre mode is exempt from the error. A package
+/// is skipped when `ignore` names it (each name must be a workspace member),
+/// when it is private and the config does not version private packages, or
+/// when its package.json has no version field; a changeset naming only
+/// skipped packages is excluded from the release plan and left on disk, and
+/// it is an error for a changeset to mix skipped and not skipped packages.
 ///
 /// In pre mode, only the changesets not yet consumed in this pre-release
 /// cycle are planned, the new versions are prereleases, and the consumed
@@ -39,7 +41,8 @@ pub(crate) fn run(
         workspace.member(name).context("invalid `--ignore` value")?;
     }
     let changeset_dir = workspace.root().join(".changeset");
-    config::validate(&changeset_dir)?;
+    let config = config::load(&changeset_dir)?;
+    let skip = SkipSet::build(&workspace, &config, ignore)?;
 
     let pre = PreJson::load(&changeset_dir)?;
     let in_pre = match &pre {
@@ -64,26 +67,9 @@ pub(crate) fn run(
         bail!("no unreleased changesets found");
     }
 
-    let mut consumed = Vec::new();
-    for change in changes {
-        let (ignored, not_ignored): (Vec<&str>, Vec<&str>) = change
-            .releases
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .partition(|name| ignore.iter().any(|ignored| ignored == name));
-        if ignored.is_empty() {
-            consumed.push(change);
-        } else if !not_ignored.is_empty() {
-            bail!(
-                "{}: cannot mix ignored packages ({}) and not ignored packages ({})",
-                changeset_dir.join(change.rel_path()).display(),
-                quote_list(&ignored),
-                quote_list(&not_ignored)
-            );
-        }
-    }
+    let consumed = skip.filter_changes(&workspace, &changeset_dir, changes)?;
 
-    let releases = plan::plan_releases(&workspace, &consumed, pre.as_ref(), ignore)?;
+    let releases = plan::plan_releases(&workspace, &consumed, pre.as_ref(), &skip)?;
 
     let pre_dir = changeset_dir.join("pre");
     // Checked before the writes are applied: a rename failing afterwards
@@ -136,23 +122,20 @@ pub(crate) fn run(
             if no_changes && !exiting {
                 return output::eprint_line("No unreleased changesets found.");
             }
+            let mut bumped = false;
             for release in &releases {
                 if release.bump.is_some() {
                     output::eprint_line(&format!(
                         "Bumped {} {} -> {}",
                         release.name, release.old_version, release.new_version
                     ))?;
+                    bumped = true;
                 }
+            }
+            if !bumped && !no_changes {
+                output::eprint_line("No packages to bump.")?;
             }
             Ok(())
         }
     }
-}
-
-fn quote_list(names: &[&str]) -> String {
-    names
-        .iter()
-        .map(|name| format!("`{name}`"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
