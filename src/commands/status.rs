@@ -8,7 +8,7 @@ use crate::{
     pre::{self, PreJson, PreMode},
     release_plan,
     skip::SkipSet,
-    workspace::Workspace,
+    workspace::{Member, Workspace},
 };
 
 /// Prints the packages to be bumped by `version` to stdout; packages named
@@ -21,7 +21,8 @@ pub(crate) fn run(verbose: bool, output_path: Option<&Path>) -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
     let changeset_dir = workspace.root().join(".changeset");
     let config = config::load(&changeset_dir)?;
-    let skip = SkipSet::build(&workspace, &config, &[])?;
+    let ignore = config.resolve_ignore(workspace.members().iter().map(Member::name))?;
+    let skip = SkipSet::build(&workspace, &config, &ignore)?;
 
     let pre = PreJson::load(&changeset_dir)?;
     let in_pre = match &pre {

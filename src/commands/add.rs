@@ -7,7 +7,13 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
 
-use crate::{bump::Bump, config, output, package_json::PackageJson, skip, workspace::Workspace};
+use crate::{
+    bump::Bump,
+    config, output,
+    package_json::PackageJson,
+    skip,
+    workspace::{Member, Workspace},
+};
 
 /// Creates a changeset file under the workspace root's `.changeset/`,
 /// creating the directory if needed, and reports the file to stderr.
@@ -38,10 +44,11 @@ pub(crate) fn run(
     let (releases, summary) = if empty {
         (Vec::new(), message.unwrap_or_default())
     } else {
+        let ignore = config.resolve_ignore(workspace.members().iter().map(Member::name))?;
         let mut packages = Vec::new();
         for member in workspace.members() {
             let package_json = PackageJson::load(member.dir())?;
-            if !skip::should_skip(&package_json, &config, &[]) {
+            if !skip::should_skip(&package_json, &config, &ignore) {
                 packages.push(package_json);
             }
         }

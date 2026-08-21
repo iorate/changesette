@@ -1163,6 +1163,11 @@ fn two_package_workspace_dir() -> TempDir {
     dir
 }
 
+fn write_config(dir: &Path, text: &str) {
+    fs::create_dir_all(dir.join(".changeset")).unwrap();
+    fs::write(dir.join(".changeset/config.json"), text).unwrap();
+}
+
 fn private_two_package_workspace_dir() -> TempDir {
     let dir = workspace_dir();
     fs::create_dir_all(dir.path().join("packages/b")).unwrap();
@@ -1297,6 +1302,96 @@ fn version_ignore_rejects_a_mixed_changeset() {
     assert!(err.contains("pkg-a"), "{err}");
     assert!(err.contains("pkg-b"), "{err}");
     assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_skips_a_config_ignored_package_and_keeps_its_changeset() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"ignore\": [\"pkg-b\"] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "Bumped pkg-a 3.1.4 -> 3.2.0\n");
+    assert!(!dir.path().join(".changeset").join(ULID_A).exists());
+    assert!(dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_resolves_config_ignore_globs_with_negation() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"ignore\": [\"pkg-*\", \"!pkg-a\"] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "Bumped pkg-a 3.1.4 -> 3.2.0\n");
+    assert!(dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_rejects_the_ignore_flag_with_a_config_ignore() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"ignore\": [\"pkg-b\"] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "--ignore", "pkg-a"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("use only one of them"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_ignore_flag_works_when_the_config_ignore_matches_nothing() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"ignore\": [\"missing-*\"] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version", "--ignore", "pkg-b"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "Bumped pkg-a 3.1.4 -> 3.2.0\n");
+    assert!(dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn status_omits_a_config_ignored_package() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"ignore\": [\"pkg-b\"] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["status"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "Packages to be bumped:\n- minor\n  - pkg-a\n"
+    );
+}
+
+#[test]
+fn add_rejects_a_config_ignored_package_in_flags() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"ignore\": [\"pkg-b\"] }\n");
+    let output = changesette(dir.path(), &["add", "--patch", "pkg-b", "-m", "Fix bug"]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains("`pkg-b`"), "{err}");
+    assert!(err.contains("skipped"), "{err}");
+}
+
+#[test]
+fn get_packages_excludes_a_config_ignored_package() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"ignore\": [\"pkg-b\"] }\n");
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"}]\n"
+    );
 }
 
 #[test]

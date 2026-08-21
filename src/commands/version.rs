@@ -7,7 +7,7 @@ use crate::{
     pre::{self, PreJson, PreMode},
     release_plan,
     skip::SkipSet,
-    workspace::Workspace,
+    workspace::{Member, Workspace},
 };
 
 /// Consumes every changeset in the workspace: bumps each named package's
@@ -16,11 +16,14 @@ use crate::{
 /// named only with `none` keep their version and changelog. With zero
 /// changesets it is an error unless `allow_no_changesets` is set, and nothing
 /// changes either way; exiting pre mode is exempt from the error. A package
-/// is skipped when `ignore` names it (each name must be a workspace member),
-/// when it is private and the config does not version private packages, or
-/// when its package.json has no version field; a changeset naming only
-/// skipped packages is excluded from the release plan and left on disk, and
-/// it is an error for a changeset to mix skipped and not skipped packages.
+/// is skipped when the ignore set names it, when it is private and the
+/// config does not version private packages, or when its package.json has no
+/// version field; a changeset naming only skipped packages is excluded from
+/// the release plan and left on disk, and it is an error for a changeset to
+/// mix skipped and not skipped packages. The ignore set is the config
+/// `ignore` patterns resolved against the workspace members, or the `ignore`
+/// argument (each name must be a workspace member) when that resolution is
+/// empty; passing `ignore` while the resolution is not empty is an error.
 ///
 /// In pre mode, only the changesets not yet consumed in this pre-release
 /// cycle are planned, the new versions are prereleases, and the consumed
@@ -37,12 +40,22 @@ pub(crate) fn run(
     output_path: Option<&Path>,
 ) -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
-    for name in ignore {
-        workspace.member(name).context("invalid `--ignore` value")?;
-    }
     let changeset_dir = workspace.root().join(".changeset");
     let config = config::load(&changeset_dir)?;
-    let skip = SkipSet::build(&workspace, &config, ignore)?;
+    let config_ignore = config.resolve_ignore(workspace.members().iter().map(Member::name))?;
+    let ignore = if config_ignore.is_empty() {
+        for name in ignore {
+            workspace.member(name).context("invalid `--ignore` value")?;
+        }
+        ignore.to_vec()
+    } else if ignore.is_empty() {
+        config_ignore
+    } else {
+        bail!(
+            "the --ignore option cannot be used while ignore is defined in .changeset/config.json; use only one of them"
+        );
+    };
+    let skip = SkipSet::build(&workspace, &config, &ignore)?;
 
     let pre = PreJson::load(&changeset_dir)?;
     let in_pre = match &pre {

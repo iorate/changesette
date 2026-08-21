@@ -1,7 +1,12 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::{config, output, package_json::PackageJson, skip, workspace::Workspace};
+use crate::{
+    config, output,
+    package_json::PackageJson,
+    skip,
+    workspace::{Member, Workspace},
+};
 
 #[derive(Serialize)]
 struct Package<'a> {
@@ -22,10 +27,11 @@ struct Package<'a> {
 pub(crate) fn run(all: bool) -> Result<()> {
     let workspace = Workspace::discover(&std::env::current_dir()?)?;
     let config = config::load(&workspace.root().join(".changeset"))?;
+    let ignore = config.resolve_ignore(workspace.members().iter().map(Member::name))?;
     let mut packages = Vec::new();
     for member in workspace.members() {
         let package_json = PackageJson::load(member.dir())?;
-        if !all && skip::should_skip(&package_json, &config, &[]) {
+        if !all && skip::should_skip(&package_json, &config, &ignore) {
             continue;
         }
         let rel = member

@@ -216,7 +216,7 @@ Applies all pending changesets: bumps each named package's `package.json`, inser
 
 In pre-release mode, `version` bumps to `-<tag>.<n>` prereleases and moves the consumed changesets to `.changeset/pre/` instead of deleting them; see [Pre-release mode](#pre-release-mode).
 
-A package is skipped when `--ignore` names it, when it is a private package not versioned by the [configuration](#configuration), or when its package.json has no `version` field. A changeset naming only skipped packages is excluded from the release plan and left in place for a later run; a changeset mixing skipped and not skipped packages is an error. `--ignore` takes a comma-separated list of package names and may be repeated, and each name must be a workspace member's package name.
+A package is skipped when the [configuration](#configuration)'s `ignore` matches it or `--ignore` names it, when it is a private package not versioned by the configuration, or when its package.json has no `version` field. A changeset naming only skipped packages is excluded from the release plan and left in place for a later run; a changeset mixing skipped and not skipped packages is an error. `--ignore` takes a comma-separated list of package names — exact names, not glob patterns — and may be repeated, and each name must be a workspace member's package name; it cannot be used while the configuration's `ignore` matches any package.
 
 `--output` (short form `-o`) suppresses the report and writes the release plan to the given file (`-` for stdout) as pretty-printed JSON, extending the changesets `ReleasePlan` type with `changelogEntry` (with `--allow-no-changesets`, an empty plan when there are zero changesets):
 
@@ -295,7 +295,7 @@ changesette version                           # 1.3.0-beta.1 -> 1.3.0, deletes p
 npm publish
 ```
 
-While in pre mode, `version` moves the changesets it consumes to `.changeset/pre/` instead of deleting them. Once pre mode is exited, the next `version` plans the parked changesets together with the new ones into the final version and deletes both the consumed changesets and `pre.json`. A package left on a prerelease version that no changeset names is given a patch bump too, which amounts to dropping its `-<tag>.<n>` suffix; `--ignore` exempts it.
+While in pre mode, `version` moves the changesets it consumes to `.changeset/pre/` instead of deleting them. Once pre mode is exited, the next `version` plans the parked changesets together with the new ones into the final version and deletes both the consumed changesets and `pre.json`. A package left on a prerelease version that no changeset names is given a patch bump too, which amounts to dropping its `-<tag>.<n>` suffix; a [skipped](#configuration) package is exempt.
 
 Choosing the npm dist-tag is up to you, as `changesette` never publishes: pass `--tag <tag>` while pre-releasing so that `latest` keeps pointing at the stable version.
 
@@ -303,6 +303,7 @@ Choosing the npm dist-tag is up to you, as `changesette` never publishes: pass `
 
 `.changeset/config.json` is read when present and is format-compatible with the changesets config; a missing file means the defaults, and unknown keys are ignored. The supported subset:
 
+- `ignore` (default `[]`): glob patterns for package names to skip. The patterns are evaluated in order against the workspace members' names: a package is ignored once a pattern matches it, and un-ignored when a later `!`-prefixed pattern matches it, so `["pkg-*", "!pkg-b"]` ignores every `pkg-*` package except `pkg-b`. A pattern matching no package is not an error. An ignored package is skipped like a private one: `add` does not offer it, `version` leaves its changesets in place, and `get-packages` omits it. While `ignore` matches any package, the `version --ignore` flag cannot be used.
 - `privatePackages` (default `{"version": false}`): whether private packages (`"private": true` in package.json) are versioned. By default they are skipped: `add` does not offer them, `version` leaves their changesets in place, and `get-packages` omits them. Set `{"privatePackages": {"version": true}}` (or the shorthand `"privatePackages": true`) to version private packages. In particular, a single-package repository whose package.json is private — which changesette v4 versioned without any configuration — needs this setting since v5.
 
 Packages whose package.json has no `version` field are always skipped, independent of the configuration.
@@ -320,7 +321,8 @@ Dependent releases are a judgment, not bookkeeping. Already-published dependents
 `changesette` shares the changeset file format with changesets, but is deliberately much smaller. Coming from changesets, expect the following:
 
 - No dependency management: dependents of a bumped package are never bumped, and dependency ranges are never rewritten (see [Workspaces](#workspaces)).
-- Minimal configuration: `.changeset/config.json` is read, but only `privatePackages` is supported (no `fixed` / `linked`; `ignore` exists only as the `version --ignore` flag). See [Configuration](#configuration).
+- Minimal configuration: `.changeset/config.json` is read, but only `ignore` and `privatePackages` are supported (no `fixed` / `linked`). See [Configuration](#configuration).
+- `ignore` patterns use the [wax](https://github.com/olson-sean-k/wax) glob syntax rather than picomatch: common patterns such as exact names, `@scope/*`, braces, and character classes behave the same, but extglobs like `!(...)` are not supported, and `{` `}` `<` `>` are metacharacters that need escaping to be literal.
 - No changed-package detection: `add` does not inspect git to suggest packages, and `status` has no `--since`.
 - No changelog decoration: entries are the plain changeset summaries, without auto-generated PR / commit / author links, and there are no changelog plugins.
 - No drop-in command compatibility: the implemented commands follow `changeset`'s flags and exit codes, but coverage is partial and terminal output differs; the changeset files are fully interchangeable, and the release plan JSON written by `--output` extends the changesets `ReleasePlan` type with `changelogEntry`.

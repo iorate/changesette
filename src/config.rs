@@ -2,16 +2,67 @@ use std::{fs, io, path::Path};
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
+use wax::{Glob, Program};
 
 /// The effective settings from `.changeset/config.json`.
 #[derive(Debug, PartialEq, Default)]
 pub(crate) struct Config {
+    /// The raw patterns of the changesets `ignore` setting; `resolve_ignore`
+    /// expands them into package names.
+    ignore: Vec<String>,
     /// Whether private packages are versioned, per the changesets
     /// `privatePackages` setting: `true` means `{version: true}`, and a
     /// missing key, `false`, or an object without `version` means
     /// `{version: false}`, matching the upstream @changesets/config@4.0.0
     /// defaults.
     pub(crate) private_packages_version: bool,
+}
+
+impl Config {
+    /// Expands the `ignore` patterns against `names` and returns the matching
+    /// names in input order, following the ordered evaluation of the upstream
+    /// @changesets/config@4.0.0 `globMatch`: a name is ignored once a pattern
+    /// matches it, and un-ignored when a later `!`-prefixed pattern matches
+    /// it. Patterns use the wax glob syntax; a pattern matching no name is
+    /// not an error.
+    pub(crate) fn resolve_ignore<'a>(
+        &self,
+        names: impl IntoIterator<Item = &'a str>,
+    ) -> Result<Vec<String>> {
+        let patterns = self
+            .ignore
+            .iter()
+            .map(|pattern| parse_ignore_pattern(pattern))
+            .collect::<Result<Vec<_>>>()?;
+        let mut resolved = Vec::new();
+        for name in names {
+            let mut ignored = false;
+            for (negated, glob) in &patterns {
+                if *negated {
+                    if ignored && glob.is_match(name) {
+                        ignored = false;
+                    }
+                } else if !ignored && glob.is_match(name) {
+                    ignored = true;
+                }
+            }
+            if ignored {
+                resolved.push(name.to_owned());
+            }
+        }
+        Ok(resolved)
+    }
+}
+
+fn parse_ignore_pattern(pattern: &str) -> Result<(bool, Glob<'_>)> {
+    // wax does not parse the leading `!`, so it is stripped here and the
+    // negation applied by resolve_ignore.
+    let (negated, body) = match pattern.strip_prefix('!') {
+        Some(body) => (true, body),
+        None => (false, pattern),
+    };
+    let glob = Glob::new(body).with_context(|| format!("invalid ignore pattern {pattern:?}"))?;
+    Ok((negated, glob))
 }
 
 /// Loads `changeset_dir/config.json` as the changesette-supported subset of
@@ -35,12 +86,20 @@ fn load_text(text: &str) -> Result<Config> {
         bail!("the root value must be an object")
     };
 
-    if let Some(ignore) = object.get("ignore") {
-        let valid = ignore
-            .as_array()
-            .is_some_and(|items| items.iter().all(Value::is_string));
-        if !valid {
+    let mut ignore = Vec::new();
+    if let Some(value) = object.get("ignore") {
+        let patterns = value.as_array().and_then(|items| {
+            items
+                .iter()
+                .map(Value::as_str)
+                .collect::<Option<Vec<&str>>>()
+        });
+        let Some(patterns) = patterns else {
             bail!("\"ignore\" must be an array of strings")
+        };
+        for pattern in patterns {
+            parse_ignore_pattern(pattern)?;
+            ignore.push(pattern.to_owned());
         }
     }
 
@@ -56,6 +115,7 @@ fn load_text(text: &str) -> Result<Config> {
     };
 
     Ok(Config {
+        ignore,
         private_packages_version,
     })
 }
@@ -72,6 +132,10 @@ mod tests {
 
     fn private_packages_version(text: &str) -> bool {
         load_ok(text).private_packages_version
+    }
+
+    fn resolve(text: &str, names: &[&str]) -> Vec<String> {
+        load_ok(text).resolve_ignore(names.iter().copied()).unwrap()
     }
 
     fn validate_err(text: &str) -> String {
@@ -109,6 +173,56 @@ mod tests {
         ));
         assert!(!private_packages_version("{ \"privatePackages\": {} }\n"));
         assert!(!private_packages_version("{}\n"));
+    }
+
+    #[test]
+    fn resolves_ignore_names_and_globs() {
+        assert_eq!(
+            resolve("{ \"ignore\": [\"pkg-a\"] }\n", &["pkg-a", "pkg-b"]),
+            ["pkg-a"]
+        );
+        assert_eq!(
+            resolve(
+                "{ \"ignore\": [\"@scope/*\"] }\n",
+                &["@scope/a", "@scope/b", "pkg-a"]
+            ),
+            ["@scope/a", "@scope/b"]
+        );
+        assert_eq!(
+            resolve(
+                "{ \"ignore\": [\"pkg-{a,b}\"] }\n",
+                &["pkg-a", "pkg-b", "pkg-c"]
+            ),
+            ["pkg-a", "pkg-b"]
+        );
+    }
+
+    #[test]
+    fn resolves_negation_in_pattern_order() {
+        assert_eq!(
+            resolve(
+                "{ \"ignore\": [\"pkg-*\", \"!pkg-b\"] }\n",
+                &["pkg-a", "pkg-b"]
+            ),
+            ["pkg-a"]
+        );
+        assert_eq!(
+            resolve(
+                "{ \"ignore\": [\"!pkg-b\", \"pkg-*\"] }\n",
+                &["pkg-a", "pkg-b"]
+            ),
+            ["pkg-a", "pkg-b"]
+        );
+    }
+
+    #[test]
+    fn tolerates_an_ignore_pattern_matching_nothing() {
+        assert!(resolve("{ \"ignore\": [\"missing-*\"] }\n", &["pkg-a"]).is_empty());
+    }
+
+    #[test]
+    fn rejects_an_invalid_ignore_pattern() {
+        insta::assert_snapshot!(validate_err("{ \"ignore\": [\"pkg-[\"] }\n"));
     }
 
     #[test]
