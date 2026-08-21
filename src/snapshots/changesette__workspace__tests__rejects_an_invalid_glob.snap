@@ -2,4 +2,4 @@
 source: src/workspace.rs
 expression: "discover_err(\"bad-glob\")"
 ---
-tests/fixtures/workspace/bad-glob/package.json: invalid workspace pattern "packages/[": Pattern syntax error near position 9: invalid range pattern
+tests/fixtures/workspace/bad-glob/package.json: invalid workspace pattern "packages/[": failed to parse glob expression
