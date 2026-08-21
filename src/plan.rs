@@ -1,17 +1,89 @@
-use std::{collections::BTreeMap, fs, io, path::PathBuf};
+use std::{collections::BTreeMap, env, fs, io, path::PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use semver::Version;
 
 use crate::{
     bump::{self, Bump},
     changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
+    config,
     package_json::PackageJson,
-    pre::{PreJson, PreMode},
+    pre::{self, PreJson, PreMode},
     skip::SkipSet,
-    workspace::Workspace,
+    workspace::{Member, Workspace},
 };
+
+/// A planned `version` run: the changesets to consume and the releases to
+/// apply, produced by `plan_version` without modifying anything on disk.
+pub(crate) struct PlannedVersion {
+    pub(crate) workspace: Workspace,
+    pub(crate) changeset_dir: PathBuf,
+    pub(crate) pre: Option<PreJson>,
+    /// Whether there were no unreleased changesets before skip filtering.
+    pub(crate) no_changes: bool,
+    /// The changesets `version` consumes, skip-filtered.
+    pub(crate) changes: Vec<LoadedChange>,
+    pub(crate) releases: Vec<PlannedRelease>,
+}
+
+impl PlannedVersion {
+    /// The pre state when in pre mode.
+    pub(crate) fn in_pre(&self) -> Option<&PreJson> {
+        self.pre.as_ref().filter(|pre| pre.mode() == PreMode::Pre)
+    }
+
+    pub(crate) fn exiting_pre(&self) -> bool {
+        matches!(&self.pre, Some(pre) if pre.mode() == PreMode::Exit)
+    }
+}
+
+/// Discovers the workspace containing the current directory and plans the
+/// pending `version` run, resolving the ignore set from the config or
+/// `cli_ignore` (using both is an error), modifying nothing on disk.
+pub(crate) fn plan_version(cli_ignore: &[String]) -> Result<PlannedVersion> {
+    let workspace = Workspace::discover(&env::current_dir()?)?;
+    let changeset_dir = workspace.root().join(".changeset");
+    let config = config::load(&changeset_dir)?;
+    let config_ignore = config.resolve_ignore(workspace.members().iter().map(Member::name))?;
+    let ignore = if config_ignore.is_empty() {
+        for name in cli_ignore {
+            workspace.member(name).context("invalid `--ignore` value")?;
+        }
+        cli_ignore.to_vec()
+    } else if cli_ignore.is_empty() {
+        config_ignore
+    } else {
+        bail!(
+            "the --ignore option cannot be used while ignore is defined in .changeset/config.json; use only one of them"
+        );
+    };
+    let skip = SkipSet::build(&workspace, &config, &ignore)?;
+
+    let pre = PreJson::load(&changeset_dir)?;
+    if let Some(pre) = pre.as_ref().filter(|pre| pre.mode() == PreMode::Pre) {
+        pre::validate_tag(pre.tag())?;
+    }
+
+    let mut changes = changeset::load(&changeset_dir)?;
+    if matches!(&pre, Some(pre) if pre.mode() == PreMode::Pre) {
+        // The `pre/` changesets were already consumed in this pre-release
+        // cycle.
+        changes.retain(|change| !change.in_pre);
+    }
+    let no_changes = changes.is_empty();
+    let changes = skip.filter_changes(&workspace, &changeset_dir, changes)?;
+    let releases = plan_releases(&workspace, &changes, pre.as_ref(), &skip)?;
+
+    Ok(PlannedVersion {
+        workspace,
+        changeset_dir,
+        pre,
+        no_changes,
+        changes,
+        releases,
+    })
+}
 
 pub(crate) struct PlannedRelease {
     pub(crate) name: String,
@@ -30,21 +102,12 @@ pub(crate) struct PlannedRelease {
 
 /// Plans the releases requested by `changes` (plus, when exiting pre mode,
 /// the members still on a pre-release version), modifying nothing on disk.
-pub(crate) fn plan_releases(
+fn plan_releases(
     workspace: &Workspace,
     changes: &[LoadedChange],
     pre: Option<&PreJson>,
     skip: &SkipSet,
 ) -> Result<Vec<PlannedRelease>> {
-    let changeset_dir = workspace.root().join(".changeset");
-    for change in changes {
-        for (name, _) in &change.releases {
-            workspace
-                .member(name)
-                .with_context(|| changeset_dir.join(change.rel_path()).display().to_string())?;
-        }
-    }
-
     let mut max_bumps = changeset::max_bumps(changes);
     if matches!(pre, Some(pre) if pre.mode() == PreMode::Exit) {
         rescue_prereleases(workspace, skip, &mut max_bumps)?;

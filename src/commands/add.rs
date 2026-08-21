@@ -133,6 +133,7 @@ fn releases_from_flags(
     ];
 
     let mut errors = Vec::new();
+    let mut flags_by_name: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (flag, _, names) in &flags {
         for name in *names {
             if workspace.member(name).is_err() {
@@ -147,11 +148,6 @@ fn releases_from_flags(
                     "the package `{name}` is passed to `{flag}` but is skipped (private, ignored, or without a version)"
                 ));
             }
-        }
-    }
-    let mut flags_by_name: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for (flag, _, names) in &flags {
-        for name in *names {
             let entry = flags_by_name.entry(name).or_default();
             if !entry.contains(flag) {
                 entry.push(flag);
