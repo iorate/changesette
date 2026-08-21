@@ -10,30 +10,10 @@ use crate::{
     workspace::{Member, Workspace},
 };
 
-/// Consumes every changeset in the workspace: bumps each named package's
-/// package.json, inserts the new section into its CHANGELOG.md, and deletes
-/// the consumed files (`none`-only and empty changesets included). Packages
-/// named only with `none` keep their version and changelog. With zero
-/// changesets it is an error unless `allow_no_changesets` is set, and nothing
-/// changes either way; exiting pre mode is exempt from the error. A package
-/// is skipped when the ignore set names it, when it is private and the
-/// config does not version private packages, or when its package.json has no
-/// version field; a changeset naming only skipped packages is excluded from
-/// the release plan and left on disk, and it is an error for a changeset to
-/// mix skipped and not skipped packages. The ignore set is the config
-/// `ignore` patterns resolved against the workspace members, or the `ignore`
-/// argument (each name must be a workspace member) when that resolution is
-/// empty; passing `ignore` while the resolution is not empty is an error.
-///
-/// In pre mode, only the changesets not yet consumed in this pre-release
-/// cycle are planned, the new versions are prereleases, and the consumed
-/// files are moved to `.changeset/pre/` instead of deleted. Exiting pre mode,
-/// the parked files are replanned along with the new ones into final versions
-/// and pre.json is deleted, even when there is nothing to release.
-///
-/// Reports the applied bumps to stderr; with `output_path`, instead writes
-/// the release plan, each bumped release carrying its new changelog entry,
-/// as pretty-printed JSON to that file (or to stdout when the path is `-`).
+/// Consumes every changeset: bumps each named package's package.json,
+/// upserts its CHANGELOG.md section, and deletes the consumed files — in pre
+/// mode planning prerelease versions and moving the consumed files to
+/// `.changeset/pre/` instead.
 pub(crate) fn run(
     ignore: &[String],
     allow_no_changesets: bool,

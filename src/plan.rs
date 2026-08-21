@@ -23,16 +23,13 @@ pub(crate) struct PlannedRelease {
     /// The ids of the changesets naming this package (`none` entries
     /// included), in load order (`pre/` changesets first).
     pub(crate) changeset_ids: Vec<String>,
-    /// The body of the new `## <new_version>` section, without the heading.
+    /// The body of the new `## <new_version>` section, without the heading;
     /// `None` for a `None` bump.
     pub(crate) changelog_entry: Option<String>,
 }
 
-/// Plans the release of each package named by `changes`, validating that
-/// every named package is a workspace member. In pre mode the new versions
-/// are `-{tag}.{n}` pre-releases; with `pre` exiting, every workspace member
-/// left on a pre-release version is released too, unless `skip` contains it.
-/// Modifies nothing on disk.
+/// Plans the releases requested by `changes` (plus, when exiting pre mode,
+/// the members still on a pre-release version), modifying nothing on disk.
 pub(crate) fn plan_releases(
     workspace: &Workspace,
     changes: &[LoadedChange],
@@ -142,9 +139,8 @@ impl StagedWrite {
     }
 }
 
-/// Stages the writes that apply `releases`: each bumped package's
-/// package.json with the new version set and its CHANGELOG.md with the new
-/// section upserted. Modifies nothing on disk.
+/// Stages the package.json and CHANGELOG.md writes that apply `releases`,
+/// modifying nothing on disk.
 pub(crate) fn stage_writes(
     workspace: &Workspace,
     releases: &[PlannedRelease],

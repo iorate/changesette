@@ -17,13 +17,10 @@ struct Package<'a> {
     dir: String,
 }
 
-/// Prints the packages managed by `version` — the workspace members it does
-/// not skip, so `version` is always present — to stdout as a single-line JSON
-/// array of `{name, version, private, dir}` objects in package name order,
-/// where `private` is always a boolean and `dir` is the member directory
-/// relative to the workspace root, `/`-separated, or `.` for the root
-/// itself. With `all`, prints every workspace member instead; only then may
-/// `version` be omitted, when the member's package.json has no version field.
+/// Prints the packages managed by `version` — every workspace member with
+/// `all` — to stdout as a single-line JSON array of
+/// `{name, version, private, dir}` objects, `dir` being relative to the
+/// workspace root.
 pub(crate) fn run(all: bool) -> Result<()> {
     let workspace = Workspace::discover(&std::env::current_dir()?)?;
     let config = config::load(&workspace.root().join(".changeset"))?;

@@ -11,8 +11,8 @@ use jsonc_parser::{
 
 use crate::jsonc::{set_string_value, string_prop};
 
-/// A loaded `package.json`. Saving preserves the original formatting,
-/// changing only the rewritten values.
+/// A loaded `package.json` whose serialization preserves the original
+/// formatting, changing only the rewritten values.
 pub(crate) struct PackageJson {
     path: PathBuf,
     root: CstRootNode,

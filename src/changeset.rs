@@ -23,12 +23,12 @@ pub(crate) struct LoadedChange {
     pub(crate) file_name: String,
     /// Whether the file was loaded from `pre/` in the changeset directory.
     pub(crate) in_pre: bool,
-    /// The packages named in the frontmatter, in frontmatter order, each with
-    /// its requested bump; `None` stands for the `none` type. Empty for an
-    /// empty changeset.
+    /// The packages named in the frontmatter, in order, each with its
+    /// requested bump (`None` for the `none` type); empty for an empty
+    /// changeset.
     pub(crate) releases: Vec<(String, Option<Bump>)>,
-    /// The summary text below the frontmatter, trimmed. May be empty, as in
-    /// the upstream parser, which does not validate the summary.
+    /// The summary text below the frontmatter, trimmed; may be empty, as the
+    /// upstream parser does not validate it.
     pub(crate) summary: String,
 }
 
@@ -57,10 +57,9 @@ impl LoadedChange {
     }
 }
 
-/// Loads every changeset in `changeset_dir`: the ones in its `pre/`
-/// subdirectory first, then the ones directly in it, each group in file-name
-/// order. A missing directory holds no changesets. Package names are not
-/// validated here; callers match them against the workspace members.
+/// Loads every changeset in `changeset_dir`, the ones in its `pre/`
+/// subdirectory first and each group in file-name order, treating a missing
+/// directory as empty and leaving package-name validation to the callers.
 pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
     let file_names = scan(changeset_dir)?.unwrap_or_default();
     let pre_dir = changeset_dir.join("pre");

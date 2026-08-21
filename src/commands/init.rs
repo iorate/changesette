@@ -20,10 +20,8 @@ const CONFIG: &str = "{
 }
 ";
 
-/// Creates the `.changeset/` directory at the workspace root with a README.md
-/// describing it and a config.json holding the default configuration,
-/// creating whichever of them are missing, and reports each created file to
-/// stderr; prints nothing if everything already exists.
+/// Creates the `.changeset/` directory at the workspace root with a default
+/// README.md and config.json, creating whichever of them are missing.
 pub(crate) fn run() -> Result<()> {
     let cwd = env::current_dir()?;
     let workspace = Workspace::discover(&cwd)?;

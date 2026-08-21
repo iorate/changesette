@@ -15,14 +15,9 @@ use crate::{
     workspace::{Member, Workspace},
 };
 
-/// Creates a changeset file under the workspace root's `.changeset/`,
-/// creating the directory if needed, and reports the file to stderr.
-/// With `empty`, the changeset names no packages and nothing is prompted.
-/// Otherwise only the versionable packages — the ones `version` does not
-/// skip — may be named: the releases come from the bump flags when any is
-/// given, and the summary from `message`; inputs missing from the flags are
-/// prompted for interactively when both stdin and stderr are terminals, and
-/// reported as an error otherwise.
+/// Creates a changeset file under the workspace root's `.changeset/`, taking
+/// the releases and summary from the flags and prompting interactively for
+/// missing inputs.
 pub(crate) fn run(
     major: Vec<String>,
     minor: Vec<String>,

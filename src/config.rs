@@ -11,20 +11,16 @@ pub(crate) struct Config {
     /// expands them into package names.
     ignore: Vec<String>,
     /// Whether private packages are versioned, per the changesets
-    /// `privatePackages` setting: `true` means `{version: true}`, and a
-    /// missing key, `false`, or an object without `version` means
-    /// `{version: false}`, matching the upstream @changesets/config@4.0.0
+    /// `privatePackages` setting and the upstream @changesets/config@4.0.0
     /// defaults.
     pub(crate) private_packages_version: bool,
 }
 
 impl Config {
     /// Expands the `ignore` patterns against `names` and returns the matching
-    /// names in input order, following the ordered evaluation of the upstream
-    /// @changesets/config@4.0.0 `globMatch`: a name is ignored once a pattern
-    /// matches it, and un-ignored when a later `!`-prefixed pattern matches
-    /// it. Patterns use the wax glob syntax; a pattern matching no name is
-    /// not an error.
+    /// names in input order, following the ordered `!`-negation evaluation of
+    /// the upstream @changesets/config@4.0.0 `globMatch`; unlike upstream, a
+    /// pattern matching no name is not an error.
     pub(crate) fn resolve_ignore<'a>(
         &self,
         names: impl IntoIterator<Item = &'a str>,
@@ -66,10 +62,8 @@ fn parse_ignore_pattern(pattern: &str) -> Result<(bool, Glob<'_>)> {
 }
 
 /// Loads `changeset_dir/config.json` as the changesette-supported subset of
-/// the changesets config format: "ignore" must be an array of strings, and
-/// "privatePackages" a boolean or an object whose optional "version" is a
-/// boolean. Unknown keys are ignored, as in upstream changesets. A missing
-/// file is valid; every setting then takes its default.
+/// the changesets config format, treating a missing file as all defaults and
+/// ignoring unknown keys as in upstream changesets.
 pub(crate) fn load(changeset_dir: &Path) -> Result<Config> {
     let path = changeset_dir.join("config.json");
     let text = match fs::read_to_string(&path) {

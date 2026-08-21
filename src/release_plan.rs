@@ -48,8 +48,8 @@ pub(crate) struct Release {
     /// The ids of the changesets naming this package (`none` entries
     /// included), in load order (`pre/` changesets first).
     pub(crate) changesets: Vec<String>,
-    /// The body of the new `## <new_version>` section, without the heading.
-    /// Absent for `none`.
+    /// The body of the new `## <new_version>` section, without the heading;
+    /// absent for `none`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) changelog_entry: Option<String>,
 }

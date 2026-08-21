@@ -7,9 +7,7 @@ use crate::{
 };
 
 /// Whether `version` skips the package, per upstream
-/// @changesets/should-skip-package@1.0.0: skipped when `ignore` names it,
-/// when it is private and private packages are not versioned, or when its
-/// package.json has no version field.
+/// @changesets/should-skip-package@1.0.0.
 pub(crate) fn should_skip(package_json: &PackageJson, config: &Config, ignore: &[String]) -> bool {
     ignore.iter().any(|name| name == package_json.name())
         || (package_json.private() && !config.private_packages_version)
@@ -42,9 +40,8 @@ impl SkipSet {
     }
 
     /// Drops from `changes` every changeset whose releases are all skipped,
-    /// leaving its file on disk untouched. Every named package must be a
-    /// workspace member, and a changeset mixing skipped and not skipped
-    /// packages is an error.
+    /// leaving its file on disk; a changeset mixing skipped and not skipped
+    /// packages is an error, as is one naming a non-member package.
     pub(crate) fn filter_changes(
         &self,
         workspace: &Workspace,

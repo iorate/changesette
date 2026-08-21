@@ -26,8 +26,8 @@ impl PreMode {
     }
 }
 
-/// A loaded `.changeset/pre.json`. Saving preserves the original formatting
-/// and unknown fields, changing only the rewritten values.
+/// A loaded `.changeset/pre.json` whose serialization preserves the original
+/// formatting and unknown fields, changing only the rewritten values.
 pub(crate) struct PreJson {
     path: PathBuf,
     root: CstRootNode,
