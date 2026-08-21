@@ -281,11 +281,11 @@ Prints the body of the `## <version>` section of the named package's `CHANGELOG.
 
 ### `ignore`
 
-Glob patterns in the [wax](https://github.com/olson-sean-k/wax) syntax to skip packages by name (default `[]`); a `!`-prefixed pattern un-ignores, in order, so `["pkg-*", "!pkg-b"]` ignores every `pkg-*` package except `pkg-b`.
+Names of packages to skip; glob patterns like `"@scope/*"` are also supported, and a `!`-prefixed entry un-ignores, in order, so `["pkg-*", "!pkg-b"]` ignores every `pkg-*` package except `pkg-b`. Defaults to `[]`.
 
 ### `privatePackages`
 
-Whether private packages (`"private": true` in package.json) are versioned (default `{ "version": false }`: they are skipped). Set `{ "version": true }` (or the shorthand `true`) to version them.
+Whether private packages (`"private": true` in package.json) are versioned. Set `{ "version": true }` (or the shorthand `true`) to version them. Defaults to `{ "version": false }`: private packages are skipped.
 
 ## Workspaces
 
