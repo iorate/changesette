@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::{
     bump::Bump,
-    changeset, output, plan,
+    changeset, config, output, plan,
     pre::{self, PreJson, PreMode},
     release_plan,
     workspace::Workspace,
@@ -19,6 +19,7 @@ use crate::{
 pub(crate) fn run(verbose: bool, output_path: Option<&Path>) -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
     let changeset_dir = workspace.root().join(".changeset");
+    config::validate(&changeset_dir)?;
 
     let pre = PreJson::load(&changeset_dir)?;
     let in_pre = match &pre {

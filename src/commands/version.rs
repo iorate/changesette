@@ -3,7 +3,7 @@ use std::{env, fs, path::Path};
 use anyhow::{Context, Result, bail};
 
 use crate::{
-    changeset, output, plan,
+    changeset, config, output, plan,
     pre::{self, PreJson, PreMode},
     release_plan,
     workspace::Workspace,
@@ -39,6 +39,7 @@ pub(crate) fn run(
         workspace.member(name).context("invalid `--ignore` value")?;
     }
     let changeset_dir = workspace.root().join(".changeset");
+    config::validate(&changeset_dir)?;
 
     let pre = PreJson::load(&changeset_dir)?;
     let in_pre = match &pre {

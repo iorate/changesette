@@ -59,14 +59,22 @@ fn assert_changeset_path(line: &str) {
 }
 
 #[test]
-fn init_creates_the_changeset_directory_with_a_readme() {
+fn init_creates_the_changeset_directory_with_a_readme_and_a_config() {
     let dir = package_dir();
     let output = changesette(dir.path(), &["init"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
-    assert_eq!(stderr(&output), "Initialized .changeset\n");
+    assert_eq!(
+        stderr(&output),
+        "Created .changeset/README.md\nCreated .changeset/config.json\n"
+    );
     let readme = fs::read_to_string(dir.path().join(".changeset/README.md")).unwrap();
     assert!(readme.starts_with("# Changesets\n"), "{readme}");
+    let config = fs::read_to_string(dir.path().join(".changeset/config.json")).unwrap();
+    assert_eq!(
+        config,
+        "{\n  \"ignore\": [],\n  \"privatePackages\": {\n    \"version\": false\n  }\n}\n"
+    );
 }
 
 #[test]
@@ -74,22 +82,41 @@ fn init_creates_the_directory_at_the_workspace_root() {
     let dir = workspace_dir();
     let output = changesette(&dir.path().join("packages/a"), &["init"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stderr(&output), "Initialized ../../.changeset\n");
+    assert_eq!(
+        stderr(&output),
+        "Created ../../.changeset/README.md\nCreated ../../.changeset/config.json\n"
+    );
     assert!(dir.path().join(".changeset/README.md").is_file());
     assert!(!dir.path().join("packages/a/.changeset").exists());
 }
 
 #[test]
-fn init_does_nothing_when_the_directory_exists() {
+fn init_backfills_missing_files_into_an_existing_directory() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
+    fs::write(dir.path().join(".changeset/README.md"), "custom\n").unwrap();
+    let output = changesette(dir.path(), &["init"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "Created .changeset/config.json\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join(".changeset/README.md")).unwrap(),
+        "custom\n"
+    );
+    assert!(dir.path().join(".changeset/config.json").is_file());
+}
+
+#[test]
+fn init_does_nothing_when_everything_exists() {
+    let dir = package_dir();
+    let output = changesette(dir.path(), &["init"]);
+    assert!(output.status.success(), "{}", stderr(&output));
     let before = dir_snapshot(dir.path());
     let output = changesette(dir.path(), &["init"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
     assert_eq!(stderr(&output), "");
     assert_eq!(dir_snapshot(dir.path()), before);
-    assert!(!dir.path().join(".changeset/README.md").exists());
 }
 
 #[test]
@@ -155,15 +182,32 @@ fn add_is_the_default_command() {
 }
 
 #[test]
-fn add_fails_without_the_changeset_directory() {
+fn add_creates_the_changeset_directory_when_missing() {
     let dir = package_dir();
+    let output = changesette(
+        dir.path(),
+        &["add", "--minor", "ublacklist", "--message", "Add feature"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let err = stderr(&output);
+    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
+    assert_eq!(content, "---\nublacklist: minor\n---\n\nAdd feature\n");
+    assert!(!dir.path().join(".changeset/README.md").exists());
+    assert!(!dir.path().join(".changeset/config.json").exists());
+}
+
+#[test]
+fn add_fails_on_an_invalid_config() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    fs::write(dir.path().join(".changeset/config.json"), "").unwrap();
     let output = changesette(
         dir.path(),
         &["add", "--minor", "ublacklist", "--message", "Add feature"],
     );
     assert!(!output.status.success());
     assert!(
-        stderr(&output).contains("changesette init"),
+        stderr(&output).contains("config.json"),
         "{}",
         stderr(&output)
     );
@@ -604,6 +648,47 @@ fn version_with_zero_changesets_fails_and_touches_nothing() {
 }
 
 #[test]
+fn version_treats_a_missing_changeset_directory_as_empty() {
+    let dir = package_dir();
+    let output = changesette(dir.path(), &["version"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("no unreleased changesets found"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!dir.path().join(".changeset").exists());
+}
+
+#[test]
+fn version_fails_on_an_invalid_config() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    fs::write(
+        dir.path().join(".changeset/config.json"),
+        "{ \"ignore\": \"pkg\" }\n",
+    )
+    .unwrap();
+    write_changeset(dir.path(), "a.md", &[("ublacklist", "patch")], "Fix bug");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("config.json: \"ignore\" must be an array of strings"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn status_treats_a_missing_changeset_directory_as_empty() {
+    let dir = package_dir();
+    let output = changesette(dir.path(), &["status"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Packages to be bumped:\n");
+    assert!(!dir.path().join(".changeset").exists());
+}
+
+#[test]
 fn version_allow_no_changesets_prints_a_notice_and_touches_nothing() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
@@ -635,18 +720,6 @@ fn version_allow_no_changesets_output_writes_an_empty_plan() {
     assert_eq!(
         fs::read_to_string(dir.path().join("plan.json")).unwrap(),
         "{\n  \"changesets\": [],\n  \"releases\": []\n}"
-    );
-}
-
-#[test]
-fn version_fails_without_the_changeset_directory() {
-    let dir = package_dir();
-    let output = changesette(dir.path(), &["version"]);
-    assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains(".changeset"),
-        "{}",
-        stderr(&output)
     );
 }
 
@@ -1194,18 +1267,6 @@ fn status_output_with_zero_changesets_writes_an_empty_plan() {
     assert_eq!(
         fs::read_to_string(dir.path().join("plan.json")).unwrap(),
         "{\n  \"changesets\": [],\n  \"releases\": []\n}"
-    );
-}
-
-#[test]
-fn status_fails_without_the_changeset_directory() {
-    let dir = package_dir();
-    let output = changesette(dir.path(), &["status"]);
-    assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains(".changeset"),
-        "{}",
-        stderr(&output)
     );
 }
 

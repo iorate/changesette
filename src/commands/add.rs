@@ -9,13 +9,13 @@ use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
 
 use crate::{
     bump::Bump,
-    output,
+    config, output,
     package_json::PackageJson,
     workspace::{Member, Workspace},
 };
 
-/// Creates a changeset file under the workspace root's `.changeset/` and
-/// reports it to stderr; the directory must already exist (see `init`).
+/// Creates a changeset file under the workspace root's `.changeset/`,
+/// creating the directory if needed, and reports the file to stderr.
 /// With `empty`, the changeset names no packages and nothing is prompted.
 /// Otherwise the releases come from the bump flags when any is given, and the
 /// summary from `message`; inputs missing from the flags are prompted for
@@ -36,11 +36,8 @@ pub(crate) fn run(
     );
 
     let changeset_dir = workspace.root().join(".changeset");
-    ensure!(
-        changeset_dir.is_dir(),
-        "{}: changeset directory not found; run `changesette init` to create it",
-        changeset_dir.display()
-    );
+    config::validate(&changeset_dir)?;
+    fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
 
     let (releases, summary) = if empty {
         (Vec::new(), message.unwrap_or_default())

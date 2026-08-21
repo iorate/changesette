@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"{ \\\"ignore\\\": [\\\"pkg-a\\\", 1] }\\n\")"
+---
+.changeset/config.json: "ignore" must be an array of strings

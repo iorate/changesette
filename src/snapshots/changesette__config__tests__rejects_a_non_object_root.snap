@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"[]\\n\")"
+---
+.changeset/config.json: the root value must be an object

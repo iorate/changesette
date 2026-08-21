@@ -59,15 +59,10 @@ impl LoadedChange {
 
 /// Loads every changeset in `changeset_dir`: the ones in its `pre/`
 /// subdirectory first, then the ones directly in it, each group in file-name
-/// order. Package names are not validated here; callers match them against
-/// the workspace members.
+/// order. A missing directory holds no changesets. Package names are not
+/// validated here; callers match them against the workspace members.
 pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
-    let Some(file_names) = scan(changeset_dir)? else {
-        bail!(
-            "{}: changeset directory not found; run `changesette init` to create it",
-            changeset_dir.display()
-        )
-    };
+    let file_names = scan(changeset_dir)?.unwrap_or_default();
     let pre_dir = changeset_dir.join("pre");
     let pre_file_names = scan(&pre_dir)?.unwrap_or_default();
 
@@ -210,8 +205,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_missing_directory() {
-        insta::assert_snapshot!(load_err("does-not-exist"));
+    fn treats_a_missing_directory_as_empty() {
+        assert_eq!(load_ok("does-not-exist").len(), 0);
     }
 
     #[test]

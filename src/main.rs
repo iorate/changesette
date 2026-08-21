@@ -6,6 +6,7 @@ mod bump;
 mod changelog;
 mod changeset;
 mod commands;
+mod config;
 mod jsonc;
 mod output;
 mod package_json;
