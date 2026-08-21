@@ -56,7 +56,15 @@ pub(crate) fn plan_releases(
     for (name, max_bump) in max_bumps {
         let member = workspace.member(name)?;
         let package_json = PackageJson::load(member.dir())?;
-        let old_version = package_json.version().clone();
+        let old_version = package_json
+            .version()
+            .with_context(|| {
+                format!(
+                    "{}: missing top-level \"version\"",
+                    package_json.path().display()
+                )
+            })?
+            .clone();
         let changeset_ids = changes
             .iter()
             .filter(|change| change.releases.iter().any(|(n, _)| n == name))
@@ -113,7 +121,10 @@ fn rescue_prereleases<'a>(
             continue;
         }
         let package_json = PackageJson::load(member.dir())?;
-        if !package_json.version().pre.is_empty() {
+        if package_json
+            .version()
+            .is_some_and(|version| !version.pre.is_empty())
+        {
             max_bumps.insert(member.name(), Some(Bump::Patch));
         }
     }

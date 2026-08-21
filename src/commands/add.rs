@@ -166,12 +166,15 @@ fn prompt_releases(workspace: &Workspace) -> Result<Vec<(String, Bump)>> {
     if let [member] = members {
         let package_json = PackageJson::load(member.dir())?;
         const ITEMS: [Bump; 3] = [Bump::Patch, Bump::Minor, Bump::Major];
+        let prompt = match package_json.version() {
+            Some(version) => format!(
+                "What kind of change is this for {}? (current version is {version})",
+                package_json.name()
+            ),
+            None => format!("What kind of change is this for {}?", package_json.name()),
+        };
         let index = dialoguer::Select::new()
-            .with_prompt(format!(
-                "What kind of change is this for {}? (current version is {})",
-                package_json.name(),
-                package_json.version()
-            ))
+            .with_prompt(prompt)
             .items(ITEMS.map(Bump::as_str))
             .default(0)
             .interact()?;
@@ -194,11 +197,10 @@ fn prompt_releases(workspace: &Workspace) -> Result<Vec<(String, Bump)>> {
     let labels = affected
         .iter()
         .map(|member| {
-            Ok(format!(
-                "{}@{}",
-                member.name(),
-                PackageJson::load(member.dir())?.version()
-            ))
+            Ok(match PackageJson::load(member.dir())?.version() {
+                Some(version) => format!("{}@{version}", member.name()),
+                None => member.name().to_owned(),
+            })
         })
         .collect::<Result<Vec<_>>>()?;
 

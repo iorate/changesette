@@ -287,7 +287,7 @@ fn collect_members(root: &Path, manifest: &Path, patterns: &[String]) -> Result<
             let Some(value) = read_json(&path)? else {
                 continue;
             };
-            let (Some(name_value), Some(_)) = (value.get("name"), value.get("version")) else {
+            let Some(name_value) = value.get("name") else {
                 continue;
             };
             let name = member_name(name_value, &path)?;
@@ -720,6 +720,79 @@ mod tests {
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn accepts_a_versionless_member_in_an_npm_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\", \"workspaces\": [\"packages/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn accepts_a_versionless_member_in_a_pnpm_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"packages/*\"\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn accepts_a_versionless_single_package() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "package.json", "{ \"name\": \"app\" }\n");
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(names_and_dirs(&workspace), [("app", dir.path())]);
+    }
+
+    #[test]
+    fn excludes_a_nameless_member() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"packages/*\"\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "packages/b/package.json",
+            "{ \"name\": \"pkg-b\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-b", dir.path().join("packages/b").as_path())]
         );
     }
 }

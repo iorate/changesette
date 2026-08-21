@@ -265,10 +265,10 @@ Leaves pre-release mode by flipping `.changeset/pre.json` to the exited state, s
 
 ### `changesette get-packages`
 
-Prints the workspace packages to stdout as a single-line JSON array in package name order. Each entry has the package's `name`, its `version`, and its `dir` relative to the workspace root (`"."` when the package is the workspace root itself):
+Prints the workspace packages to stdout as a single-line JSON array in package name order. Each entry has the package's `name`, its `version` (omitted when its package.json has no version field), a boolean `private`, and its `dir` relative to the workspace root (`"."` when the package is the workspace root itself):
 
 ```json
-[{"name":"pkg-a","version":"3.1.4","dir":"packages/a"},{"name":"pkg-b","version":"1.0.0","dir":"packages/b"}]
+[{"name":"pkg-a","version":"3.1.4","private":false,"dir":"packages/a"},{"name":"pkg-b","version":"1.0.0","private":true,"dir":"packages/b"}]
 ```
 
 ### `changesette get-changelog-entry <package> <version>`

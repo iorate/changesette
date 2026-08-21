@@ -17,8 +17,9 @@ pub(crate) struct PackageJson {
     path: PathBuf,
     root: CstRootNode,
     name: String,
-    version_lit: CstStringLit,
-    version: semver::Version,
+    version_lit: Option<CstStringLit>,
+    version: Option<semver::Version>,
+    private: bool,
 }
 
 impl PackageJson {
@@ -48,14 +49,27 @@ impl PackageJson {
             .context("top-level \"name\" must be a valid string")?;
         ensure!(!name.is_empty(), "top-level \"name\" must not be empty");
 
-        let version_lit = string_prop(&object, "version", "top-level \"version\"")?
-            .context("missing top-level \"version\"")?;
-        let raw_version = version_lit
-            .decoded_value()
-            .context("top-level \"version\" must be a valid string")?;
-        let version = raw_version.parse().with_context(|| {
-            format!("top-level \"version\" ({raw_version:?}) is not a valid semver version")
-        })?;
+        let version_lit = string_prop(&object, "version", "top-level \"version\"")?;
+        let version = match &version_lit {
+            Some(version_lit) => {
+                let raw_version = version_lit
+                    .decoded_value()
+                    .context("top-level \"version\" must be a valid string")?;
+                Some(raw_version.parse().with_context(|| {
+                    format!("top-level \"version\" ({raw_version:?}) is not a valid semver version")
+                })?)
+            }
+            None => None,
+        };
+
+        let private = match object.get("private") {
+            Some(prop) => prop
+                .value()
+                .and_then(|value| value.as_boolean_lit())
+                .context("top-level \"private\" must be a boolean")?
+                .value(),
+            None => false,
+        };
 
         Ok(Self {
             path,
@@ -63,6 +77,7 @@ impl PackageJson {
             name,
             version_lit,
             version,
+            private,
         })
     }
 
@@ -70,13 +85,20 @@ impl PackageJson {
         &self.name
     }
 
-    pub(crate) fn version(&self) -> &semver::Version {
-        &self.version
+    pub(crate) fn version(&self) -> Option<&semver::Version> {
+        self.version.as_ref()
+    }
+
+    pub(crate) fn private(&self) -> bool {
+        self.private
     }
 
     pub(crate) fn set_version(&mut self, version: &semver::Version) -> Result<()> {
-        set_string_value(&self.version_lit, &version.to_string());
-        self.version = version.clone();
+        let Some(version_lit) = &self.version_lit else {
+            bail!("{}: missing top-level \"version\"", self.path.display())
+        };
+        set_string_value(version_lit, &version.to_string());
+        self.version = Some(version.clone());
         Ok(())
     }
 
@@ -120,7 +142,10 @@ mod tests {
     fn reads_name_and_version() {
         let package_json = PackageJson::load(&fixture("two-space")).unwrap();
         assert_eq!(package_json.name(), "ublacklist");
-        assert_eq!(package_json.version(), &semver::Version::new(10, 0, 2));
+        assert_eq!(
+            package_json.version(),
+            Some(&semver::Version::new(10, 0, 2))
+        );
     }
 
     #[test]
@@ -129,7 +154,10 @@ mod tests {
         package_json
             .set_version(&semver::Version::new(10, 1, 0))
             .unwrap();
-        assert_eq!(package_json.version(), &semver::Version::new(10, 1, 0));
+        assert_eq!(
+            package_json.version(),
+            Some(&semver::Version::new(10, 1, 0))
+        );
     }
 
     #[test]
@@ -160,8 +188,41 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_missing_version() {
-        insta::assert_snapshot!(load_err("version-missing"));
+    fn reads_a_missing_version_as_none() {
+        let package_json = PackageJson::load(&fixture("version-missing")).unwrap();
+        assert_eq!(package_json.version(), None);
+    }
+
+    #[test]
+    fn rejects_set_version_without_a_version_key() {
+        let mut package_json = PackageJson::load(&fixture("version-missing")).unwrap();
+        let err = package_json
+            .set_version(&semver::Version::new(10, 1, 0))
+            .unwrap_err();
+        insta::assert_snapshot!(format!("{err:#}"));
+    }
+
+    #[test]
+    fn reads_private_true() {
+        let package_json = PackageJson::load(&fixture("private-true")).unwrap();
+        assert!(package_json.private());
+    }
+
+    #[test]
+    fn reads_private_false() {
+        let package_json = PackageJson::load(&fixture("private-false")).unwrap();
+        assert!(!package_json.private());
+    }
+
+    #[test]
+    fn reads_a_missing_private_as_false() {
+        let package_json = PackageJson::load(&fixture("scripts-version-key")).unwrap();
+        assert!(!package_json.private());
+    }
+
+    #[test]
+    fn rejects_a_non_boolean_private() {
+        insta::assert_snapshot!(load_err("private-not-boolean"));
     }
 
     #[test]

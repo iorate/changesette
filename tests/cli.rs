@@ -559,7 +559,7 @@ fn get_packages_prints_the_single_package_with_a_dot_dir() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[{\"name\":\"ublacklist\",\"version\":\"1.2.3\",\"dir\":\".\"}]\n"
+        "[{\"name\":\"ublacklist\",\"version\":\"1.2.3\",\"private\":false,\"dir\":\".\"}]\n"
     );
 }
 
@@ -576,7 +576,7 @@ fn get_packages_lists_workspace_members_in_name_order() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"dir\":\"packages/a\"},{\"name\":\"pkg-b\",\"version\":\"1.0.0\",\"dir\":\"packages/b\"}]\n"
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"pkg-b\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"packages/b\"}]\n"
     );
 }
 
@@ -587,7 +587,48 @@ fn get_packages_keeps_dirs_relative_to_the_root_from_a_subdirectory() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"dir\":\"packages/a\"}]\n"
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"}]\n"
+    );
+}
+
+#[test]
+fn version_fails_for_a_changeset_naming_a_versionless_package() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"name\": \"ublacklist\"\n}\n",
+    )
+    .unwrap();
+    write_changeset(dir.path(), "a.md", &[("ublacklist", "patch")], "Fix bug");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("missing top-level \"version\""),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn get_packages_reports_private_and_omits_a_missing_version() {
+    let dir = workspace_dir();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"private\": true\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("packages/c")).unwrap();
+    fs::write(
+        dir.path().join("packages/c/package.json"),
+        "{\n  \"name\": \"pkg-c\",\n  \"version\": \"2.0.0\",\n  \"private\": false\n}\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"pkg-b\",\"private\":true,\"dir\":\"packages/b\"},{\"name\":\"pkg-c\",\"version\":\"2.0.0\",\"private\":false,\"dir\":\"packages/c\"}]\n"
     );
 }
 

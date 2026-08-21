@@ -1,0 +1,5 @@
+---
+source: src/package_json.rs
+expression: "load_err(\"private-not-boolean\")"
+---
+tests/fixtures/package-json/private-not-boolean/package.json: top-level "private" must be a boolean
