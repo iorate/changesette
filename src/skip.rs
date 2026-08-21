@@ -6,8 +6,6 @@ use crate::{
     changeset::LoadedChange, config::Config, package_json::PackageJson, workspace::Workspace,
 };
 
-/// Whether `version` skips the package, per upstream
-/// @changesets/should-skip-package@1.0.0.
 pub(crate) fn should_skip(package_json: &PackageJson, config: &Config, ignore: &[String]) -> bool {
     ignore.iter().any(|name| name == package_json.name())
         || (package_json.private() && !config.private_packages_version)
@@ -48,9 +46,9 @@ impl SkipSet {
         changeset_dir: &Path,
         changes: Vec<LoadedChange>,
     ) -> Result<Vec<LoadedChange>> {
-        // Membership is checked before the skip judgment, as in upstream, so
-        // that a changeset naming an unknown package always reports that
-        // rather than a mixed-changeset error.
+        // Membership is checked before the skip judgment so that a changeset
+        // naming an unknown package always reports that rather than a
+        // mixed-changeset error.
         for change in &changes {
             for (name, _) in &change.releases {
                 workspace

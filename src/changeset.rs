@@ -27,14 +27,13 @@ pub(crate) struct LoadedChange {
     /// requested bump (`None` for the `none` type); empty for an empty
     /// changeset.
     pub(crate) releases: Vec<(String, Option<Bump>)>,
-    /// The summary text below the frontmatter, trimmed; may be empty, as the
-    /// upstream parser does not validate it.
+    /// The summary text below the frontmatter, trimmed; may be empty.
     pub(crate) summary: String,
 }
 
 impl LoadedChange {
     /// The file name without its `.md` suffix, prefixed with `pre/` for a
-    /// `pre/` changeset, as in the upstream ids.
+    /// `pre/` changeset.
     pub(crate) fn id(&self) -> String {
         let stem = self
             .file_name
@@ -91,9 +90,7 @@ fn scan(dir: &Path) -> Result<Option<Vec<String>>> {
         let Ok(file_name) = entry.file_name().into_string() else {
             continue;
         };
-        // Entries are selected by name alone, as in the upstream
-        // `@changesets/read`: dotfiles, non-`.md` names, README.md, and agent
-        // instruction files are skipped, symlinks are followed, and a
+        // Selecting entries by name alone means a symlink is followed and a
         // directory with an adopted name is a read error.
         if file_name.starts_with('.')
             || !file_name.ends_with(".md")

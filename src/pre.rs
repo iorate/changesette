@@ -126,7 +126,7 @@ pub(crate) fn validate_tag(tag: &str) -> Result<()> {
     Ok(())
 }
 
-/// Writes a fresh `pre.json` in pre mode, in the upstream formatting.
+/// Writes a fresh `pre.json` in pre mode.
 pub(crate) fn write_new(changeset_dir: &Path, tag: &str) -> Result<()> {
     let path = changeset_dir.join("pre.json");
     let text = format!("{{\n  \"mode\": \"pre\",\n  \"tag\": \"{tag}\"\n}}\n");

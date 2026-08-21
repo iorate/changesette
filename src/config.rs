@@ -7,20 +7,19 @@ use wax::{Glob, Program};
 /// The effective settings from `.changeset/config.json`.
 #[derive(Debug, PartialEq, Default)]
 pub(crate) struct Config {
-    /// The raw patterns of the changesets `ignore` setting; `resolve_ignore`
-    /// expands them into package names.
+    /// The raw patterns of the `ignore` setting; `resolve_ignore` expands
+    /// them into package names.
     ignore: Vec<String>,
-    /// Whether private packages are versioned, per the changesets
-    /// `privatePackages` setting and the upstream @changesets/config@4.0.0
-    /// defaults.
+    /// Whether private packages are versioned, per the `privatePackages`
+    /// setting.
     pub(crate) private_packages_version: bool,
 }
 
 impl Config {
     /// Expands the `ignore` patterns against `names` and returns the matching
-    /// names in input order, following the ordered `!`-negation evaluation of
-    /// the upstream @changesets/config@4.0.0 `globMatch`; unlike upstream, a
-    /// pattern matching no name is not an error.
+    /// names in input order, with a `!`-prefixed pattern un-ignoring the
+    /// names it matches, in order; a pattern matching no name is not an
+    /// error.
     pub(crate) fn resolve_ignore<'a>(
         &self,
         names: impl IntoIterator<Item = &'a str>,
@@ -61,9 +60,8 @@ fn parse_ignore_pattern(pattern: &str) -> Result<(bool, Glob<'_>)> {
     Ok((negated, glob))
 }
 
-/// Loads `changeset_dir/config.json` as the changesette-supported subset of
-/// the changesets config format, treating a missing file as all defaults and
-/// ignoring unknown keys as in upstream changesets.
+/// Loads the supported subset of `changeset_dir/config.json`, treating a
+/// missing file as all defaults and ignoring unknown keys.
 pub(crate) fn load(changeset_dir: &Path) -> Result<Config> {
     let path = changeset_dir.join("config.json");
     let text = match fs::read_to_string(&path) {
