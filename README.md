@@ -334,7 +334,6 @@ While in pre mode, `version` moves the changesets it consumes to `.changeset/pre
 ```sh
 changesette version --snapshot canary         # 1.2.3 -> 0.0.0-canary-20260822123456
 npm publish --tag canary
-git checkout .                                # discard the version changes
 ```
 
 By default the suffix is `<tag>-<datetime>`, or just `<datetime>` when no tag is given. It can be customized with `--snapshot-prerelease-template`, or the [`snapshot.prereleaseTemplate`](#snapshot) setting, using the `{tag}`, `{timestamp}`, and `{datetime}` placeholders; changesets' `{commit}` and `{commit-short}` are not supported.
