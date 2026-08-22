@@ -265,10 +265,23 @@ Leaves pre-release mode by flipping `.changeset/pre.json` to the exited state, s
 
 ### `changesette get-packages [--all]`
 
-Prints the packages managed by `version` to stdout as a single-line JSON array:
+Prints the packages managed by `version` to stdout as a JSON array:
 
 ```json
-[{"name":"pkg-a","version":"3.1.4","private":false,"dir":"packages/a"},{"name":"pkg-b","version":"1.0.0","private":false,"dir":"packages/b"}]
+[
+  {
+    "name": "pkg-a",
+    "version": "3.1.4",
+    "private": false,
+    "dir": "packages/a"
+  },
+  {
+    "name": "pkg-b",
+    "version": "1.0.0",
+    "private": false,
+    "dir": "packages/b"
+  }
+]
 ```
 
 With `--all`, skipped packages are included too.

@@ -1168,6 +1168,20 @@ fn pretty_plan(id: &str) -> String {
     )
 }
 
+fn compact_plan(id: &str) -> String {
+    format!(
+        concat!(
+            "{{\"changesets\":[{{\"id\":\"{0}\",\"summary\":\"Add feature\",",
+            "\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"minor\"}}]}}],",
+            "\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"minor\",",
+            "\"oldVersion\":\"1.2.3\",\"newVersion\":\"1.3.0\",",
+            "\"changesets\":[\"{0}\"],",
+            "\"changelogEntry\":\"### Minor Changes\\n\\n- Add feature\"}}]}}"
+        ),
+        id
+    )
+}
+
 #[test]
 fn version_output_writes_the_pretty_plan_and_applies_the_changesets() {
     let dir = package_dir();
@@ -1192,7 +1206,7 @@ fn version_output_writes_the_pretty_plan_and_applies_the_changesets() {
 }
 
 #[test]
-fn version_output_dash_writes_the_pretty_plan_to_stdout() {
+fn version_output_dash_writes_the_compact_plan_to_stdout() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
@@ -1202,7 +1216,7 @@ fn version_output_dash_writes_the_pretty_plan_to_stdout() {
     );
     let output = changesette(dir.path(), &["version", "--output", "-"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), pretty_plan(ID_B) + "\n");
+    assert_eq!(stdout(&output), compact_plan(ID_B) + "\n");
     assert_eq!(stderr(&output), "");
     assert!(!dir.path().join("-").exists());
     assert!(!dir.path().join(".changeset").join(ULID_B).exists());
@@ -1540,42 +1554,15 @@ fn version_output_includes_a_skipped_changeset_without_a_release() {
         stdout(&output),
         format!(
             concat!(
-                "{{\n",
-                "  \"changesets\": [\n",
-                "    {{\n",
-                "      \"id\": \"{0}\",\n",
-                "      \"summary\": \"Improve pkg-a\",\n",
-                "      \"releases\": [\n",
-                "        {{\n",
-                "          \"name\": \"pkg-a\",\n",
-                "          \"type\": \"minor\"\n",
-                "        }}\n",
-                "      ]\n",
-                "    }},\n",
-                "    {{\n",
-                "      \"id\": \"{1}\",\n",
-                "      \"summary\": \"Fix pkg-b\",\n",
-                "      \"releases\": [\n",
-                "        {{\n",
-                "          \"name\": \"pkg-b\",\n",
-                "          \"type\": \"patch\"\n",
-                "        }}\n",
-                "      ]\n",
-                "    }}\n",
-                "  ],\n",
-                "  \"releases\": [\n",
-                "    {{\n",
-                "      \"name\": \"pkg-a\",\n",
-                "      \"type\": \"minor\",\n",
-                "      \"oldVersion\": \"3.1.4\",\n",
-                "      \"newVersion\": \"3.2.0\",\n",
-                "      \"changesets\": [\n",
-                "        \"{0}\"\n",
-                "      ],\n",
-                "      \"changelogEntry\": \"### Minor Changes\\n\\n- Improve pkg-a\"\n",
-                "    }}\n",
-                "  ]\n",
-                "}}\n"
+                "{{\"changesets\":[",
+                "{{\"id\":\"{0}\",\"summary\":\"Improve pkg-a\",",
+                "\"releases\":[{{\"name\":\"pkg-a\",\"type\":\"minor\"}}]}},",
+                "{{\"id\":\"{1}\",\"summary\":\"Fix pkg-b\",",
+                "\"releases\":[{{\"name\":\"pkg-b\",\"type\":\"patch\"}}]}}],",
+                "\"releases\":[{{\"name\":\"pkg-a\",\"type\":\"minor\",",
+                "\"oldVersion\":\"3.1.4\",\"newVersion\":\"3.2.0\",",
+                "\"changesets\":[\"{0}\"],",
+                "\"changelogEntry\":\"### Minor Changes\\n\\n- Improve pkg-a\"}}]}}\n"
             ),
             ID_A, ID_B
         )
@@ -1777,7 +1764,7 @@ fn status_output_writes_the_pretty_plan_without_modifying_files() {
 }
 
 #[test]
-fn status_output_dash_writes_the_pretty_plan_to_stdout() {
+fn status_output_dash_writes_the_compact_plan_to_stdout() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
@@ -1788,7 +1775,7 @@ fn status_output_dash_writes_the_pretty_plan_to_stdout() {
     let before = dir_snapshot(dir.path());
     let output = changesette(dir.path(), &["status", "-o", "-"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), pretty_plan(ID_B) + "\n");
+    assert_eq!(stdout(&output), compact_plan(ID_B) + "\n");
     assert_eq!(stderr(&output), "");
     assert_eq!(dir_snapshot(dir.path()), before);
 }

@@ -13,9 +13,8 @@ struct Package<'a> {
 }
 
 /// Prints the packages managed by `version` — every workspace member with
-/// `all` — to stdout as a single-line JSON array of
-/// `{name, version, private, dir}` objects, `dir` being relative to the
-/// workspace root.
+/// `all` — to stdout as a JSON array of `{name, version, private, dir}`
+/// objects, `dir` being relative to the workspace root.
 pub(crate) fn run(all: bool) -> Result<()> {
     let workspace = Workspace::discover(&std::env::current_dir()?)?;
     let config = config::load(&workspace.root().join(".changeset"))?;
@@ -32,6 +31,6 @@ pub(crate) fn run(all: bool) -> Result<()> {
             dir: member.rel_dir(),
         });
     }
-    output::print_line(&serde_json::to_string(&packages)?)?;
+    output::print_json(&packages)?;
     Ok(())
 }
