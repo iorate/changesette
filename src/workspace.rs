@@ -257,26 +257,51 @@ fn collect_members(
         } else {
             normalized.push_str("/package.json");
         }
-        let compiled = Glob::new(&normalized)
-            .map(Glob::into_owned)
-            .with_context(|| {
-                format!(
-                    "{}: invalid workspace pattern {original:?}",
-                    manifest.display()
-                )
-            })?;
         if negative {
+            let compiled = Glob::new(&normalized)
+                .map(Glob::into_owned)
+                .with_context(|| {
+                    format!(
+                        "{}: invalid workspace pattern {original:?}",
+                        manifest.display()
+                    )
+                })?;
             negatives.push(compiled);
-        } else {
-            positives.push(compiled);
+            continue;
         }
+        // A leading `../` segment cannot be expressed in a wax glob, so it
+        // walks the ancestor directory it names instead, as pnpm 12 does; a
+        // traversal climbing past the filesystem root matches nothing.
+        // Negations are exempt: they match the path each entry has from the
+        // workspace root, which keeps its `../` segments.
+        let mut walk_root = root;
+        let mut rest = normalized.as_str();
+        let mut escaped = false;
+        while let Some(tail) = rest.strip_prefix("../") {
+            let Some(parent) = walk_root.parent() else {
+                escaped = true;
+                break;
+            };
+            walk_root = parent;
+            rest = tail;
+        }
+        if escaped {
+            continue;
+        }
+        let compiled = Glob::new(rest).map(Glob::into_owned).with_context(|| {
+            format!(
+                "{}: invalid workspace pattern {original:?}",
+                manifest.display()
+            )
+        })?;
+        positives.push((compiled, walk_root));
     }
 
     let ignore = wax::any(IGNORE_PATTERNS)?;
     let mut dirs = BTreeSet::new();
     let mut members = Vec::new();
-    for glob in &positives {
-        let walk = glob.walk(root).not(ignore.clone())?;
+    for (glob, walk_root) in &positives {
+        let walk = glob.walk(walk_root).not(ignore.clone())?;
         'candidates: for entry in walk {
             let entry = match entry {
                 Ok(entry) => entry,
@@ -292,8 +317,19 @@ fn collect_members(
                 }
             };
             let path = entry.into_path();
-            let Ok(rel) = path.strip_prefix(root) else {
-                continue;
+            // The nearest ancestor of the root containing the entry; the
+            // walk root is one, so the loop always terminates.
+            let mut base = root;
+            let mut ups = 0;
+            let rel = loop {
+                if let Ok(rel) = path.strip_prefix(base) {
+                    break rel;
+                }
+                let Some(parent) = base.parent() else {
+                    continue 'candidates;
+                };
+                base = parent;
+                ups += 1;
             };
             let mut rel_parts = Vec::new();
             for component in rel.components() {
@@ -305,7 +341,7 @@ fn collect_members(
                     _ => continue 'candidates,
                 }
             }
-            let rel_str = rel_parts.join("/");
+            let rel_str = "../".repeat(ups) + &rel_parts.join("/");
             if negatives
                 .iter()
                 .any(|negative| negative.is_match(rel_str.as_str()))
@@ -313,9 +349,9 @@ fn collect_members(
                 continue;
             }
             let dir = if rel_parts.len() <= 1 {
-                root.to_path_buf()
+                base.to_path_buf()
             } else {
-                root.join(rel_parts[..rel_parts.len() - 1].join("/"))
+                base.join(rel_parts[..rel_parts.len() - 1].join("/"))
             };
             if !dirs.insert(dir.clone()) {
                 continue;
@@ -861,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn a_parent_directory_pattern_matches_nothing() {
+    fn follows_a_parent_directory_pattern() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -874,7 +910,32 @@ mod tests {
             "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = Workspace::discover(&dir.path().join("ws")).unwrap();
-        assert_eq!(names_and_dirs(&workspace), []);
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("sibling/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn a_negation_matches_a_parent_directory_member_by_its_dotted_path() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "ws/pnpm-workspace.yaml",
+            "packages:\n  - \"../sibling/*\"\n  - \"!../sibling/b\"\n",
+        );
+        for name in ["a", "b"] {
+            write(
+                dir.path(),
+                &format!("sibling/{name}/package.json"),
+                &format!("{{ \"name\": \"pkg-{name}\", \"version\": \"1.0.0\" }}\n"),
+            );
+        }
+        let workspace = Workspace::discover(&dir.path().join("ws")).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("sibling/a").as_path())]
+        );
     }
 
     #[test]

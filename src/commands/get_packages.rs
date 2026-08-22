@@ -28,17 +28,26 @@ pub(crate) fn run(all: bool) -> Result<()> {
         if !all && skip::should_skip(member, &config, &ignore) {
             continue;
         }
-        let rel = member
-            .dir()
-            .strip_prefix(workspace.root())
-            .with_context(|| member.dir().display().to_string())?;
-        let dir = if rel.as_os_str().is_empty() {
+        let mut base = workspace.root();
+        let mut ups = 0;
+        let rel = loop {
+            if let Ok(rel) = member.dir().strip_prefix(base) {
+                break rel;
+            }
+            base = base
+                .parent()
+                .with_context(|| member.dir().display().to_string())?;
+            ups += 1;
+        };
+        let mut parts: Vec<String> = vec!["..".to_owned(); ups];
+        parts.extend(
+            rel.components()
+                .map(|component| component.as_os_str().to_string_lossy().into_owned()),
+        );
+        let dir = if parts.is_empty() {
             ".".to_owned()
         } else {
-            rel.components()
-                .map(|component| component.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("/")
+            parts.join("/")
         };
         packages.push(Package {
             name: member.name(),

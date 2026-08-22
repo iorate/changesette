@@ -657,6 +657,29 @@ fn get_packages_keeps_dirs_relative_to_the_root_from_a_subdirectory() {
 }
 
 #[test]
+fn get_packages_renders_a_parent_directory_member_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("ws")).unwrap();
+    fs::write(
+        dir.path().join("ws/pnpm-workspace.yaml"),
+        "packages:\n  - \"../sibling/*\"\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("sibling/a")).unwrap();
+    fs::write(
+        dir.path().join("sibling/a/package.json"),
+        "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+    )
+    .unwrap();
+    let output = changesette(&dir.path().join("ws"), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"../sibling/a\"}]\n"
+    );
+}
+
+#[test]
 fn version_skips_a_versionless_package_and_keeps_its_changeset() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
