@@ -211,13 +211,6 @@ fn read_pnpm_manifest(dir: &Path) -> Result<Option<Vec<String>>> {
         };
         patterns.push(pattern.to_owned());
     }
-    // pnpm always makes the workspace root a project (pnpm/pnpm#1986), which
-    // `.` states as a pattern instead of the root manifest being read again
-    // on its own afterwards. Being a pattern, a negation matching
-    // `package.json` can still drop the root again.
-    if !patterns.iter().any(|pattern| pattern == ".") {
-        patterns.insert(0, ".".to_owned());
-    }
     Ok(Some(patterns))
 }
 
@@ -769,40 +762,12 @@ mod tests {
     }
 
     #[test]
-    fn always_includes_the_pnpm_root_package() {
+    fn does_not_include_the_pnpm_root_package_without_a_pattern() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             "pnpm-workspace.yaml",
             "packages:\n  - \"packages/*\"\n",
-        );
-        write(
-            dir.path(),
-            "package.json",
-            "{ \"name\": \"root\", \"version\": \"1.0.0\" }\n",
-        );
-        write(
-            dir.path(),
-            "packages/a/package.json",
-            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
-        );
-        let workspace = Workspace::discover(dir.path()).unwrap();
-        assert_eq!(
-            names_and_dirs(&workspace),
-            [
-                ("pkg-a", dir.path().join("packages/a").as_path()),
-                ("root", dir.path()),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_negated_pattern_removes_the_pnpm_root_package() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            "pnpm-workspace.yaml",
-            "packages:\n  - \"packages/*\"\n  - \"!.\"\n",
         );
         write(
             dir.path(),
@@ -827,7 +792,7 @@ mod tests {
         write(
             dir.path(),
             "pnpm-workspace.yaml",
-            "packages:\n  - \"packages/*\"\n",
+            "packages:\n  - \".\"\n  - \"packages/*\"\n",
         );
         write(dir.path(), "package.json", "{ \"version\": \"1.0.0\" }\n");
         write(
