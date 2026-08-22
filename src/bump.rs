@@ -27,12 +27,19 @@ pub(crate) fn next_version(current: &Version, bump: Bump) -> Version {
         Bump::Major if pre && current.minor == 0 && current.patch == 0 => {
             Version::new(current.major, 0, 0)
         }
-        Bump::Major => Version::new(current.major + 1, 0, 0),
+        Bump::Major => Version::new(checked_inc(current.major), 0, 0),
         Bump::Minor if pre && current.patch == 0 => Version::new(current.major, current.minor, 0),
-        Bump::Minor => Version::new(current.major, current.minor + 1, 0),
+        Bump::Minor => Version::new(current.major, checked_inc(current.minor), 0),
         Bump::Patch if pre => Version::new(current.major, current.minor, current.patch),
-        Bump::Patch => Version::new(current.major, current.minor, current.patch + 1),
+        Bump::Patch => Version::new(current.major, current.minor, checked_inc(current.patch)),
     }
+}
+
+// Release builds do not check arithmetic overflow, so `+ 1` on a pathological
+// u64::MAX value would silently wrap and write a rewound version; keep the
+// failure loud instead.
+fn checked_inc(number: u64) -> u64 {
+    number.checked_add(1).expect("version number overflow")
 }
 
 /// The counter of the `-{tag}.{n}` pre-release following `current`: one past
@@ -45,7 +52,7 @@ pub(crate) fn pre_counter(current: &Version, tag: &str) -> u64 {
         .as_str()
         .strip_prefix(&format!("{tag}."))
         .and_then(|rest| rest.parse::<u64>().ok())
-        .map_or(0, |number| number + 1)
+        .map_or(0, checked_inc)
 }
 
 /// Returns `next_version(current, bump)` with the pre-release `-{tag}.{n}`
@@ -212,6 +219,18 @@ mod tests {
         assert_eq!(counter("1.0.0", "beta"), 0);
         assert_eq!(counter("1.1.0-alpha.3", "beta"), 0);
         assert_eq!(counter("1.0.0-alpha.beta", "alpha"), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "version number overflow")]
+    fn panics_on_a_version_component_overflow() {
+        next("18446744073709551615.0.0", Bump::Major);
+    }
+
+    #[test]
+    #[should_panic(expected = "version number overflow")]
+    fn pre_counter_panics_on_a_counter_overflow() {
+        counter("1.0.0-beta.18446744073709551615", "beta");
     }
 
     #[test]
