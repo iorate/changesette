@@ -307,10 +307,15 @@ fn collect_members(
                 Ok(entry) => entry,
                 Err(err) => {
                     // NotFound covers a pattern whose base directory does not
-                    // exist and entries deleted mid-walk; anything else, such
+                    // exist and entries deleted mid-walk, and NotADirectory a
+                    // pattern whose path prefix crosses a regular file; pnpm
+                    // 12 matches nothing in both cases. Anything else, such
                     // as a permission error, is reported.
                     let err = io::Error::from(err);
-                    if err.kind() == io::ErrorKind::NotFound {
+                    if matches!(
+                        err.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                    ) {
                         continue;
                     }
                     return Err(err.into());
@@ -946,6 +951,27 @@ mod tests {
             "pnpm-workspace.yaml",
             "packages:\n  - \"packages/*\"\n  - \"apps/*\"\n",
         );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn tolerates_a_pattern_whose_path_crosses_a_regular_file() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"docs/pkg\"\n  - \"packages/*\"\n",
+        );
+        write(dir.path(), "docs", "not a directory\n");
         write(
             dir.path(),
             "packages/a/package.json",
