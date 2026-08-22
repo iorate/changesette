@@ -4,15 +4,15 @@ expression: "changes.iter().map(|change|\n(change.id(), change.rel_path())).coll
 ---
 [
     (
+        "brave-lions-dance",
+        "brave-lions-dance.md",
+    ),
+    (
         "pre/atomic-pugs-smile",
         "pre/atomic-pugs-smile.md",
     ),
     (
         "pre/zany-moons-sing",
         "pre/zany-moons-sing.md",
-    ),
-    (
-        "brave-lions-dance",
-        "brave-lions-dance.md",
     ),
 ]

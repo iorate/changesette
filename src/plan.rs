@@ -93,7 +93,7 @@ pub(crate) struct PlannedRelease {
     pub(crate) old_version: Version,
     pub(crate) new_version: Version,
     /// The ids of the changesets naming this package (`none` entries
-    /// included), in load order (`pre/` changesets first).
+    /// included), in load order (root changesets first, then `pre/`).
     pub(crate) changeset_ids: Vec<String>,
     /// The body of the new `## <new_version>` section, without the heading;
     /// `None` for a `None` bump.

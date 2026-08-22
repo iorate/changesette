@@ -4,6 +4,19 @@ expression: changes
 ---
 [
     LoadedChange {
+        file_name: "brave-lions-dance.md",
+        in_pre: false,
+        releases: [
+            (
+                "ublacklist",
+                Some(
+                    Minor,
+                ),
+            ),
+        ],
+        summary: "A new changeset, loaded before the pre ones",
+    },
+    LoadedChange {
         file_name: "atomic-pugs-smile.md",
         in_pre: true,
         releases: [
@@ -28,18 +41,5 @@ expression: changes
             ),
         ],
         summary: "Parked second",
-    },
-    LoadedChange {
-        file_name: "brave-lions-dance.md",
-        in_pre: false,
-        releases: [
-            (
-                "ublacklist",
-                Some(
-                    Minor,
-                ),
-            ),
-        ],
-        summary: "A new changeset, loaded after the pre ones",
     },
 ]

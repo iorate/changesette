@@ -56,21 +56,22 @@ impl LoadedChange {
     }
 }
 
-/// Loads every changeset in `changeset_dir`, the ones in its `pre/`
-/// subdirectory first and each group in file-name order, treating a missing
-/// directory as empty and leaving package-name validation to the callers.
+/// Loads every changeset in `changeset_dir`, the ones directly in it first
+/// and then the ones in its `pre/` subdirectory as in the upstream reader,
+/// each group in file-name order, treating a missing directory as empty and
+/// leaving package-name validation to the callers.
 pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
     let file_names = scan(changeset_dir)?.unwrap_or_default();
     let pre_dir = changeset_dir.join("pre");
     let pre_file_names = scan(&pre_dir)?.unwrap_or_default();
 
-    pre_file_names
+    file_names
         .iter()
-        .map(|file_name| load_one(&pre_dir, file_name, true))
+        .map(|file_name| load_one(changeset_dir, file_name, false))
         .chain(
-            file_names
+            pre_file_names
                 .iter()
-                .map(|file_name| load_one(changeset_dir, file_name, false)),
+                .map(|file_name| load_one(&pre_dir, file_name, true)),
         )
         .collect()
 }
@@ -211,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn loads_pre_changesets_first_with_prefixed_ids() {
+    fn loads_pre_changesets_last_with_prefixed_ids() {
         let changes = load_ok("with-pre");
         insta::assert_debug_snapshot!(changes);
         insta::assert_debug_snapshot!(
