@@ -8,6 +8,20 @@ Workspace {
         Member {
             name: "pkg-a",
             dir: "tests/fixtures/workspace/pnpm/packages/a",
+            rel_dir: "packages/a",
+            version: Some(
+                "1.0.0",
+            ),
+            private: false,
+        },
+        Member {
+            name: "root",
+            dir: "tests/fixtures/workspace/pnpm",
+            rel_dir: ".",
+            version: Some(
+                "0.0.0",
+            ),
+            private: false,
         },
     ],
 }

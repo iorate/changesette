@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, io, path::PathBuf};
+use std::{collections::BTreeMap, env, fs, io, path::PathBuf};
 
 use anyhow::{Context, Result};
 use semver::Version;
@@ -8,9 +8,72 @@ use crate::{
     changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
     package_json::PackageJson,
-    pre::{PreJson, PreMode},
-    workspace::Workspace,
+    pre::{self, PreJson, PreMode},
+    skip::SkipSet,
+    workspace::{Member, Workspace},
 };
+
+/// A planned `version` run: the changesets to consume and the releases to
+/// apply, produced by `plan_version` without modifying anything on disk.
+pub(crate) struct PlannedVersion {
+    pub(crate) workspace: Workspace,
+    pub(crate) changeset_dir: PathBuf,
+    pub(crate) pre: Option<PreJson>,
+    /// Every unreleased changeset, the ones naming only skipped packages
+    /// included; the release plan reports all of them.
+    pub(crate) changes: Vec<LoadedChange>,
+    /// The changesets `version` consumes, skip-filtered.
+    pub(crate) consumed_changes: Vec<LoadedChange>,
+    pub(crate) releases: Vec<PlannedRelease>,
+}
+
+fn pre_state(pre: Option<&PreJson>) -> Option<&PreJson> {
+    pre.filter(|pre| pre.mode() == PreMode::Pre)
+}
+
+impl PlannedVersion {
+    /// The pre state when in pre mode.
+    pub(crate) fn in_pre(&self) -> Option<&PreJson> {
+        pre_state(self.pre.as_ref())
+    }
+
+    pub(crate) fn exiting_pre(&self) -> bool {
+        matches!(&self.pre, Some(pre) if pre.mode() == PreMode::Exit)
+    }
+}
+
+/// Discovers the workspace containing the current directory and plans the
+/// pending `version` run, resolving the ignore set from the config or
+/// `cli_ignore` (using both is an error), modifying nothing on disk.
+pub(crate) fn plan_version(cli_ignore: &[String]) -> Result<PlannedVersion> {
+    let workspace = Workspace::discover(&env::current_dir()?)?;
+    let changeset_dir = workspace.root().join(".changeset");
+    let skip = SkipSet::load(&workspace, &changeset_dir, cli_ignore)?;
+
+    let pre = PreJson::load(&changeset_dir)?;
+    let in_pre = pre_state(pre.as_ref());
+    if let Some(pre) = in_pre {
+        pre::validate_tag(pre.tag())?;
+    }
+
+    let mut changes = changeset::load(&changeset_dir)?;
+    if in_pre.is_some() {
+        // The `pre/` changesets were already consumed in this pre-release
+        // cycle.
+        changes.retain(|change| !change.in_pre);
+    }
+    let consumed_changes = skip.filter_changes(&workspace, &changeset_dir, &changes)?;
+    let releases = plan_releases(&workspace, &consumed_changes, pre.as_ref(), &skip)?;
+
+    Ok(PlannedVersion {
+        workspace,
+        changeset_dir,
+        pre,
+        changes,
+        consumed_changes,
+        releases,
+    })
+}
 
 pub(crate) struct PlannedRelease {
     pub(crate) name: String,
@@ -20,43 +83,30 @@ pub(crate) struct PlannedRelease {
     pub(crate) old_version: Version,
     pub(crate) new_version: Version,
     /// The ids of the changesets naming this package (`none` entries
-    /// included), in load order (`pre/` changesets first).
+    /// included), in load order (root changesets first, then `pre/`).
     pub(crate) changeset_ids: Vec<String>,
-    /// The body of the new `## <new_version>` section, without the heading.
+    /// The body of the new `## <new_version>` section, without the heading;
     /// `None` for a `None` bump.
     pub(crate) changelog_entry: Option<String>,
 }
 
-/// Plans the release of each package named by `changes`, validating that
-/// every named package is a workspace member. In pre mode the new versions
-/// are `-{tag}.{n}` pre-releases; with `pre` exiting, every workspace member
-/// left on a pre-release version is released too, unless `ignore` names it.
-/// Modifies nothing on disk.
-pub(crate) fn plan_releases(
+// Plans the releases requested by `changes` (plus, when exiting pre mode,
+// the members still on a pre-release version), modifying nothing on disk.
+fn plan_releases(
     workspace: &Workspace,
     changes: &[LoadedChange],
     pre: Option<&PreJson>,
-    ignore: &[String],
+    skip: &SkipSet,
 ) -> Result<Vec<PlannedRelease>> {
-    let changeset_dir = workspace.root().join(".changeset");
-    for change in changes {
-        for (name, _) in &change.releases {
-            workspace
-                .member(name)
-                .with_context(|| changeset_dir.join(change.rel_path()).display().to_string())?;
-        }
-    }
-
     let mut max_bumps = changeset::max_bumps(changes);
     if matches!(pre, Some(pre) if pre.mode() == PreMode::Exit) {
-        rescue_prereleases(workspace, ignore, &mut max_bumps)?;
+        rescue_prereleases(workspace, skip, &mut max_bumps)?;
     }
 
     let mut releases = Vec::new();
     for (name, max_bump) in max_bumps {
         let member = workspace.member(name)?;
-        let package_json = PackageJson::load(member.dir())?;
-        let old_version = package_json.version().clone();
+        let old_version = member_version(member)?;
         let changeset_ids = changes
             .iter()
             .filter(|change| change.releases.iter().any(|(n, _)| n == name))
@@ -76,11 +126,9 @@ pub(crate) fn plan_releases(
                             .map(|bump| (bump, change.summary.as_str()))
                     })
                     .collect();
-                let new_version = match pre {
-                    Some(pre) if pre.mode() == PreMode::Pre => {
-                        bump::next_pre_version(&old_version, max_bump, pre.tag())
-                    }
-                    _ => bump::next_version(&old_version, max_bump),
+                let new_version = match pre_state(pre) {
+                    Some(pre) => bump::next_pre_version(&old_version, max_bump, pre.tag()),
+                    None => bump::next_version(&old_version, max_bump),
                 };
                 (new_version, Some(render_entry(&summaries)))
             }
@@ -103,21 +151,34 @@ pub(crate) fn plan_releases(
 // the empty summary list renders a heading-only changelog section.
 fn rescue_prereleases<'a>(
     workspace: &'a Workspace,
-    ignore: &[String],
+    skip: &SkipSet,
     max_bumps: &mut BTreeMap<&'a str, Option<Bump>>,
 ) -> Result<()> {
     for member in workspace.members() {
-        if ignore.iter().any(|ignored| ignored == member.name())
-            || max_bumps.get(member.name()).is_some_and(Option::is_some)
+        if skip.contains(member.name()) || max_bumps.get(member.name()).is_some_and(Option::is_some)
         {
             continue;
         }
-        let package_json = PackageJson::load(member.dir())?;
-        if !package_json.version().pre.is_empty() {
+        if !member_version(member)?.pre.is_empty() {
             max_bumps.insert(member.name(), Some(Bump::Patch));
         }
     }
     Ok(())
+}
+
+// Parses the semver version the member's manifest held at discovery; a
+// missing or invalid version is an error.
+fn member_version(member: &Member) -> Result<Version> {
+    let path = member.dir().join("package.json");
+    let raw = member
+        .version()
+        .with_context(|| format!("{}: missing top-level \"version\"", path.display()))?;
+    raw.parse().with_context(|| {
+        format!(
+            "{}: top-level \"version\" ({raw:?}) is not a valid semver version",
+            path.display()
+        )
+    })
 }
 
 pub(crate) struct StagedWrite {
@@ -131,9 +192,8 @@ impl StagedWrite {
     }
 }
 
-/// Stages the writes that apply `releases`: each bumped package's
-/// package.json with the new version set and its CHANGELOG.md with the new
-/// section upserted. Modifies nothing on disk.
+/// Stages the package.json and CHANGELOG.md writes that apply `releases`,
+/// modifying nothing on disk.
 pub(crate) fn stage_writes(
     workspace: &Workspace,
     releases: &[PlannedRelease],

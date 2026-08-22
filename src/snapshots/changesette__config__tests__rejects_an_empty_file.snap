@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"\")"
+---
+.changeset/config.json: EOF while parsing a value at line 1 column 0

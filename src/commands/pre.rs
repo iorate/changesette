@@ -8,10 +8,8 @@ use crate::{
     workspace::Workspace,
 };
 
-/// Enters pre-release mode by writing `.changeset/pre.json` with `tag`,
-/// creating the changeset directory if needed, and reports it to stderr. It
-/// is an error to already be in pre mode; a pre.json left in the exited state
-/// is rewritten in place.
+/// Enters pre-release mode by writing `.changeset/pre.json` with `tag`; it
+/// is an error to already be in pre mode.
 pub(crate) fn enter(tag: &str) -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
     let changeset_dir = workspace.root().join(".changeset");
@@ -43,8 +41,8 @@ pub(crate) fn enter(tag: &str) -> Result<()> {
 }
 
 /// Exits pre-release mode by flipping `.changeset/pre.json` to the exited
-/// state, and reports it to stderr. It is an error not to have a pre.json;
-/// exiting twice succeeds.
+/// state; it is an error not to have a pre.json, while exiting twice
+/// succeeds.
 pub(crate) fn exit() -> Result<()> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
     let changeset_dir = workspace.root().join(".changeset");

@@ -6,10 +6,9 @@ use semver::Version;
 
 use crate::bump::Bump;
 
-/// Renders a version's changelog entry, grouping the release lines
-/// (changeset summaries) under Major/Minor/Patch headings and omitting empty
-/// groups. The result has no `## <version>` heading and no surrounding
-/// newlines.
+/// Renders a version's changelog entry from changeset summaries, grouped
+/// under Major/Minor/Patch headings, with no `## <version>` heading and no
+/// surrounding newlines.
 pub(crate) fn render_entry(summaries: &[(Bump, &str)]) -> String {
     let mut blocks = Vec::new();
     for (bump, heading) in [
@@ -30,8 +29,8 @@ pub(crate) fn render_entry(summaries: &[(Bump, &str)]) -> String {
     blocks.join("\n\n")
 }
 
-/// Renders a `## <version>` section from a `render_entry` result. The result
-/// has no surrounding newlines.
+/// Renders a `## <version>` section from a `render_entry` result, with no
+/// surrounding newlines.
 pub(crate) fn render_section(version: &Version, entry: &str) -> String {
     if entry.is_empty() {
         format!("## {version}")
@@ -54,19 +53,10 @@ fn render_release_line(body: &str) -> String {
     text
 }
 
-/// Inserts `section` (a `render_section` result whose first line is
-/// `## <version>`) into the CHANGELOG text and returns the new text.
-///
-/// The version sections of a changelog are delimited by top-level `##`
-/// headings. The new section goes right before the first existing section, so
-/// an H1 title and any preamble prose stay above it; a document without
-/// sections gets the new section appended at the end. A section of the same
-/// version, if present, is removed first, making a re-run with the same inputs
-/// idempotent. Passing `text = ""` generates a well-formed new file.
-///
-/// The surroundings of the insertion/removal points are spliced with
-/// single-blank-line separation and a single trailing newline; everything else
-/// is copied verbatim, byte for byte.
+/// Upserts `section` (a `render_section` result) as the `## <version>`
+/// section of the CHANGELOG text and returns the new text, replacing an
+/// existing section of the same version and copying everything outside the
+/// splice points verbatim.
 pub(crate) fn upsert_section(
     text: &str,
     package_name: &str,
@@ -97,7 +87,8 @@ pub(crate) fn upsert_section(
         headings = parse_headings(&text);
     }
 
-    // Insert before the first section, or at the end if there is none,
+    // Insert before the first section — keeping the H1 title and any
+    // preamble prose above the new one — or at the end if there is none,
     // normalizing to one blank line between the new section and each
     // neighbor. `before` holds at least the H1, so the blank line after it
     // never turns into a leading newline; `section` has no surrounding
@@ -119,10 +110,9 @@ pub(crate) fn upsert_section(
     result
 }
 
-/// Returns the body of the `## <version>` section — the text between that
-/// heading and the next top-level `##` heading (or the end of the document) —
-/// with surrounding blank lines trimmed and no trailing newline. Errors if
-/// the section is not found.
+/// Returns the body of the `## <version>` section with surrounding blank
+/// lines trimmed and no trailing newline, erroring when the section is not
+/// found.
 pub(crate) fn extract_section(text: &str, version: &str) -> Result<String> {
     let headings = parse_headings(text);
     let index =

@@ -19,10 +19,8 @@ impl Bump {
     }
 }
 
-/// Returns `current` incremented by `bump`, following node-semver's `inc`
-/// (used by changesets): a pre-release graduates to the release it precedes
-/// when that release satisfies the bump, and pre-release and build metadata
-/// are always cleared.
+/// Returns `current` incremented by `bump`, following node-semver's `inc` as
+/// used by changesets.
 pub(crate) fn next_version(current: &Version, bump: Bump) -> Version {
     let pre = !current.pre.is_empty();
     match bump {
@@ -38,8 +36,7 @@ pub(crate) fn next_version(current: &Version, bump: Bump) -> Version {
 }
 
 /// Returns `next_version(current, bump)` with the pre-release `-{tag}.{n}`
-/// attached, where `n` restarts at 0 unless `current`'s pre-release is exactly
-/// `{tag}.{m}` with a numeric `m`, in which case it is `m + 1`. `tag` must
+/// attached, continuing `current`'s counter when its tag matches; `tag` must
 /// have passed `pre::validate_tag`.
 pub(crate) fn next_pre_version(current: &Version, bump: Bump, tag: &str) -> Version {
     // Counting on the tag, rather than on the second pre-release identifier,

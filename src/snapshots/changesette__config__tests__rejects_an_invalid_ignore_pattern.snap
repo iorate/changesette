@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"{ \\\"ignore\\\": [\\\"pkg-[\\\"] }\\n\")"
+---
+.changeset/config.json: invalid ignore pattern "pkg-[": failed to parse glob expression

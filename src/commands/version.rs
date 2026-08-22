@@ -1,94 +1,37 @@
-use std::{env, fs, path::Path};
+use std::{fs, path::Path};
 
 use anyhow::{Context, Result, bail};
 
-use crate::{
-    changeset, output, plan,
-    pre::{self, PreJson, PreMode},
-    release_plan,
-    workspace::Workspace,
-};
+use crate::{output, plan, release_plan};
 
-/// Consumes every changeset in the workspace: bumps each named package's
-/// package.json, inserts the new section into its CHANGELOG.md, and deletes
-/// the consumed files (`none`-only and empty changesets included). Packages
-/// named only with `none` keep their version and changelog. With zero
-/// changesets it is an error unless `allow_no_changesets` is set, and nothing
-/// changes either way; exiting pre mode is exempt from the error. Each name
-/// in `ignore` must be a workspace
-/// member; a changeset naming an ignored package is skipped — excluded from
-/// the release plan and left on disk — and it is an error for such a
-/// changeset to also name a package that is not ignored.
-///
-/// In pre mode, only the changesets not yet consumed in this pre-release
-/// cycle are planned, the new versions are prereleases, and the consumed
-/// files are moved to `.changeset/pre/` instead of deleted. Exiting pre mode,
-/// the parked files are replanned along with the new ones into final versions
-/// and pre.json is deleted, even when there is nothing to release.
-///
-/// Reports the applied bumps to stderr; with `output_path`, instead writes
-/// the release plan, each bumped release carrying its new changelog entry,
-/// as pretty-printed JSON to that file (or to stdout when the path is `-`).
+/// Consumes every changeset: bumps each named package's package.json,
+/// upserts its CHANGELOG.md section, and deletes the consumed files — in pre
+/// mode planning prerelease versions and moving the consumed files to
+/// `.changeset/pre/` instead.
 pub(crate) fn run(
     ignore: &[String],
     allow_no_changesets: bool,
     output_path: Option<&Path>,
 ) -> Result<()> {
-    let workspace = Workspace::discover(&env::current_dir()?)?;
-    for name in ignore {
-        workspace.member(name).context("invalid `--ignore` value")?;
+    let planned = plan::plan_version(ignore)?;
+    let pre = planned.in_pre();
+    if let Some(pre) = pre {
+        output::eprint_line(&format!(
+            "warning: in pre mode with tag `{}`; versions will be prereleases. Run `changesette pre exit` first for a normal release.",
+            pre.tag()
+        ))?;
     }
-    let changeset_dir = workspace.root().join(".changeset");
-
-    let pre = PreJson::load(&changeset_dir)?;
-    let in_pre = match &pre {
-        Some(pre) if pre.mode() == PreMode::Pre => {
-            pre::validate_tag(pre.tag())?;
-            output::eprint_line(&format!(
-                "warning: in pre mode with tag `{}`; versions will be prereleases. Run `changesette pre exit` first for a normal release.",
-                pre.tag()
-            ))?;
-            true
-        }
-        _ => false,
-    };
-    let exiting = matches!(&pre, Some(pre) if pre.mode() == PreMode::Exit);
-
-    let mut changes = changeset::load(&changeset_dir)?;
-    if in_pre {
-        changes.retain(|change| !change.in_pre);
-    }
-    let no_changes = changes.is_empty();
-    if no_changes && !exiting && !allow_no_changesets {
+    let in_pre = pre.is_some();
+    let exiting = planned.exiting_pre();
+    if planned.changes.is_empty() && !exiting && !allow_no_changesets {
         bail!("no unreleased changesets found");
     }
 
-    let mut consumed = Vec::new();
-    for change in changes {
-        let (ignored, not_ignored): (Vec<&str>, Vec<&str>) = change
-            .releases
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .partition(|name| ignore.iter().any(|ignored| ignored == name));
-        if ignored.is_empty() {
-            consumed.push(change);
-        } else if !not_ignored.is_empty() {
-            bail!(
-                "{}: cannot mix ignored packages ({}) and not ignored packages ({})",
-                changeset_dir.join(change.rel_path()).display(),
-                quote_list(&ignored),
-                quote_list(&not_ignored)
-            );
-        }
-    }
-
-    let releases = plan::plan_releases(&workspace, &consumed, pre.as_ref(), ignore)?;
-
-    let pre_dir = changeset_dir.join("pre");
+    let pre_dir = planned.changeset_dir.join("pre");
     // Checked before the writes are applied: a rename failing afterwards
     // would leave the versions bumped with their changesets still pending.
     if in_pre {
-        for change in &consumed {
+        for change in &planned.consumed_changes {
             let path = pre_dir.join(&change.file_name);
             if path
                 .try_exists()
@@ -99,29 +42,29 @@ pub(crate) fn run(
         }
     }
 
-    let writes = plan::stage_writes(&workspace, &releases)?;
+    let writes = plan::stage_writes(&planned.workspace, &planned.releases)?;
     for write in &writes {
         write.apply()?;
     }
 
     if in_pre {
-        if !consumed.is_empty() {
+        if !planned.consumed_changes.is_empty() {
             fs::create_dir_all(&pre_dir).with_context(|| pre_dir.display().to_string())?;
         }
-        for change in &consumed {
-            let path = changeset_dir.join(change.rel_path());
+        for change in &planned.consumed_changes {
+            let path = planned.changeset_dir.join(change.rel_path());
             let pre_path = pre_dir.join(&change.file_name);
             fs::rename(&path, &pre_path)
                 .with_context(|| format!("{} -> {}", path.display(), pre_path.display()))?;
         }
     } else {
-        for change in &consumed {
-            let path = changeset_dir.join(change.rel_path());
+        for change in &planned.consumed_changes {
+            let path = planned.changeset_dir.join(change.rel_path());
             fs::remove_file(&path).with_context(|| path.display().to_string())?;
         }
         // Deleted even with nothing to release, so that an exited pre mode
         // always ends here.
-        if let Some(pre) = &pre {
+        if let Some(pre) = &planned.pre {
             fs::remove_file(pre.path()).with_context(|| pre.path().display().to_string())?;
         }
     }
@@ -129,29 +72,26 @@ pub(crate) fn run(
     match output_path {
         Some(path) => release_plan::write_file(
             path,
-            &release_plan::build(&consumed, &releases, pre.as_ref()),
+            &release_plan::build(&planned.changes, &planned.releases, planned.pre.as_ref()),
         ),
         None => {
-            if no_changes && !exiting {
+            if planned.changes.is_empty() && !exiting {
                 return output::eprint_line("No unreleased changesets found.");
             }
-            for release in &releases {
+            let mut bumped = false;
+            for release in &planned.releases {
                 if release.bump.is_some() {
                     output::eprint_line(&format!(
                         "Bumped {} {} -> {}",
                         release.name, release.old_version, release.new_version
                     ))?;
+                    bumped = true;
                 }
+            }
+            if !bumped && !planned.changes.is_empty() {
+                output::eprint_line("No packages to bump.")?;
             }
             Ok(())
         }
     }
-}
-
-fn quote_list(names: &[&str]) -> String {
-    names
-        .iter()
-        .map(|name| format!("`{name}`"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }

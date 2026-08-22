@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"{ \\\"privatePackages\\\": { \\\"version\\\": \\\"yes\\\" } }\\n\")"
+---
+.changeset/config.json: "version" in "privatePackages" must be a boolean

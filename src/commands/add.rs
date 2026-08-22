@@ -10,17 +10,13 @@ use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
 use crate::{
     bump::Bump,
     output,
-    package_json::PackageJson,
+    skip::SkipSet,
     workspace::{Member, Workspace},
 };
 
-/// Creates a changeset file under the workspace root's `.changeset/` and
-/// reports it to stderr; the directory must already exist (see `init`).
-/// With `empty`, the changeset names no packages and nothing is prompted.
-/// Otherwise the releases come from the bump flags when any is given, and the
-/// summary from `message`; inputs missing from the flags are prompted for
-/// interactively when both stdin and stderr are terminals, and reported as an
-/// error otherwise.
+/// Creates a changeset file under the workspace root's `.changeset/`, taking
+/// the releases and summary from the flags and prompting interactively for
+/// missing inputs.
 pub(crate) fn run(
     major: Vec<String>,
     minor: Vec<String>,
@@ -36,11 +32,17 @@ pub(crate) fn run(
     );
 
     let changeset_dir = workspace.root().join(".changeset");
+    let skip = SkipSet::load(&workspace, &changeset_dir, &[])?;
+    let packages: Vec<&Member> = workspace
+        .members()
+        .iter()
+        .filter(|member| !skip.contains(member.name()))
+        .collect();
     ensure!(
-        changeset_dir.is_dir(),
-        "{}: changeset directory not found; run `changesette init` to create it",
-        changeset_dir.display()
+        !packages.is_empty(),
+        "no versionable packages found; ensure the packages are not private or ignored and have a version field in package.json"
     );
+    fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
 
     let (releases, summary) = if empty {
         (Vec::new(), message.unwrap_or_default())
@@ -62,9 +64,9 @@ pub(crate) fn run(
             }
         }
         let releases = if flags_given {
-            releases_from_flags(&workspace, &major, &minor, &patch)?
+            releases_from_flags(&workspace, &packages, &major, &minor, &patch)?
         } else {
-            prompt_releases(&workspace)?
+            prompt_releases(&packages)?
         };
         let summary = match message {
             Some(message) => message,
@@ -114,6 +116,7 @@ pub(crate) fn run(
 
 fn releases_from_flags(
     workspace: &Workspace,
+    packages: &[&Member],
     major: &[String],
     minor: &[String],
     patch: &[String],
@@ -125,18 +128,18 @@ fn releases_from_flags(
     ];
 
     let mut errors = Vec::new();
+    let mut flags_by_name: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (flag, _, names) in &flags {
         for name in *names {
             if workspace.member(name).is_err() {
                 errors.push(format!(
                     "the package `{name}` is passed to `{flag}` but is not a workspace member"
                 ));
+            } else if !packages.iter().any(|member| member.name() == name) {
+                errors.push(format!(
+                    "the package `{name}` is passed to `{flag}` but is skipped (private, ignored, or without a version)"
+                ));
             }
-        }
-    }
-    let mut flags_by_name: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for (flag, _, names) in &flags {
-        for name in *names {
             let entry = flags_by_name.entry(name).or_default();
             if !entry.contains(flag) {
                 entry.push(flag);
@@ -164,24 +167,25 @@ fn releases_from_flags(
     Ok(releases)
 }
 
-fn prompt_releases(workspace: &Workspace) -> Result<Vec<(String, Bump)>> {
-    let members = workspace.members();
-    if let [member] = members {
-        let package_json = PackageJson::load(member.dir())?;
+fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Bump)>> {
+    if let [member] = packages {
         const ITEMS: [Bump; 3] = [Bump::Patch, Bump::Minor, Bump::Major];
+        let prompt = match member.version() {
+            Some(version) => format!(
+                "What kind of change is this for {}? (current version is {version})",
+                member.name()
+            ),
+            None => format!("What kind of change is this for {}?", member.name()),
+        };
         let index = dialoguer::Select::new()
-            .with_prompt(format!(
-                "What kind of change is this for {}? (current version is {})",
-                package_json.name(),
-                package_json.version()
-            ))
+            .with_prompt(prompt)
             .items(ITEMS.map(Bump::as_str))
             .default(0)
             .interact()?;
-        return Ok(vec![(package_json.name().to_owned(), ITEMS[index])]);
+        return Ok(vec![(member.name().to_owned(), ITEMS[index])]);
     }
 
-    let names: Vec<&str> = members.iter().map(Member::name).collect();
+    let names: Vec<&str> = packages.iter().map(|member| member.name()).collect();
     let affected: Vec<&Member> = loop {
         let indexes = dialoguer::MultiSelect::new()
             .with_prompt("Which packages were affected by the changes you made?")
@@ -191,19 +195,16 @@ fn prompt_releases(workspace: &Workspace) -> Result<Vec<(String, Bump)>> {
             eprintln!("You must select at least one package");
             continue;
         }
-        break indexes.into_iter().map(|index| &members[index]).collect();
+        break indexes.into_iter().map(|index| packages[index]).collect();
     };
 
-    let labels = affected
+    let labels: Vec<String> = affected
         .iter()
-        .map(|member| {
-            Ok(format!(
-                "{}@{}",
-                member.name(),
-                PackageJson::load(member.dir())?.version()
-            ))
+        .map(|member| match member.version() {
+            Some(version) => format!("{}@{version}", member.name()),
+            None => member.name().to_owned(),
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect();
 
     let mut releases = Vec::new();
     let mut remaining: Vec<usize> = (0..affected.len()).collect();
