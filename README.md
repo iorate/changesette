@@ -206,9 +206,9 @@ jobs:
 
 Creates the `.changeset/` directory with a README.md and a config.json holding the default configuration. Optional: every command works without the directory, and `add` creates it on demand.
 
-### `changesette [add] [--empty] [--message <text>] [--major <pkgs>] [--minor <pkgs>] [--patch <pkgs>]`
+### `changesette [add] [--empty] [--open] [--message <text>] [--major <pkgs>] [--minor <pkgs>] [--patch <pkgs>]`
 
-Creates a changeset file in `.changeset/`. `--empty` creates a changeset that names no packages; `--message` (short form `-m`) sets the summary; `--major`, `--minor`, and `--patch` each take a comma-separated list of package names. When run in a terminal, missing inputs are prompted for interactively.
+Creates a changeset file in `.changeset/`. `--empty` creates a changeset that names no packages; `--open` opens the created changeset in your editor; `--message` (short form `-m`) sets the summary; `--major`, `--minor`, and `--patch` each take a comma-separated list of package names. When run in a terminal, missing inputs are prompted for interactively.
 
 ### `changesette version [--ignore <pkgs>] [--allow-no-changesets] [--output <file>]`
 

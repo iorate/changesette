@@ -30,6 +30,9 @@ struct AddArgs {
     /// Create a changeset that names no packages
     #[arg(long, conflicts_with_all = ["major", "minor", "patch"])]
     empty: bool,
+    /// Open the created changeset in your editor
+    #[arg(long)]
+    open: bool,
     /// The summary text of the change
     #[arg(short, long)]
     message: Option<String>,
@@ -122,7 +125,8 @@ fn run() -> anyhow::Result<()> {
             patch,
             message,
             empty,
-        }) => commands::add::run(major, minor, patch, message, empty),
+            open,
+        }) => commands::add::run(major, minor, patch, message, empty, open),
         Command::Version {
             ignore,
             allow_no_changesets,

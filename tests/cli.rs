@@ -411,6 +411,21 @@ fn add_without_bump_flags_fails_naming_them() {
 }
 
 #[test]
+fn add_open_fails_in_non_interactive_mode() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["add", "--empty", "-m", "Note", "--open"]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(
+        err.contains("cannot use --open in non-interactive mode"),
+        "{err}"
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
 fn add_without_any_flags_fails_naming_all_missing_flags() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
