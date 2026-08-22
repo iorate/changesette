@@ -204,7 +204,7 @@ jobs:
 
 ### `changesette init`
 
-Creates the `.changeset/` directory with a README.md and a config.json holding the default configuration. Optional: every command works without the directory, and `add` creates it on demand.
+Creates the `.changeset/` directory with a `README.md` and a `config.json` holding the default configuration. Optional: every command works without the directory, and `add` creates it on demand.
 
 ### `changesette [add] [--empty] [--open] [--message <text>] [--major <pkgs>] [--minor <pkgs>] [--patch <pkgs>]`
 
@@ -249,7 +249,7 @@ Applies all pending changesets: bumps each released package's `package.json`, in
 }
 ```
 
-In pre-release mode, a top-level `"preState"` object is included.
+In pre-release mode, a top-level `preState` object is included.
 
 ### `changesette status [--verbose] [--output <file>]`
 
@@ -310,7 +310,7 @@ Groups (arrays) of names of packages whose versions are aligned whenever they ar
 
 Default: `{ "version": false }`.
 
-Whether private packages (`"private": true` in package.json) are versioned. Set `{ "version": true }` (or the shorthand `true`) to version them; by default they are skipped.
+Whether private packages (`"private": true` in `package.json`) are versioned. Set `{ "version": true }` (or the shorthand `true`) to version them; by default they are skipped.
 
 ### `ignore`
 
