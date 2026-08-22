@@ -248,11 +248,11 @@ fn apply_groups<'a>(
         };
         let highest = group_highest_version(workspace, group)?;
         for name in group {
-            if let Some(entry) = max_bumps.get_mut(name.as_str()) {
-                if entry.is_some() {
-                    *entry = Some(max_bump);
-                    old_versions.insert(name.clone(), highest.clone());
-                }
+            if let Some(entry) = max_bumps.get_mut(name.as_str())
+                && entry.is_some()
+            {
+                *entry = Some(max_bump);
+                old_versions.insert(name.clone(), highest.clone());
             }
         }
     }

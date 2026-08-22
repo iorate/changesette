@@ -69,10 +69,10 @@ pub(crate) fn run(
         // Deleted even with nothing to release, so that an exited pre mode
         // always ends here; a snapshot run keeps it, leaving the exit to the
         // next regular `version` once the throwaway tree is discarded.
-        if let Some(pre) = &planned.pre {
-            if snapshot.is_none() {
-                fs::remove_file(pre.path()).with_context(|| pre.path().display().to_string())?;
-            }
+        if let Some(pre) = &planned.pre
+            && snapshot.is_none()
+        {
+            fs::remove_file(pre.path()).with_context(|| pre.path().display().to_string())?;
         }
     }
 
