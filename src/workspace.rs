@@ -185,23 +185,21 @@ fn read_pnpm_manifest(dir: &Path) -> Result<Option<Vec<String>>> {
         Ok(docs) => docs,
         Err(err) => bail!("{}: invalid YAML: {err}", path.display()),
     };
-    // pnpm makes a directory a workspace root on the presence of
-    // pnpm-workspace.yaml alone and defaults `packages` to `["."]`, giving a
-    // workspace whose only member is the root. Since pnpm 10 the file doubles
-    // as a settings file (`onlyBuiltDependencies`, `catalog`, ...), so a
-    // single-package repository really does carry one with no `packages`.
-    let root_only = || Ok(Some(vec![".".to_owned()]));
+    // Upstream recognizes a pnpm workspace root only when the manifest has a
+    // `packages` key, so a settings-only pnpm-workspace.yaml (pnpm 10+ uses
+    // the file for `onlyBuiltDependencies`, `catalog`, ...) does not stop the
+    // walk here.
     let Some(Yaml::Mapping(mapping)) = docs.into_iter().next() else {
-        return root_only();
+        return Ok(None);
     };
     let packages = mapping
         .iter()
         .find_map(|(key, value)| (key.as_str() == Some("packages")).then_some(value));
     let Some(packages) = packages else {
-        return root_only();
+        return Ok(None);
     };
     if packages.is_null() {
-        return root_only();
+        return Ok(None);
     }
     let Yaml::Sequence(items) = packages else {
         bail!("{}: \"packages\" must be a list of strings", path.display())
@@ -512,7 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn pnpm_manifest_without_packages_wins_over_npm_workspaces() {
+    fn pnpm_manifest_without_packages_does_not_suppress_npm_workspaces() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -524,6 +522,7 @@ mod tests {
             "package.json",
             "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
         );
+        write(dir.path(), "package-lock.json", "");
         write(
             dir.path(),
             "packages/a/package.json",
@@ -531,11 +530,14 @@ mod tests {
         );
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(workspace.root(), dir.path());
-        assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
     }
 
     #[test]
-    fn pnpm_manifest_with_null_packages_is_a_root_only_workspace() {
+    fn pnpm_manifest_with_null_packages_is_not_a_workspace_root() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "pnpm-workspace.yaml", "packages:\n");
         write(
@@ -549,7 +551,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_pnpm_manifest_is_a_root_only_workspace() {
+    fn an_empty_pnpm_manifest_is_not_a_workspace_root() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "pnpm-workspace.yaml", "");
         write(
@@ -563,13 +565,14 @@ mod tests {
     }
 
     #[test]
-    fn pnpm_manifest_without_packages_shadows_an_outer_workspace() {
+    fn pnpm_manifest_without_packages_does_not_shadow_an_outer_workspace() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             "package.json",
             "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
         );
+        write(dir.path(), "package-lock.json", "");
         write(
             dir.path(),
             "packages/a/package.json",
@@ -587,8 +590,14 @@ mod tests {
         );
         let inner = dir.path().join("packages/inner");
         let workspace = Workspace::discover(&inner).unwrap();
-        assert_eq!(workspace.root(), inner);
-        assert_eq!(names_and_dirs(&workspace), [("inner", inner.as_path())]);
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [
+                ("inner", inner.as_path()),
+                ("pkg-a", dir.path().join("packages/a").as_path()),
+            ]
+        );
     }
 
     #[test]
