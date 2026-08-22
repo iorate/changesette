@@ -59,12 +59,6 @@ enum Command {
         /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
         #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
         ignore: Vec<String>,
-        /// Succeed even when there are no unreleased changesets
-        #[arg(short, long)]
-        allow_no_changesets: bool,
-        /// Write the release plan to the file (or stdout with `-`) as JSON
-        #[arg(short, long, value_name = "FILE")]
-        output: Option<PathBuf>,
         /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
         #[arg(
             long,
@@ -81,6 +75,12 @@ enum Command {
             value_parser = clap::builder::NonEmptyStringValueParser::new()
         )]
         snapshot_prerelease_template: Option<String>,
+        /// Succeed even when there are no unreleased changesets
+        #[arg(short, long)]
+        allow_no_changesets: bool,
+        /// Write the release plan to the file (or stdout with `-`) as JSON
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
     },
     /// Enter or exit pre-release mode
     Pre {
@@ -146,10 +146,10 @@ fn run() -> anyhow::Result<()> {
         }) => commands::add::run(major, minor, patch, message, empty, open),
         Command::Version {
             ignore,
-            allow_no_changesets,
-            output,
             snapshot,
             snapshot_prerelease_template,
+            allow_no_changesets,
+            output,
         } => {
             let snapshot = snapshot.map(|tag| snapshot::Snapshot {
                 tag,
