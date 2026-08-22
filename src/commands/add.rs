@@ -9,7 +9,8 @@ use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
 
 use crate::{
     bump::Bump,
-    config, output, skip,
+    output,
+    skip::SkipSet,
     workspace::{Member, Workspace},
 };
 
@@ -31,12 +32,11 @@ pub(crate) fn run(
     );
 
     let changeset_dir = workspace.root().join(".changeset");
-    let config = config::load(&changeset_dir)?;
-    let ignore = config.resolve_ignore(workspace.members().iter().map(Member::name))?;
+    let skip = SkipSet::load(&workspace, &changeset_dir, &[])?;
     let packages: Vec<&Member> = workspace
         .members()
         .iter()
-        .filter(|member| !skip::should_skip(member, &config, &ignore))
+        .filter(|member| !skip.contains(member.name()))
         .collect();
     ensure!(
         !packages.is_empty(),

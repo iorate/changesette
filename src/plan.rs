@@ -1,13 +1,12 @@
 use std::{collections::BTreeMap, env, fs, io, path::PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use semver::Version;
 
 use crate::{
     bump::{self, Bump},
     changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
-    config,
     package_json::PackageJson,
     pre::{self, PreJson, PreMode},
     skip::SkipSet,
@@ -45,21 +44,7 @@ impl PlannedVersion {
 pub(crate) fn plan_version(cli_ignore: &[String]) -> Result<PlannedVersion> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
     let changeset_dir = workspace.root().join(".changeset");
-    let config = config::load(&changeset_dir)?;
-    let ignore = if config.has_ignore() {
-        if !cli_ignore.is_empty() {
-            bail!(
-                "the --ignore option cannot be used while ignore is defined in .changeset/config.json; use only one of them"
-            );
-        }
-        config.resolve_ignore(workspace.members().iter().map(Member::name))?
-    } else {
-        for name in cli_ignore {
-            workspace.member(name).context("invalid `--ignore` value")?;
-        }
-        cli_ignore.to_vec()
-    };
-    let skip = SkipSet::build(&workspace, &config, &ignore);
+    let skip = SkipSet::load(&workspace, &changeset_dir, cli_ignore)?;
 
     let pre = PreJson::load(&changeset_dir)?;
     if let Some(pre) = pre.as_ref().filter(|pre| pre.mode() == PreMode::Pre) {

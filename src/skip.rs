@@ -4,11 +4,11 @@ use anyhow::{Context, Result, bail};
 
 use crate::{
     changeset::LoadedChange,
-    config::Config,
+    config::{self, Config},
     workspace::{Member, Workspace},
 };
 
-pub(crate) fn should_skip(member: &Member, config: &Config, ignore: &[String]) -> bool {
+fn should_skip(member: &Member, config: &Config, ignore: &[String]) -> bool {
     ignore.iter().any(|name| name == member.name())
         || (member.private() && !config.private_packages_version)
         || member.version().is_none()
@@ -20,14 +20,35 @@ pub(crate) struct SkipSet {
 }
 
 impl SkipSet {
-    pub(crate) fn build(workspace: &Workspace, config: &Config, ignore: &[String]) -> SkipSet {
+    /// Loads `changeset_dir/config.json` and collects the members skipped as
+    /// private, ignored, or versionless, resolving the ignore names from the
+    /// config or `cli_ignore` (using both is an error).
+    pub(crate) fn load(
+        workspace: &Workspace,
+        changeset_dir: &Path,
+        cli_ignore: &[String],
+    ) -> Result<SkipSet> {
+        let config = config::load(changeset_dir)?;
+        let ignore = if config.has_ignore() {
+            if !cli_ignore.is_empty() {
+                bail!(
+                    "the --ignore option cannot be used while ignore is defined in .changeset/config.json; use only one of them"
+                );
+            }
+            config.resolve_ignore(workspace.members().iter().map(Member::name))?
+        } else {
+            for name in cli_ignore {
+                workspace.member(name).context("invalid `--ignore` value")?;
+            }
+            cli_ignore.to_vec()
+        };
         let names = workspace
             .members()
             .iter()
-            .filter(|member| should_skip(member, config, ignore))
+            .filter(|member| should_skip(member, &config, &ignore))
             .map(|member| member.name().to_owned())
             .collect();
-        SkipSet { names }
+        Ok(SkipSet { names })
     }
 
     pub(crate) fn contains(&self, name: &str) -> bool {

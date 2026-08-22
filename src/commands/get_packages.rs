@@ -1,10 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::{
-    config, output, skip,
-    workspace::{Member, Workspace},
-};
+use crate::{output, skip::SkipSet, workspace::Workspace};
 
 #[derive(Serialize)]
 struct Package<'a> {
@@ -21,11 +18,10 @@ struct Package<'a> {
 /// workspace root.
 pub(crate) fn run(all: bool) -> Result<()> {
     let workspace = Workspace::discover(&std::env::current_dir()?)?;
-    let config = config::load(&workspace.root().join(".changeset"))?;
-    let ignore = config.resolve_ignore(workspace.members().iter().map(Member::name))?;
+    let skip = SkipSet::load(&workspace, &workspace.root().join(".changeset"), &[])?;
     let mut packages = Vec::new();
     for member in workspace.members() {
-        if !all && skip::should_skip(member, &config, &ignore) {
+        if !all && skip.contains(member.name()) {
             continue;
         }
         let mut base = workspace.root();
