@@ -1388,9 +1388,25 @@ fn version_rejects_the_ignore_flag_with_a_config_ignore() {
 }
 
 #[test]
-fn version_ignore_flag_works_when_the_config_ignore_matches_nothing() {
+fn version_rejects_the_ignore_flag_when_the_config_ignore_matches_nothing() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"ignore\": [\"missing-*\"] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "--ignore", "pkg-b"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("use only one of them"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_ignore_flag_works_with_an_empty_config_ignore() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"ignore\": [] }\n");
     write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
     write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
     let output = changesette(dir.path(), &["version", "--ignore", "pkg-b"]);

@@ -16,6 +16,11 @@ pub(crate) struct Config {
 }
 
 impl Config {
+    /// Whether the `ignore` setting defines any patterns.
+    pub(crate) fn has_ignore(&self) -> bool {
+        !self.ignore.is_empty()
+    }
+
     /// Expands the `ignore` patterns against `names` and returns the matching
     /// names in input order, with a `!`-prefixed pattern un-ignoring the
     /// names it matches, in order; a pattern matching no name is not an
