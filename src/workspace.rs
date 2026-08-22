@@ -37,7 +37,7 @@ impl Workspace {
                 let manifest = dir.join("pnpm-workspace.yaml");
                 return Ok(Workspace {
                     root: dir.to_path_buf(),
-                    members: collect_members(dir, &manifest, &patterns)?,
+                    members: collect_members(dir, &manifest, &patterns, true)?,
                 });
             }
             let path = dir.join("package.json");
@@ -56,7 +56,7 @@ impl Workspace {
                 };
                 return Ok(Workspace {
                     root: dir.to_path_buf(),
-                    members: collect_members(dir, &path, &patterns)?,
+                    members: collect_members(dir, &path, &patterns, false)?,
                 });
             }
             if fallback.is_none() {
@@ -197,7 +197,12 @@ fn member_name(value: &Value, path: &Path) -> Result<String> {
     Ok(name.to_owned())
 }
 
-fn collect_members(root: &Path, manifest: &Path, patterns: &[String]) -> Result<Vec<Member>> {
+fn collect_members(
+    root: &Path,
+    manifest: &Path,
+    patterns: &[String],
+    include_root: bool,
+) -> Result<Vec<Member>> {
     let mut positives = Vec::new();
     let mut negatives = Vec::new();
     for original in patterns {
@@ -294,6 +299,21 @@ fn collect_members(root: &Path, manifest: &Path, patterns: &[String]) -> Result<
             };
             let name = member_name(name_value, &path)?;
             members.push(Member { name, dir });
+        }
+    }
+
+    // pnpm always makes the workspace root a project, whatever the patterns
+    // say (pnpm/pnpm#1986).
+    if include_root && !dirs.contains(root) {
+        let path = root.join("package.json");
+        if let Some(value) = read_json(&path)? {
+            if let Some(name_value) = value.get("name") {
+                let name = member_name(name_value, &path)?;
+                members.push(Member {
+                    name,
+                    dir: root.to_path_buf(),
+                });
+            }
         }
     }
 
@@ -641,6 +661,75 @@ mod tests {
         );
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
+    }
+
+    #[test]
+    fn always_includes_the_pnpm_root_package() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"packages/*\"\n",
+        );
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [
+                ("pkg-a", dir.path().join("packages/a").as_path()),
+                ("root", dir.path()),
+            ]
+        );
+    }
+
+    #[test]
+    fn excludes_a_nameless_pnpm_root_package() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"packages/*\"\n",
+        );
+        write(dir.path(), "package.json", "{ \"version\": \"1.0.0\" }\n");
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn does_not_include_the_npm_root_package_without_a_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
     }
 
     #[test]

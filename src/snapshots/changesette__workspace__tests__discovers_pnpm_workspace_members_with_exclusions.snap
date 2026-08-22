@@ -9,5 +9,9 @@ Workspace {
             name: "pkg-a",
             dir: "tests/fixtures/workspace/pnpm/packages/a",
         },
+        Member {
+            name: "root",
+            dir: "tests/fixtures/workspace/pnpm",
+        },
     ],
 }
