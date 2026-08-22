@@ -35,18 +35,34 @@ pub(crate) fn next_version(current: &Version, bump: Bump) -> Version {
     }
 }
 
-/// Returns `next_version(current, bump)` with the pre-release `-{tag}.{n}`
-/// attached, continuing `current`'s counter when its tag matches; `tag` must
-/// have passed `pre::validate_tag`.
-pub(crate) fn next_pre_version(current: &Version, bump: Bump, tag: &str) -> Version {
+/// The counter of the `-{tag}.{n}` pre-release following `current`: one past
+/// `current`'s counter when its tag matches, `0` otherwise.
+pub(crate) fn pre_counter(current: &Version, tag: &str) -> u64 {
     // Counting on the tag, rather than on the second pre-release identifier,
     // keeps a dotted tag (`beta.2`) counting and restarts on a tag switch.
-    let counter = current
+    current
         .pre
         .as_str()
         .strip_prefix(&format!("{tag}."))
         .and_then(|rest| rest.parse::<u64>().ok())
-        .map_or(0, |number| number + 1);
+        .map_or(0, |number| number + 1)
+}
+
+/// Returns `next_version(current, bump)` with the pre-release `-{tag}.{n}`
+/// attached, continuing `current`'s counter when its tag matches; `tag` must
+/// have passed `pre::validate_tag`.
+pub(crate) fn next_pre_version(current: &Version, bump: Bump, tag: &str) -> Version {
+    next_pre_version_with(current, bump, tag, pre_counter(current, tag))
+}
+
+/// Returns `next_version(current, bump)` with the pre-release
+/// `-{tag}.{counter}` attached; `tag` must have passed `pre::validate_tag`.
+pub(crate) fn next_pre_version_with(
+    current: &Version,
+    bump: Bump,
+    tag: &str,
+    counter: u64,
+) -> Version {
     let mut version = next_version(current, bump);
     version.pre =
         Prerelease::new(&format!("{tag}.{counter}")).expect("a validated tag stays valid");
@@ -179,5 +195,31 @@ mod tests {
     #[test]
     fn pre_version_clears_build_metadata() {
         assert_eq!(next_pre("1.2.3+abc", Bump::Minor, "beta"), "1.3.0-beta.0");
+    }
+
+    fn counter(current: &str, tag: &str) -> u64 {
+        pre_counter(&current.parse().unwrap(), tag)
+    }
+
+    #[test]
+    fn pre_counter_continues_a_matching_tag() {
+        assert_eq!(counter("1.1.0-beta.0", "beta"), 1);
+        assert_eq!(counter("1.1.0-beta.2.3", "beta.2"), 4);
+    }
+
+    #[test]
+    fn pre_counter_restarts_otherwise() {
+        assert_eq!(counter("1.0.0", "beta"), 0);
+        assert_eq!(counter("1.1.0-alpha.3", "beta"), 0);
+        assert_eq!(counter("1.0.0-alpha.beta", "alpha"), 0);
+    }
+
+    #[test]
+    fn pre_version_with_a_given_counter() {
+        assert_eq!(
+            next_pre_version_with(&"1.1.0-beta.0".parse().unwrap(), Bump::Patch, "beta", 5)
+                .to_string(),
+            "1.1.0-beta.5"
+        );
     }
 }

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::BTreeSet, path::Path};
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -6,12 +6,24 @@ use wax::{Glob, Program};
 
 use crate::workspace::read_json;
 
+#[derive(Debug)]
+struct Pattern {
+    negated: bool,
+    glob: Glob<'static>,
+    // The pattern as written in the config, the leading `!` included.
+    text: String,
+}
+
 /// The effective settings from `.changeset/config.json`.
 #[derive(Debug, Default)]
 pub(crate) struct Config {
-    // The parsed patterns of the `ignore` setting as (negated, glob) pairs;
-    // `resolve_ignore` expands them into package names.
-    ignore: Vec<(bool, Glob<'static>)>,
+    // The parsed patterns of the `ignore` setting; `resolve_ignore` expands
+    // them into package names.
+    ignore: Vec<Pattern>,
+    // The parsed pattern groups of the `fixed` / `linked` settings;
+    // `resolve_groups` expands them into package-name groups.
+    fixed: Vec<Vec<Pattern>>,
+    linked: Vec<Vec<Pattern>>,
     /// Whether private packages are versioned, per the `privatePackages`
     /// setting.
     pub(crate) private_packages_version: bool,
@@ -37,37 +49,118 @@ impl Config {
         &self,
         names: impl IntoIterator<Item = &'a str>,
     ) -> Vec<String> {
-        let mut resolved = Vec::new();
-        for name in names {
-            let mut ignored = false;
-            for (negated, glob) in &self.ignore {
-                if *negated {
-                    if ignored && glob.is_match(name) {
-                        ignored = false;
-                    }
-                } else if !ignored && glob.is_match(name) {
-                    ignored = true;
-                }
-            }
-            if ignored {
-                resolved.push(name.to_owned());
+        expand_patterns(&self.ignore, names)
+    }
+
+    /// Expands the `fixed` / `linked` pattern groups against `names` with the
+    /// same ordered `!` negation as `resolve_ignore`, erroring on a package
+    /// in multiple same-kind groups or in both a `fixed` and a `linked`
+    /// group, and warning on a pattern matching no package.
+    pub(crate) fn resolve_groups(&self, names: &[&str]) -> Result<ResolvedGroups> {
+        let expand = |groups: &[Vec<Pattern>]| -> Vec<Vec<String>> {
+            groups
+                .iter()
+                .map(|patterns| expand_patterns(patterns, names.iter().copied()))
+                .collect()
+        };
+        let fixed = expand(&self.fixed);
+        let linked = expand(&self.linked);
+
+        check_group_duplicates("fixed", &fixed)?;
+        check_group_duplicates("linked", &linked)?;
+        let fixed_names: BTreeSet<&String> = fixed.iter().flatten().collect();
+        for name in linked.iter().flatten() {
+            if fixed_names.contains(name) {
+                bail!(
+                    "package `{name}` is in both a \"fixed\" and a \"linked\" group; a package can be in only one of them"
+                );
             }
         }
-        resolved
+
+        let mut warnings = Vec::new();
+        for (key, groups) in [("fixed", &self.fixed), ("linked", &self.linked)] {
+            for pattern in groups.iter().flatten() {
+                // Following the upstream getUnmatchedPatterns, each pattern
+                // is judged alone, so a `!`-prefixed pattern "matches" any
+                // name its body does not match — unlike the ordered
+                // expansion above.
+                let matches = |name: &&str| pattern.glob.is_match(*name) != pattern.negated;
+                if !names.iter().any(matches) {
+                    warnings.push(format!(
+                        "{key}: the package or glob {:?} does not match any package in the workspace",
+                        pattern.text
+                    ));
+                }
+            }
+        }
+
+        Ok(ResolvedGroups {
+            fixed,
+            linked,
+            warnings,
+        })
     }
 }
 
-fn parse_ignore_pattern(pattern: &str) -> Result<(bool, Glob<'static>)> {
+/// The `fixed` / `linked` groups expanded into package names by
+/// `Config::resolve_groups`.
+pub(crate) struct ResolvedGroups {
+    pub(crate) fixed: Vec<Vec<String>>,
+    pub(crate) linked: Vec<Vec<String>>,
+    /// The unmatched-pattern warnings, without a `warning: ` prefix.
+    pub(crate) warnings: Vec<String>,
+}
+
+fn expand_patterns<'a>(
+    patterns: &[Pattern],
+    names: impl IntoIterator<Item = &'a str>,
+) -> Vec<String> {
+    let mut resolved = Vec::new();
+    for name in names {
+        let mut matched = false;
+        for pattern in patterns {
+            if pattern.negated {
+                if matched && pattern.glob.is_match(name) {
+                    matched = false;
+                }
+            } else if !matched && pattern.glob.is_match(name) {
+                matched = true;
+            }
+        }
+        if matched {
+            resolved.push(name.to_owned());
+        }
+    }
+    resolved
+}
+
+// Each name appears at most once per expanded group, so a duplicate can only
+// come from another group.
+fn check_group_duplicates(key: &str, groups: &[Vec<String>]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for name in groups.iter().flatten() {
+        if !seen.insert(name) {
+            bail!(
+                "package `{name}` is in multiple \"{key}\" groups; a package can belong to only one group"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn parse_pattern(pattern: &str) -> Result<Pattern> {
     // wax does not parse the leading `!`, so it is stripped here and the
-    // negation applied by resolve_ignore.
+    // negation applied by expand_patterns.
     let (negated, body) = match pattern.strip_prefix('!') {
         Some(body) => (true, body),
         None => (false, pattern),
     };
-    let glob = Glob::new(body)
-        .map(Glob::into_owned)
-        .with_context(|| format!("invalid ignore pattern {pattern:?}"))?;
-    Ok((negated, glob))
+    let glob = Glob::new(body).map(Glob::into_owned)?;
+    Ok(Pattern {
+        negated,
+        glob,
+        text: pattern.to_owned(),
+    })
 }
 
 /// Loads the supported subset of `changeset_dir/config.json`, treating a
@@ -97,17 +190,45 @@ fn load_value(value: &Value) -> Result<Config> {
             bail!("\"ignore\" must be an array of strings")
         };
         for pattern in patterns {
-            ignore.push(parse_ignore_pattern(pattern)?);
+            ignore.push(
+                parse_pattern(pattern)
+                    .with_context(|| format!("invalid ignore pattern {pattern:?}"))?,
+            );
         }
     }
 
-    for key in ["fixed", "linked"] {
-        if let Some(value) = object.get(key) {
-            if value.as_array().is_none_or(|groups| !groups.is_empty()) {
-                bail!("\"{key}\" is not yet implemented");
+    let mut groups = [Vec::new(), Vec::new()];
+    for (key, parsed) in ["fixed", "linked"].into_iter().zip(&mut groups) {
+        let Some(value) = object.get(key) else {
+            continue;
+        };
+        let raw_groups = value.as_array().and_then(|groups| {
+            groups
+                .iter()
+                .map(|group| {
+                    group.as_array().and_then(|items| {
+                        items
+                            .iter()
+                            .map(Value::as_str)
+                            .collect::<Option<Vec<&str>>>()
+                    })
+                })
+                .collect::<Option<Vec<Vec<&str>>>>()
+        });
+        let Some(raw_groups) = raw_groups else {
+            bail!("\"{key}\" must be an array of arrays of strings")
+        };
+        for (index, raw_group) in raw_groups.into_iter().enumerate() {
+            let mut group = Vec::new();
+            for pattern in raw_group {
+                group.push(parse_pattern(pattern).with_context(|| {
+                    format!("invalid pattern {pattern:?} in \"{key}\"[{index}]")
+                })?);
             }
+            parsed.push(group);
         }
     }
+    let [fixed, linked] = groups;
 
     let private_packages_version = match object.get("privatePackages") {
         None => false,
@@ -147,6 +268,8 @@ fn load_value(value: &Value) -> Result<Config> {
 
     Ok(Config {
         ignore,
+        fixed,
+        linked,
         private_packages_version,
         snapshot_use_calculated_version,
         snapshot_prerelease_template,
@@ -274,16 +397,117 @@ mod tests {
         );
         load_ok("{ \"ignore\": [] }\n");
         load_ok("{ \"fixed\": [], \"linked\": [] }\n");
+        load_ok("{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]], \"linked\": [[\"@scope/*\"]] }\n");
+    }
+
+    fn resolve_groups(text: &str, names: &[&str]) -> ResolvedGroups {
+        load_ok(text).resolve_groups(names).unwrap()
+    }
+
+    fn resolve_groups_err(text: &str, names: &[&str]) -> String {
+        let err = load_ok(text).resolve_groups(names).err().unwrap();
+        format!("{err:#}")
     }
 
     #[test]
-    fn rejects_a_non_empty_fixed() {
-        insta::assert_snapshot!(validate_err("{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n"));
+    fn resolves_group_globs_with_negation() {
+        let groups = resolve_groups(
+            "{ \"fixed\": [[\"pkg-*\", \"!pkg-b\"]], \"linked\": [[\"pkg-b\"]] }\n",
+            &["pkg-a", "pkg-b", "pkg-c"],
+        );
+        assert_eq!(groups.fixed, [["pkg-a", "pkg-c"]]);
+        assert_eq!(groups.linked, [["pkg-b"]]);
+        assert!(groups.warnings.is_empty());
     }
 
     #[test]
-    fn rejects_a_non_empty_linked() {
-        insta::assert_snapshot!(validate_err("{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n"));
+    fn resolves_empty_groups_without_warnings() {
+        let groups = resolve_groups("{}\n", &["pkg-a"]);
+        assert!(groups.fixed.is_empty());
+        assert!(groups.linked.is_empty());
+        assert!(groups.warnings.is_empty());
+    }
+
+    #[test]
+    fn rejects_a_package_in_multiple_fixed_groups() {
+        insta::assert_snapshot!(resolve_groups_err(
+            "{ \"fixed\": [[\"pkg-*\"], [\"pkg-b\"]] }\n",
+            &["pkg-a", "pkg-b"],
+        ));
+    }
+
+    #[test]
+    fn rejects_a_package_in_multiple_linked_groups() {
+        insta::assert_snapshot!(resolve_groups_err(
+            "{ \"linked\": [[\"pkg-a\", \"pkg-b\"], [\"pkg-b\"]] }\n",
+            &["pkg-a", "pkg-b"],
+        ));
+    }
+
+    #[test]
+    fn rejects_a_package_in_both_fixed_and_linked_groups() {
+        insta::assert_snapshot!(resolve_groups_err(
+            "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]], \"linked\": [[\"pkg-b\"]] }\n",
+            &["pkg-a", "pkg-b"],
+        ));
+    }
+
+    #[test]
+    fn warns_on_a_group_pattern_matching_nothing() {
+        let groups = resolve_groups(
+            "{ \"fixed\": [[\"pkg-a\", \"missing-*\"]] }\n",
+            &["pkg-a", "pkg-b"],
+        );
+        assert_eq!(groups.fixed, [["pkg-a"]]);
+        assert_eq!(
+            groups.warnings,
+            [
+                "fixed: the package or glob \"missing-*\" does not match any package in the workspace"
+            ]
+        );
+    }
+
+    #[test]
+    fn warns_on_a_negated_pattern_whose_body_matches_everything() {
+        let groups = resolve_groups(
+            "{ \"linked\": [[\"pkg-*\", \"!pkg-*\"]] }\n",
+            &["pkg-a", "pkg-b"],
+        );
+        assert_eq!(groups.linked, [[] as [&str; 0]]);
+        assert_eq!(
+            groups.warnings,
+            ["linked: the package or glob \"!pkg-*\" does not match any package in the workspace"]
+        );
+    }
+
+    #[test]
+    fn does_not_warn_on_a_negated_pattern_whose_body_misses_a_name() {
+        let groups = resolve_groups(
+            "{ \"linked\": [[\"pkg-*\", \"!pkg-b\"]] }\n",
+            &["pkg-a", "pkg-b"],
+        );
+        assert_eq!(groups.linked, [["pkg-a"]]);
+        assert!(groups.warnings.is_empty());
+    }
+
+    #[test]
+    fn rejects_a_non_array_fixed() {
+        insta::assert_snapshot!(validate_err("{ \"fixed\": \"pkg-a\" }\n"));
+    }
+
+    #[test]
+    fn rejects_a_non_array_group() {
+        insta::assert_snapshot!(validate_err("{ \"fixed\": [\"pkg-a\"] }\n"));
+    }
+
+    #[test]
+    fn rejects_a_non_string_group_item() {
+        insta::assert_snapshot!(validate_err("{ \"linked\": [[\"pkg-a\", 1]] }\n"));
+    }
+
+    #[test]
+    fn rejects_an_invalid_group_pattern() {
+        insta::assert_snapshot!(validate_err("{ \"linked\": [[\"pkg-a\"], [\"pkg-[\"]] }\n"));
     }
 
     #[test]

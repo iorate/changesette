@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "resolve_groups_err(\"{ \\\"linked\\\": [[\\\"pkg-a\\\", \\\"pkg-b\\\"], [\\\"pkg-b\\\"]] }\\n\",\n&[\"pkg-a\", \"pkg-b\"],)"
+---
+package `pkg-b` is in multiple "linked" groups; a package can belong to only one group

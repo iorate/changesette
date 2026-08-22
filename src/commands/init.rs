@@ -13,10 +13,12 @@ pending changesets to bump the version and update CHANGELOG.md.
 ";
 
 const CONFIG: &str = "{
-  \"ignore\": [],
+  \"fixed\": [],
+  \"linked\": [],
   \"privatePackages\": {
     \"version\": false
-  }
+  },
+  \"ignore\": []
 }
 ";
 

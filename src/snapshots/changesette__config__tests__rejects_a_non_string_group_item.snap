@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"{ \\\"linked\\\": [[\\\"pkg-a\\\", 1]] }\\n\")"
+---
+.changeset/config.json: "linked" must be an array of arrays of strings
