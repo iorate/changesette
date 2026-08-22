@@ -27,10 +27,15 @@ pub(crate) struct PlannedVersion {
     pub(crate) releases: Vec<PlannedRelease>,
 }
 
+/// Filters `pre` to the pre state only when it is in pre mode.
+fn pre_state(pre: Option<&PreJson>) -> Option<&PreJson> {
+    pre.filter(|pre| pre.mode() == PreMode::Pre)
+}
+
 impl PlannedVersion {
     /// The pre state when in pre mode.
     pub(crate) fn in_pre(&self) -> Option<&PreJson> {
-        self.pre.as_ref().filter(|pre| pre.mode() == PreMode::Pre)
+        pre_state(self.pre.as_ref())
     }
 
     pub(crate) fn exiting_pre(&self) -> bool {
@@ -47,12 +52,13 @@ pub(crate) fn plan_version(cli_ignore: &[String]) -> Result<PlannedVersion> {
     let skip = SkipSet::load(&workspace, &changeset_dir, cli_ignore)?;
 
     let pre = PreJson::load(&changeset_dir)?;
-    if let Some(pre) = pre.as_ref().filter(|pre| pre.mode() == PreMode::Pre) {
+    let in_pre = pre_state(pre.as_ref());
+    if let Some(pre) = in_pre {
         pre::validate_tag(pre.tag())?;
     }
 
     let mut changes = changeset::load(&changeset_dir)?;
-    if matches!(&pre, Some(pre) if pre.mode() == PreMode::Pre) {
+    if in_pre.is_some() {
         // The `pre/` changesets were already consumed in this pre-release
         // cycle.
         changes.retain(|change| !change.in_pre);
@@ -121,11 +127,9 @@ fn plan_releases(
                             .map(|bump| (bump, change.summary.as_str()))
                     })
                     .collect();
-                let new_version = match pre {
-                    Some(pre) if pre.mode() == PreMode::Pre => {
-                        bump::next_pre_version(&old_version, max_bump, pre.tag())
-                    }
-                    _ => bump::next_version(&old_version, max_bump),
+                let new_version = match pre_state(pre) {
+                    Some(pre) => bump::next_pre_version(&old_version, max_bump, pre.tag()),
+                    None => bump::next_version(&old_version, max_bump),
                 };
                 (new_version, Some(render_entry(&summaries)))
             }

@@ -14,13 +14,14 @@ pub(crate) fn run(
     output_path: Option<&Path>,
 ) -> Result<()> {
     let planned = plan::plan_version(ignore)?;
-    if let Some(pre) = planned.in_pre() {
+    let pre = planned.in_pre();
+    if let Some(pre) = pre {
         output::eprint_line(&format!(
             "warning: in pre mode with tag `{}`; versions will be prereleases. Run `changesette pre exit` first for a normal release.",
             pre.tag()
         ))?;
     }
-    let in_pre = planned.in_pre().is_some();
+    let in_pre = pre.is_some();
     let exiting = planned.exiting_pre();
     if planned.changes.is_empty() && !exiting && !allow_no_changesets {
         bail!("no unreleased changesets found");
