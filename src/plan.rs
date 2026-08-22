@@ -27,7 +27,6 @@ pub(crate) struct PlannedVersion {
     pub(crate) releases: Vec<PlannedRelease>,
 }
 
-/// Filters `pre` to the pre state only when it is in pre mode.
 fn pre_state(pre: Option<&PreJson>) -> Option<&PreJson> {
     pre.filter(|pre| pre.mode() == PreMode::Pre)
 }
@@ -91,8 +90,8 @@ pub(crate) struct PlannedRelease {
     pub(crate) changelog_entry: Option<String>,
 }
 
-/// Plans the releases requested by `changes` (plus, when exiting pre mode,
-/// the members still on a pre-release version), modifying nothing on disk.
+// Plans the releases requested by `changes` (plus, when exiting pre mode,
+// the members still on a pre-release version), modifying nothing on disk.
 fn plan_releases(
     workspace: &Workspace,
     changes: &[LoadedChange],
@@ -167,8 +166,8 @@ fn rescue_prereleases<'a>(
     Ok(())
 }
 
-/// Parses the semver version the member's manifest held at discovery; a
-/// missing or invalid version is an error.
+// Parses the semver version the member's manifest held at discovery; a
+// missing or invalid version is an error.
 fn member_version(member: &Member) -> Result<Version> {
     let path = member.dir().join("package.json");
     let raw = member

@@ -9,8 +9,8 @@ use crate::workspace::read_json;
 /// The effective settings from `.changeset/config.json`.
 #[derive(Debug, Default)]
 pub(crate) struct Config {
-    /// The parsed patterns of the `ignore` setting as (negated, glob) pairs;
-    /// `resolve_ignore` expands them into package names.
+    // The parsed patterns of the `ignore` setting as (negated, glob) pairs;
+    // `resolve_ignore` expands them into package names.
     ignore: Vec<(bool, Glob<'static>)>,
     /// Whether private packages are versioned, per the `privatePackages`
     /// setting.
