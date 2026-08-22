@@ -292,19 +292,31 @@ Prints the body of the `## <version>` section of the named package's `CHANGELOG.
 
 ## Configuration
 
-`.changeset/config.json` is read when present and is format-compatible with the changesets config; a missing file means the defaults, and unknown keys are ignored.
+`.changeset/config.json` is read when present and is format-compatible with the changesets config; a missing file means the defaults, and unknown keys are ignored. Wherever a setting lists package names, glob patterns like `"@scope/*"` also work, and a `!`-prefixed pattern un-matches, in order, so `["pkg-*", "!pkg-b"]` selects every `pkg-*` package except `pkg-b`.
 
-### `ignore`
+### `fixed`
 
 Default: `[]`.
 
-Names of packages to skip; glob patterns like `"@scope/*"` are also supported, and a `!`-prefixed entry un-ignores, in order, so `["pkg-*", "!pkg-b"]` ignores every `pkg-*` package except `pkg-b`.
+Groups (arrays) of names of packages that are always released together at the same version.
+
+### `linked`
+
+Default: `[]`.
+
+Groups (arrays) of names of packages whose versions are aligned whenever they are released together.
 
 ### `privatePackages`
 
 Default: `{ "version": false }`.
 
 Whether private packages (`"private": true` in package.json) are versioned. Set `{ "version": true }` (or the shorthand `true`) to version them; by default they are skipped.
+
+### `ignore`
+
+Default: `[]`.
+
+Names of packages to skip.
 
 ### `snapshot`
 

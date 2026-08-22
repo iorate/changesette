@@ -73,7 +73,7 @@ fn init_creates_the_changeset_directory_with_a_readme_and_a_config() {
     let config = fs::read_to_string(dir.path().join(".changeset/config.json")).unwrap();
     assert_eq!(
         config,
-        "{\n  \"ignore\": [],\n  \"privatePackages\": {\n    \"version\": false\n  }\n}\n"
+        "{\n  \"fixed\": [],\n  \"linked\": [],\n  \"privatePackages\": {\n    \"version\": false\n  },\n  \"ignore\": []\n}\n"
     );
 }
 
@@ -1511,6 +1511,372 @@ fn version_bumps_a_private_package_when_the_config_versions_it() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stderr(&output), "Bumped pkg-b 2.0.0 -> 2.0.1\n");
     assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_fixed_bumps_the_partner_with_a_heading_only_changelog() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stderr(&output),
+        "Bumped pkg-a 3.1.4 -> 3.2.0\nBumped pkg-b 3.1.4 -> 3.2.0\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.2.0\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/CHANGELOG.md")).unwrap(),
+        "# pkg-a\n\n## 3.2.0\n\n### Minor Changes\n\n- Improve pkg-a\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"3.2.0\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/CHANGELOG.md")).unwrap(),
+        "# pkg-b\n\n## 3.2.0\n"
+    );
+    assert!(!dir.path().join(".changeset").join(ULID_A).exists());
+}
+
+#[test]
+fn version_linked_does_not_bump_a_non_releasing_member() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "Bumped pkg-b 3.1.4 -> 3.1.5\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.1.4\"\n}\n"
+    );
+    assert!(!dir.path().join("packages/a/CHANGELOG.md").exists());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"3.1.5\"\n}\n"
+    );
+}
+
+#[test]
+fn version_linked_aligns_the_releasing_members() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "minor")], "Improve pkg-b");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stderr(&output),
+        "Bumped pkg-a 3.1.4 -> 3.2.0\nBumped pkg-b 3.1.4 -> 3.2.0\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"3.2.0\"\n}\n"
+    );
+}
+
+#[test]
+fn version_fixed_counts_a_skipped_member_without_adding_it() {
+    let dir = workspace_dir();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"9.9.9\",\n  \"private\": true\n}\n",
+    )
+    .unwrap();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "Bumped pkg-a 9.9.9 -> 9.10.0\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"9.10.0\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"9.9.9\",\n  \"private\": true\n}\n"
+    );
+    assert!(!dir.path().join("packages/b/CHANGELOG.md").exists());
+}
+
+#[test]
+fn version_fixed_in_pre_mode_aligns_the_counter() {
+    let dir = workspace_dir();
+    fs::write(
+        dir.path().join("packages/a/package.json"),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"1.0.1-beta.7\"\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0-beta.2\"\n}\n",
+    )
+    .unwrap();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    fs::write(dir.path().join(".changeset/pre.json"), PRE_JSON).unwrap();
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let err = stderr(&output);
+    assert!(
+        err.contains("Bumped pkg-a 2.0.0-beta.2 -> 2.0.0-beta.8\n"),
+        "{err}"
+    );
+    assert!(
+        err.contains("Bumped pkg-b 2.0.0-beta.2 -> 2.0.0-beta.8\n"),
+        "{err}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"2.0.0-beta.8\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0-beta.8\"\n}\n"
+    );
+    assert!(dir.path().join(".changeset/pre").join(ULID_B).exists());
+}
+
+#[test]
+fn version_fixed_output_reports_the_overridden_old_version() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    let output = changesette(dir.path(), &["version", "--output", "plan.json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let plan = fs::read_to_string(dir.path().join("plan.json")).unwrap();
+    assert!(
+        plan.contains(
+            "    {\n      \"name\": \"pkg-b\",\n      \"type\": \"minor\",\n      \"oldVersion\": \"3.1.4\",\n      \"newVersion\": \"3.2.0\",\n      \"changesets\": [],\n      \"changelogEntry\": \"\"\n    }"
+        ),
+        "{plan}"
+    );
+}
+
+#[test]
+fn version_warns_on_an_unmatched_group_pattern() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"missing-*\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stderr(&output),
+        "warning: fixed: the package or glob \"missing-*\" does not match any package in the workspace\nBumped pkg-a 3.1.4 -> 3.1.5\n"
+    );
+}
+
+#[test]
+fn status_warns_on_an_unmatched_group_pattern() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"linked\": [[\"missing-*\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    let output = changesette(dir.path(), &["status"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stderr(&output),
+        "warning: linked: the package or glob \"missing-*\" does not match any package in the workspace\n"
+    );
+    assert_eq!(
+        stdout(&output),
+        "Packages to be bumped:\n- patch\n  - pkg-a\n"
+    );
+}
+
+#[test]
+fn version_rejects_a_package_in_both_fixed_and_linked_groups() {
+    let dir = two_package_workspace_dir();
+    write_config(
+        dir.path(),
+        "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]], \"linked\": [[\"pkg-b\"]] }\n",
+    );
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version"]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains(".changeset"), "{err}");
+    assert!(err.contains("`pkg-b`"), "{err}");
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_linked_in_pre_mode_aligns_the_counter() {
+    let dir = workspace_dir();
+    fs::write(
+        dir.path().join("packages/a/package.json"),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"1.0.1-beta.7\"\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0-beta.2\"\n}\n",
+    )
+    .unwrap();
+    write_config(dir.path(), "{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    fs::write(dir.path().join(".changeset/pre.json"), PRE_JSON).unwrap();
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let err = stderr(&output);
+    assert!(
+        err.contains("Bumped pkg-b 2.0.0-beta.2 -> 2.0.0-beta.8\n"),
+        "{err}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"1.0.1-beta.7\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0-beta.8\"\n}\n"
+    );
+}
+
+#[test]
+fn version_after_exit_rescues_a_linked_partner_without_a_prerelease() {
+    let dir = two_package_workspace_dir();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.1-beta.4\"\n}\n",
+    )
+    .unwrap();
+    write_config(dir.path(), "{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    fs::write(dir.path().join(".changeset/pre.json"), EXITED_PRE_JSON).unwrap();
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stderr(&output),
+        "Bumped pkg-a 3.1.4 -> 3.1.5\nBumped pkg-b 2.0.1-beta.4 -> 2.0.1\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/CHANGELOG.md")).unwrap(),
+        "# pkg-a\n\n## 3.1.5\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/CHANGELOG.md")).unwrap(),
+        "# pkg-b\n\n## 2.0.1\n"
+    );
+    assert!(!dir.path().join(".changeset/pre.json").exists());
+}
+
+#[test]
+fn version_after_exit_rescues_the_fixed_group_of_a_skipped_prerelease() {
+    let dir = workspace_dir();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0-beta.1\",\n  \"private\": true\n}\n",
+    )
+    .unwrap();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    fs::write(dir.path().join(".changeset/pre.json"), EXITED_PRE_JSON).unwrap();
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "Bumped pkg-a 3.1.4 -> 3.1.5\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/CHANGELOG.md")).unwrap(),
+        "# pkg-a\n\n## 3.1.5\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0-beta.1\",\n  \"private\": true\n}\n"
+    );
+    assert!(!dir.path().join(".changeset/pre.json").exists());
+}
+
+#[test]
+fn version_fixed_in_pre_mode_counts_a_skipped_member_counter() {
+    let dir = workspace_dir();
+    fs::write(
+        dir.path().join("packages/a/package.json"),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"2.0.0-beta.2\"\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"1.0.1-beta.7\",\n  \"private\": true\n}\n",
+    )
+    .unwrap();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    fs::write(dir.path().join(".changeset/pre.json"), PRE_JSON).unwrap();
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let err = stderr(&output);
+    assert!(
+        err.contains("Bumped pkg-a 2.0.0-beta.2 -> 2.0.0-beta.8\n"),
+        "{err}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"1.0.1-beta.7\",\n  \"private\": true\n}\n"
+    );
+}
+
+#[test]
+fn version_linked_leaves_a_none_only_member_unchanged() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "none")], "Note only");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "Bumped pkg-a 3.1.4 -> 3.1.5\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\"\n}\n"
+    );
+    assert!(!dir.path().join("packages/b/CHANGELOG.md").exists());
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_fixed_upgrades_a_none_only_member() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "none")], "Note only");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stderr(&output),
+        "Bumped pkg-a 3.1.4 -> 3.2.0\nBumped pkg-b 3.1.4 -> 3.2.0\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/CHANGELOG.md")).unwrap(),
+        "# pkg-b\n\n## 3.2.0\n"
+    );
+    assert!(!dir.path().join(".changeset").join(ULID_A).exists());
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_fixed_is_not_triggered_by_a_none_only_member() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "none")], "Note only");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "No packages to bump.\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/a/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.1.4\"\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\"\n}\n"
+    );
+    assert!(!dir.path().join(".changeset").join(ULID_A).exists());
 }
 
 #[test]

@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "resolve_groups_err(\"{ \\\"fixed\\\": [[\\\"pkg-a\\\", \\\"pkg-b\\\"]], \\\"linked\\\": [[\\\"pkg-b\\\"]] }\\n\",\n&[\"pkg-a\", \"pkg-b\"],)"
+---
+package `pkg-b` is in both a "fixed" and a "linked" group; a package can be in only one of them

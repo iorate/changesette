@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"{ \\\"linked\\\": [[\\\"pkg-a\\\"], [\\\"pkg-[\\\"]] }\\n\")"
+---
+.changeset/config.json: invalid pattern "pkg-[" in "linked"[1]: failed to parse glob expression

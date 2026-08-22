@@ -15,6 +15,9 @@ pub(crate) fn run(
     snapshot: Option<&Snapshot>,
 ) -> Result<()> {
     let planned = plan::plan_version(ignore, snapshot)?;
+    for warning in &planned.warnings {
+        output::eprint_line(&format!("warning: {warning}"))?;
+    }
     let pre = planned.in_pre();
     if let Some(pre) = pre {
         output::eprint_line(&format!(
