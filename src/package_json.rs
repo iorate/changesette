@@ -17,7 +17,6 @@ pub(crate) struct PackageJson {
     path: PathBuf,
     root: CstRootNode,
     version_lit: Option<CstStringLit>,
-    version: Option<semver::Version>,
 }
 
 impl PackageJson {
@@ -48,28 +47,20 @@ impl PackageJson {
         ensure!(!name.is_empty(), "top-level \"name\" must not be empty");
 
         let version_lit = string_prop(&object, "version", "top-level \"version\"")?;
-        let version = match &version_lit {
-            Some(version_lit) => {
-                let raw_version = version_lit
-                    .decoded_value()
-                    .context("top-level \"version\" must be a valid string")?;
-                Some(raw_version.parse().with_context(|| {
-                    format!("top-level \"version\" ({raw_version:?}) is not a valid semver version")
-                })?)
-            }
-            None => None,
-        };
+        if let Some(version_lit) = &version_lit {
+            let raw_version = version_lit
+                .decoded_value()
+                .context("top-level \"version\" must be a valid string")?;
+            raw_version.parse::<semver::Version>().with_context(|| {
+                format!("top-level \"version\" ({raw_version:?}) is not a valid semver version")
+            })?;
+        }
 
         Ok(Self {
             path,
             root,
             version_lit,
-            version,
         })
-    }
-
-    pub(crate) fn version(&self) -> Option<&semver::Version> {
-        self.version.as_ref()
     }
 
     pub(crate) fn set_version(&mut self, version: &semver::Version) -> Result<()> {
@@ -77,7 +68,6 @@ impl PackageJson {
             bail!("{}: missing top-level \"version\"", self.path.display())
         };
         set_string_value(version_lit, &version.to_string());
-        self.version = Some(version.clone());
         Ok(())
     }
 
@@ -118,27 +108,6 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_version() {
-        let package_json = PackageJson::load(&fixture("two-space")).unwrap();
-        assert_eq!(
-            package_json.version(),
-            Some(&semver::Version::new(10, 0, 2))
-        );
-    }
-
-    #[test]
-    fn set_version_updates_the_read_value() {
-        let mut package_json = PackageJson::load(&fixture("two-space")).unwrap();
-        package_json
-            .set_version(&semver::Version::new(10, 1, 0))
-            .unwrap();
-        assert_eq!(
-            package_json.version(),
-            Some(&semver::Version::new(10, 1, 0))
-        );
-    }
-
-    #[test]
     fn rewrites_a_two_space_indented_file() {
         insta::assert_snapshot!(rewrite("two-space"));
     }
@@ -163,12 +132,6 @@ mod tests {
     #[test]
     fn rejects_a_missing_package_json() {
         insta::assert_snapshot!(load_err("no-package-json"));
-    }
-
-    #[test]
-    fn reads_a_missing_version_as_none() {
-        let package_json = PackageJson::load(&fixture("version-missing")).unwrap();
-        assert_eq!(package_json.version(), None);
     }
 
     #[test]

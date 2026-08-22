@@ -116,16 +116,7 @@ fn plan_releases(
     let mut releases = Vec::new();
     for (name, max_bump) in max_bumps {
         let member = workspace.member(name)?;
-        let package_json = PackageJson::load(member.dir())?;
-        let old_version = package_json
-            .version()
-            .with_context(|| {
-                format!(
-                    "{}: missing top-level \"version\"",
-                    package_json.path().display()
-                )
-            })?
-            .clone();
+        let old_version = member_version(member)?;
         let changeset_ids = changes
             .iter()
             .filter(|change| change.releases.iter().any(|(n, _)| n == name))
@@ -180,15 +171,26 @@ fn rescue_prereleases<'a>(
         {
             continue;
         }
-        let package_json = PackageJson::load(member.dir())?;
-        if package_json
-            .version()
-            .is_some_and(|version| !version.pre.is_empty())
-        {
+        if !member_version(member)?.pre.is_empty() {
             max_bumps.insert(member.name(), Some(Bump::Patch));
         }
     }
     Ok(())
+}
+
+/// Parses the semver version the member's manifest held at discovery; a
+/// missing or invalid version is an error.
+fn member_version(member: &Member) -> Result<Version> {
+    let path = member.dir().join("package.json");
+    let raw = member
+        .version()
+        .with_context(|| format!("{}: missing top-level \"version\"", path.display()))?;
+    raw.parse().with_context(|| {
+        format!(
+            "{}: top-level \"version\" ({raw:?}) is not a valid semver version",
+            path.display()
+        )
+    })
 }
 
 pub(crate) struct StagedWrite {
