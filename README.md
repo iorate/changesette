@@ -42,7 +42,7 @@ npm:
 npm install -g @iorate/changesette
 ```
 
-Cargo (requires Rust 1.85+):
+Cargo (requires Rust 1.88+):
 
 ```sh
 cargo install changesette

@@ -2,7 +2,7 @@
 name = "changesette"
 version = "4.0.1"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "A version and changelog manager using the changesets file format"
 homepage = "https://github.com/iorate/changesette"
 repository = "https://github.com/iorate/changesette"
@@ -24,7 +24,7 @@ semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 shell-words = "1.1.0"
-time = { version = "0.3.45", default-features = false }
+time = { version = "0.3.55", default-features = false }
 wax = "0.7.0"
 
 [dev-dependencies]

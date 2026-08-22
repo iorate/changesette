@@ -394,16 +394,16 @@ fn collect_members(
     // say (pnpm/pnpm#1986).
     if include_root && !dirs.contains(root) {
         let path = root.join("package.json");
-        if let Some(value) = read_json(&path)? {
-            if let Some(name_value) = value.get("name") {
-                let name = member_name(name_value, &path)?;
-                members.push(Member::from_manifest(
-                    name,
-                    root.to_path_buf(),
-                    ".".to_owned(),
-                    &value,
-                ));
-            }
+        if let Some(value) = read_json(&path)?
+            && let Some(name_value) = value.get("name")
+        {
+            let name = member_name(name_value, &path)?;
+            members.push(Member::from_manifest(
+                name,
+                root.to_path_buf(),
+                ".".to_owned(),
+                &value,
+            ));
         }
     }
 
