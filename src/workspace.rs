@@ -271,6 +271,11 @@ fn collect_members(root: &Path, manifest: &Path, patterns: &[String]) -> Result<
         if body.is_empty() {
             continue;
         }
+        // Upstream matches an absolute pattern against nothing: a positive
+        // finds no member and a negative excludes nothing.
+        if body.starts_with('/') {
+            continue;
+        }
         let mut normalized = body
             .split('/')
             .filter(|segment| !segment.is_empty() && *segment != ".")
@@ -1164,7 +1169,7 @@ mod tests {
     }
 
     #[test]
-    fn treats_an_absolute_negative_pattern_as_relative() {
+    fn an_absolute_negative_pattern_excludes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -1181,12 +1186,15 @@ mod tests {
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(
             names_and_dirs(&workspace),
-            [("pkg-b", dir.path().join("packages/b").as_path())]
+            [
+                ("pkg-a", dir.path().join("packages/a").as_path()),
+                ("pkg-b", dir.path().join("packages/b").as_path()),
+            ]
         );
     }
 
     #[test]
-    fn treats_an_absolute_positive_pattern_as_relative() {
+    fn an_absolute_positive_pattern_matches_nothing() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -1206,10 +1214,7 @@ mod tests {
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(
             names_and_dirs(&workspace),
-            [
-                ("app-b", dir.path().join("apps/b").as_path()),
-                ("pkg-a", dir.path().join("packages/a").as_path()),
-            ]
+            [("app-b", dir.path().join("apps/b").as_path())]
         );
     }
 
