@@ -5,14 +5,22 @@ use serde_json::Value;
 use wax::{Glob, Program};
 
 /// The effective settings from `.changeset/config.json`.
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct Config {
-    /// The raw patterns of the `ignore` setting; `resolve_ignore` expands
+    /// The parsed patterns of the `ignore` setting; `resolve_ignore` expands
     /// them into package names.
-    ignore: Vec<String>,
+    ignore: Vec<IgnorePattern>,
     /// Whether private packages are versioned, per the `privatePackages`
     /// setting.
     pub(crate) private_packages_version: bool,
+}
+
+/// One `ignore` entry, parsed by `parse_ignore_pattern`.
+#[derive(Debug)]
+struct IgnorePattern {
+    raw: String,
+    negated: bool,
+    glob: Glob<'static>,
 }
 
 impl Config {
@@ -30,19 +38,14 @@ impl Config {
         &self,
         names: impl IntoIterator<Item = &'a str>,
     ) -> Result<Vec<String>> {
-        let patterns = self
-            .ignore
-            .iter()
-            .map(|pattern| parse_ignore_pattern(pattern))
-            .collect::<Result<Vec<_>>>()?;
-        let mut matched = vec![false; patterns.len()];
+        let mut matched = vec![false; self.ignore.len()];
         let mut resolved = Vec::new();
         for name in names {
             let mut ignored = false;
-            for ((negated, glob), matched) in patterns.iter().zip(&mut matched) {
-                let is_match = glob.is_match(name);
+            for (pattern, matched) in self.ignore.iter().zip(&mut matched) {
+                let is_match = pattern.glob.is_match(name);
                 *matched = *matched || is_match;
-                if *negated {
+                if pattern.negated {
                     if ignored && is_match {
                         ignored = false;
                     }
@@ -57,12 +60,11 @@ impl Config {
         // Upstream changesets refuses any ignore entry matching no package;
         // only entries that name a single package are validated here, keeping
         // a glob reserved for future packages usable.
-        for (pattern, ((negated, glob), matched)) in
-            self.ignore.iter().zip(patterns.iter().zip(matched))
-        {
-            if !negated && !matched && glob.text().is_invariant() {
+        for (pattern, matched) in self.ignore.iter().zip(matched) {
+            if !pattern.negated && !matched && pattern.glob.text().is_invariant() {
                 bail!(
-                    "package `{pattern}` is specified in the \"ignore\" option in .changeset/config.json but is not a workspace member"
+                    "package `{}` is specified in the \"ignore\" option in .changeset/config.json but is not a workspace member",
+                    pattern.raw
                 );
             }
         }
@@ -70,15 +72,21 @@ impl Config {
     }
 }
 
-fn parse_ignore_pattern(pattern: &str) -> Result<(bool, Glob<'_>)> {
+fn parse_ignore_pattern(pattern: &str) -> Result<IgnorePattern> {
     // wax does not parse the leading `!`, so it is stripped here and the
     // negation applied by resolve_ignore.
     let (negated, body) = match pattern.strip_prefix('!') {
         Some(body) => (true, body),
         None => (false, pattern),
     };
-    let glob = Glob::new(body).with_context(|| format!("invalid ignore pattern {pattern:?}"))?;
-    Ok((negated, glob))
+    let glob = Glob::new(body)
+        .map(Glob::into_owned)
+        .with_context(|| format!("invalid ignore pattern {pattern:?}"))?;
+    Ok(IgnorePattern {
+        raw: pattern.to_owned(),
+        negated,
+        glob,
+    })
 }
 
 /// Loads the supported subset of `changeset_dir/config.json`, treating a
@@ -111,8 +119,7 @@ fn load_text(text: &str) -> Result<Config> {
             bail!("\"ignore\" must be an array of strings")
         };
         for pattern in patterns {
-            parse_ignore_pattern(pattern)?;
-            ignore.push(pattern.to_owned());
+            ignore.push(parse_ignore_pattern(pattern)?);
         }
     }
 
@@ -169,15 +176,20 @@ mod tests {
         )
     }
 
+    fn assert_default(config: &Config) {
+        assert!(!config.has_ignore());
+        assert!(!config.private_packages_version);
+    }
+
     #[test]
     fn a_missing_file_yields_the_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(load(dir.path()).unwrap(), Config::default());
+        assert_default(&load(dir.path()).unwrap());
     }
 
     #[test]
     fn accepts_an_empty_object() {
-        assert_eq!(load_ok("{}\n"), Config::default());
+        assert_default(&load_ok("{}\n"));
     }
 
     #[test]
