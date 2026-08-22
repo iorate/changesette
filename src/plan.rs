@@ -59,7 +59,7 @@ pub(crate) fn plan_version(cli_ignore: &[String]) -> Result<PlannedVersion> {
             "the --ignore option cannot be used while ignore is defined in .changeset/config.json; use only one of them"
         );
     };
-    let skip = SkipSet::build(&workspace, &config, &ignore)?;
+    let skip = SkipSet::build(&workspace, &config, &ignore);
 
     let pre = PreJson::load(&changeset_dir)?;
     if let Some(pre) = pre.as_ref().filter(|pre| pre.mode() == PreMode::Pre) {

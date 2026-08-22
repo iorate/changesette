@@ -2,9 +2,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::{
-    config, output,
-    package_json::PackageJson,
-    skip,
+    config, output, skip,
     workspace::{Member, Workspace},
 };
 
@@ -27,8 +25,7 @@ pub(crate) fn run(all: bool) -> Result<()> {
     let ignore = config.resolve_ignore(workspace.members().iter().map(Member::name))?;
     let mut packages = Vec::new();
     for member in workspace.members() {
-        let package_json = PackageJson::load(member.dir())?;
-        if !all && skip::should_skip(&package_json, &config, &ignore) {
+        if !all && skip::should_skip(member, &config, &ignore) {
             continue;
         }
         let rel = member
@@ -45,8 +42,8 @@ pub(crate) fn run(all: bool) -> Result<()> {
         };
         packages.push(Package {
             name: member.name(),
-            version: package_json.version().map(ToString::to_string),
-            private: package_json.private(),
+            version: member.version().map(str::to_owned),
+            private: member.private(),
             dir,
         });
     }

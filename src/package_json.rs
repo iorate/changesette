@@ -16,10 +16,8 @@ use crate::jsonc::{set_string_value, string_prop};
 pub(crate) struct PackageJson {
     path: PathBuf,
     root: CstRootNode,
-    name: String,
     version_lit: Option<CstStringLit>,
     version: Option<semver::Version>,
-    private: bool,
 }
 
 impl PackageJson {
@@ -62,35 +60,16 @@ impl PackageJson {
             None => None,
         };
 
-        let private = match object.get("private") {
-            Some(prop) => prop
-                .value()
-                .and_then(|value| value.as_boolean_lit())
-                .context("top-level \"private\" must be a boolean")?
-                .value(),
-            None => false,
-        };
-
         Ok(Self {
             path,
             root,
-            name,
             version_lit,
             version,
-            private,
         })
-    }
-
-    pub(crate) fn name(&self) -> &str {
-        &self.name
     }
 
     pub(crate) fn version(&self) -> Option<&semver::Version> {
         self.version.as_ref()
-    }
-
-    pub(crate) fn private(&self) -> bool {
-        self.private
     }
 
     pub(crate) fn set_version(&mut self, version: &semver::Version) -> Result<()> {
@@ -139,9 +118,8 @@ mod tests {
     }
 
     #[test]
-    fn reads_name_and_version() {
+    fn reads_the_version() {
         let package_json = PackageJson::load(&fixture("two-space")).unwrap();
-        assert_eq!(package_json.name(), "ublacklist");
         assert_eq!(
             package_json.version(),
             Some(&semver::Version::new(10, 0, 2))
@@ -200,29 +178,6 @@ mod tests {
             .set_version(&semver::Version::new(10, 1, 0))
             .unwrap_err();
         insta::assert_snapshot!(format!("{err:#}"));
-    }
-
-    #[test]
-    fn reads_private_true() {
-        let package_json = PackageJson::load(&fixture("private-true")).unwrap();
-        assert!(package_json.private());
-    }
-
-    #[test]
-    fn reads_private_false() {
-        let package_json = PackageJson::load(&fixture("private-false")).unwrap();
-        assert!(!package_json.private());
-    }
-
-    #[test]
-    fn reads_a_missing_private_as_false() {
-        let package_json = PackageJson::load(&fixture("scripts-version-key")).unwrap();
-        assert!(!package_json.private());
-    }
-
-    #[test]
-    fn rejects_a_non_boolean_private() {
-        insta::assert_snapshot!(load_err("private-not-boolean"));
     }
 
     #[test]

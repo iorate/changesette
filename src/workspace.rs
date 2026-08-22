@@ -24,6 +24,8 @@ pub(crate) struct Workspace {
 pub(crate) struct Member {
     name: String,
     dir: PathBuf,
+    version: Option<String>,
+    private: bool,
 }
 
 impl Workspace {
@@ -74,9 +76,10 @@ impl Workspace {
             bail!("{}: missing top-level \"name\"", path.display())
         };
         let name = member_name(name_value, &path)?;
+        let member = Member::from_manifest(name, dir.clone(), &value);
         Ok(Workspace {
-            root: dir.clone(),
-            members: vec![Member { name, dir }],
+            root: dir,
+            members: vec![member],
         })
     }
 
@@ -124,12 +127,38 @@ impl Workspace {
 }
 
 impl Member {
+    fn from_manifest(name: String, dir: PathBuf, value: &Value) -> Member {
+        Member {
+            name,
+            dir,
+            version: value
+                .get("version")
+                .and_then(Value::as_str)
+                .filter(|version| !version.is_empty())
+                .map(str::to_owned),
+            private: value
+                .get("private")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }
+    }
+
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
     pub(crate) fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// The manifest's top-level `version` when it is a nonempty string.
+    pub(crate) fn version(&self) -> Option<&str> {
+        self.version.as_deref()
+    }
+
+    /// Whether the manifest sets top-level `private` to boolean `true`.
+    pub(crate) fn private(&self) -> bool {
+        self.private
     }
 }
 
@@ -298,7 +327,7 @@ fn collect_members(
                 continue;
             };
             let name = member_name(name_value, &path)?;
-            members.push(Member { name, dir });
+            members.push(Member::from_manifest(name, dir, &value));
         }
     }
 
@@ -309,10 +338,7 @@ fn collect_members(
         if let Some(value) = read_json(&path)? {
             if let Some(name_value) = value.get("name") {
                 let name = member_name(name_value, &path)?;
-                members.push(Member {
-                    name,
-                    dir: root.to_path_buf(),
-                });
+                members.push(Member::from_manifest(name, root.to_path_buf(), &value));
             }
         }
     }
@@ -730,6 +756,39 @@ mod tests {
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("packages/a").as_path())]
         );
+    }
+
+    #[test]
+    fn reads_member_version_and_private_leniently() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"packages/*\"\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"private\": true }\n",
+        );
+        write(
+            dir.path(),
+            "packages/b/package.json",
+            "{ \"name\": \"pkg-b\", \"version\": 1, \"private\": \"true\" }\n",
+        );
+        write(
+            dir.path(),
+            "packages/c/package.json",
+            "{ \"name\": \"pkg-c\", \"version\": \"\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        let members = workspace.members();
+        assert_eq!(members[0].version(), Some("1.0.0"));
+        assert!(members[0].private());
+        assert_eq!(members[1].version(), None);
+        assert!(!members[1].private());
+        assert_eq!(members[2].version(), None);
+        assert!(!members[2].private());
     }
 
     #[test]

@@ -3,13 +3,15 @@ use std::{collections::BTreeSet, path::Path};
 use anyhow::{Context, Result, bail};
 
 use crate::{
-    changeset::LoadedChange, config::Config, package_json::PackageJson, workspace::Workspace,
+    changeset::LoadedChange,
+    config::Config,
+    workspace::{Member, Workspace},
 };
 
-pub(crate) fn should_skip(package_json: &PackageJson, config: &Config, ignore: &[String]) -> bool {
-    ignore.iter().any(|name| name == package_json.name())
-        || (package_json.private() && !config.private_packages_version)
-        || package_json.version().is_none()
+pub(crate) fn should_skip(member: &Member, config: &Config, ignore: &[String]) -> bool {
+    ignore.iter().any(|name| name == member.name())
+        || (member.private() && !config.private_packages_version)
+        || member.version().is_none()
 }
 
 /// The names of the workspace members `version` skips.
@@ -18,19 +20,14 @@ pub(crate) struct SkipSet {
 }
 
 impl SkipSet {
-    pub(crate) fn build(
-        workspace: &Workspace,
-        config: &Config,
-        ignore: &[String],
-    ) -> Result<SkipSet> {
-        let mut names = BTreeSet::new();
-        for member in workspace.members() {
-            let package_json = PackageJson::load(member.dir())?;
-            if should_skip(&package_json, config, ignore) {
-                names.insert(member.name().to_owned());
-            }
-        }
-        Ok(SkipSet { names })
+    pub(crate) fn build(workspace: &Workspace, config: &Config, ignore: &[String]) -> SkipSet {
+        let names = workspace
+            .members()
+            .iter()
+            .filter(|member| should_skip(member, config, ignore))
+            .map(|member| member.name().to_owned())
+            .collect();
+        SkipSet { names }
     }
 
     pub(crate) fn contains(&self, name: &str) -> bool {

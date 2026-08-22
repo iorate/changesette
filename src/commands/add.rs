@@ -9,9 +9,7 @@ use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
 
 use crate::{
     bump::Bump,
-    config, output,
-    package_json::PackageJson,
-    skip,
+    config, output, skip,
     workspace::{Member, Workspace},
 };
 
@@ -40,13 +38,11 @@ pub(crate) fn run(
         (Vec::new(), message.unwrap_or_default())
     } else {
         let ignore = config.resolve_ignore(workspace.members().iter().map(Member::name))?;
-        let mut packages = Vec::new();
-        for member in workspace.members() {
-            let package_json = PackageJson::load(member.dir())?;
-            if !skip::should_skip(&package_json, &config, &ignore) {
-                packages.push(package_json);
-            }
-        }
+        let packages: Vec<&Member> = workspace
+            .members()
+            .iter()
+            .filter(|member| !skip::should_skip(member, &config, &ignore))
+            .collect();
         ensure!(
             !packages.is_empty(),
             "no versionable packages found; ensure the packages are not private or ignored and have a version field in package.json"
@@ -121,7 +117,7 @@ pub(crate) fn run(
 
 fn releases_from_flags(
     workspace: &Workspace,
-    packages: &[PackageJson],
+    packages: &[&Member],
     major: &[String],
     minor: &[String],
     patch: &[String],
@@ -140,10 +136,7 @@ fn releases_from_flags(
                 errors.push(format!(
                     "the package `{name}` is passed to `{flag}` but is not a workspace member"
                 ));
-            } else if !packages
-                .iter()
-                .any(|package_json| package_json.name() == name)
-            {
+            } else if !packages.iter().any(|member| member.name() == name) {
                 errors.push(format!(
                     "the package `{name}` is passed to `{flag}` but is skipped (private, ignored, or without a version)"
                 ));
@@ -175,26 +168,26 @@ fn releases_from_flags(
     Ok(releases)
 }
 
-fn prompt_releases(packages: &[PackageJson]) -> Result<Vec<(String, Bump)>> {
-    if let [package_json] = packages {
+fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Bump)>> {
+    if let [member] = packages {
         const ITEMS: [Bump; 3] = [Bump::Patch, Bump::Minor, Bump::Major];
-        let prompt = match package_json.version() {
+        let prompt = match member.version() {
             Some(version) => format!(
                 "What kind of change is this for {}? (current version is {version})",
-                package_json.name()
+                member.name()
             ),
-            None => format!("What kind of change is this for {}?", package_json.name()),
+            None => format!("What kind of change is this for {}?", member.name()),
         };
         let index = dialoguer::Select::new()
             .with_prompt(prompt)
             .items(ITEMS.map(Bump::as_str))
             .default(0)
             .interact()?;
-        return Ok(vec![(package_json.name().to_owned(), ITEMS[index])]);
+        return Ok(vec![(member.name().to_owned(), ITEMS[index])]);
     }
 
-    let names: Vec<&str> = packages.iter().map(PackageJson::name).collect();
-    let affected: Vec<&PackageJson> = loop {
+    let names: Vec<&str> = packages.iter().map(|member| member.name()).collect();
+    let affected: Vec<&Member> = loop {
         let indexes = dialoguer::MultiSelect::new()
             .with_prompt("Which packages were affected by the changes you made?")
             .items(&names)
@@ -203,14 +196,14 @@ fn prompt_releases(packages: &[PackageJson]) -> Result<Vec<(String, Bump)>> {
             eprintln!("You must select at least one package");
             continue;
         }
-        break indexes.into_iter().map(|index| &packages[index]).collect();
+        break indexes.into_iter().map(|index| packages[index]).collect();
     };
 
     let labels: Vec<String> = affected
         .iter()
-        .map(|package_json| match package_json.version() {
-            Some(version) => format!("{}@{version}", package_json.name()),
-            None => package_json.name().to_owned(),
+        .map(|member| match member.version() {
+            Some(version) => format!("{}@{version}", member.name()),
+            None => member.name().to_owned(),
         })
         .collect();
 

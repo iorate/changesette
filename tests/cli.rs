@@ -1513,6 +1513,37 @@ fn version_output_includes_a_skipped_changeset_without_a_release() {
 }
 
 #[test]
+fn version_tolerates_a_broken_manifest_in_an_unreleased_member() {
+    let dir = workspace_dir();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"next\"\n}\n",
+    )
+    .unwrap();
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    let output = changesette(dir.path(), &["version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "Bumped pkg-a 3.1.4 -> 3.2.0\n");
+}
+
+#[test]
+fn get_packages_treats_a_non_boolean_private_as_not_private() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\",\n  \"private\": \"true\"\n}\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"ublacklist\",\"version\":\"1.2.3\",\"private\":false,\"dir\":\".\"}]\n"
+    );
+}
+
+#[test]
 fn version_in_pre_mode_leaves_a_skipped_changeset_in_place() {
     let dir = private_two_package_workspace_dir();
     write_pre_json(dir.path(), PRE_JSON);
