@@ -8,6 +8,7 @@ Workspace {
         Member {
             name: "alpha",
             dir: "tests/fixtures/workspace/npm/packages/two",
+            rel_dir: "packages/two",
             version: Some(
                 "2.0.0",
             ),
@@ -16,6 +17,7 @@ Workspace {
         Member {
             name: "zeta",
             dir: "tests/fixtures/workspace/npm/packages/one",
+            rel_dir: "packages/one",
             version: Some(
                 "1.0.0",
             ),

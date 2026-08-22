@@ -24,6 +24,7 @@ pub(crate) struct Workspace {
 pub(crate) struct Member {
     name: String,
     dir: PathBuf,
+    rel_dir: String,
     version: Option<String>,
     private: bool,
 }
@@ -76,7 +77,7 @@ impl Workspace {
             bail!("{}: missing top-level \"name\"", path.display())
         };
         let name = member_name(name_value, &path)?;
-        let member = Member::from_manifest(name, dir.clone(), &value);
+        let member = Member::from_manifest(name, dir.clone(), ".".to_owned(), &value);
         Ok(Workspace {
             root: dir,
             members: vec![member],
@@ -127,10 +128,11 @@ impl Workspace {
 }
 
 impl Member {
-    fn from_manifest(name: String, dir: PathBuf, value: &Value) -> Member {
+    fn from_manifest(name: String, dir: PathBuf, rel_dir: String, value: &Value) -> Member {
         Member {
             name,
             dir,
+            rel_dir,
             version: value
                 .get("version")
                 .and_then(Value::as_str)
@@ -149,6 +151,13 @@ impl Member {
 
     pub(crate) fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// The member directory relative to the workspace root, `/`-separated
+    /// with leading `..` segments for a directory outside the root; `.` for
+    /// the root itself.
+    pub(crate) fn rel_dir(&self) -> &str {
+        &self.rel_dir
     }
 
     /// The manifest's top-level `version` when it is a nonempty string.
@@ -368,7 +377,14 @@ fn collect_members(
                 continue;
             };
             let name = member_name(name_value, &path)?;
-            members.push(Member::from_manifest(name, dir, &value));
+            let mut rel_dir_parts = vec![".."; ups];
+            rel_dir_parts.extend(&rel_parts[..rel_parts.len() - 1]);
+            let rel_dir = if rel_dir_parts.is_empty() {
+                ".".to_owned()
+            } else {
+                rel_dir_parts.join("/")
+            };
+            members.push(Member::from_manifest(name, dir, rel_dir, &value));
         }
     }
 
@@ -379,7 +395,12 @@ fn collect_members(
         if let Some(value) = read_json(&path)? {
             if let Some(name_value) = value.get("name") {
                 let name = member_name(name_value, &path)?;
-                members.push(Member::from_manifest(name, root.to_path_buf(), &value));
+                members.push(Member::from_manifest(
+                    name,
+                    root.to_path_buf(),
+                    ".".to_owned(),
+                    &value,
+                ));
             }
         }
     }
