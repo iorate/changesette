@@ -545,6 +545,7 @@ fn add_fails_in_a_memberless_workspace() {
         "{\n  \"workspaces\": []\n}\n",
     )
     .unwrap();
+    fs::write(dir.path().join("package-lock.json"), "").unwrap();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(dir.path(), &["add", "--empty"]);
     assert!(!output.status.success());
@@ -562,6 +563,7 @@ fn workspace_dir() -> TempDir {
         "{\n  \"workspaces\": [\"packages/*\"]\n}\n",
     )
     .unwrap();
+    fs::write(dir.path().join("package-lock.json"), "").unwrap();
     fs::create_dir_all(dir.path().join("packages/a")).unwrap();
     fs::write(
         dir.path().join("packages/a/package.json"),
@@ -802,6 +804,7 @@ fn get_packages_prints_an_empty_array_for_a_memberless_workspace() {
         "{\n  \"workspaces\": []\n}\n",
     )
     .unwrap();
+    fs::write(dir.path().join("package-lock.json"), "").unwrap();
     let output = changesette(dir.path(), &["get-packages"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "[]\n");

@@ -53,7 +53,15 @@ impl Workspace {
             let Some(object) = value.as_object() else {
                 bail!("{}: the root value must be an object", path.display())
             };
-            if let Some(workspaces) = object.get("workspaces") {
+            // Upstream's npm / yarn / bun tools recognize `workspaces` as a
+            // workspace root only with the tool's lockfile next to it;
+            // without one the walk keeps climbing and the manifest can only
+            // become the single-package fallback.
+            if let Some(workspaces) = object.get("workspaces")
+                && ["package-lock.json", "yarn.lock", "bun.lockb", "bun.lock"]
+                    .iter()
+                    .any(|name| dir.join(name).exists())
+            {
                 let Some(patterns) = string_array(workspaces) else {
                     bail!(
                         "{}: \"workspaces\" must be an array of strings (the Yarn 1 object form is not supported)",
@@ -757,6 +765,7 @@ mod tests {
             "package.json",
             "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\".\"] }\n",
         );
+        write(dir.path(), "package-lock.json", "");
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
     }
@@ -815,6 +824,7 @@ mod tests {
             "package.json",
             "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
         );
+        write(dir.path(), "package-lock.json", "");
         write(
             dir.path(),
             "packages/a/package.json",
@@ -825,6 +835,81 @@ mod tests {
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("packages/a").as_path())]
         );
+    }
+
+    #[test]
+    fn workspaces_without_a_lockfile_is_a_single_package() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"app\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(names_and_dirs(&workspace), [("app", dir.path())]);
+    }
+
+    #[test]
+    fn any_supported_lockfile_makes_workspaces_a_root() {
+        for lockfile in ["package-lock.json", "yarn.lock", "bun.lockb", "bun.lock"] {
+            let dir = tempfile::tempdir().unwrap();
+            write(
+                dir.path(),
+                "package.json",
+                "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
+            );
+            write(dir.path(), lockfile, "");
+            write(
+                dir.path(),
+                "packages/a/package.json",
+                "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+            );
+            let workspace = Workspace::discover(dir.path()).unwrap();
+            assert_eq!(
+                names_and_dirs(&workspace),
+                [("pkg-a", dir.path().join("packages/a").as_path())],
+                "{lockfile}"
+            );
+        }
+    }
+
+    #[test]
+    fn workspaces_without_a_lockfile_yields_to_an_outer_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"packages/*\"\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": [\"nested/*\"] }\n",
+        );
+        let workspace = Workspace::discover(&dir.path().join("packages/a")).unwrap();
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn the_yarn_1_object_form_without_a_lockfile_is_a_single_package() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"app\", \"version\": \"1.0.0\", \"workspaces\": { \"packages\": [\"packages/*\"] } }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(names_and_dirs(&workspace), [("app", dir.path())]);
     }
 
     #[test]
@@ -1200,6 +1285,7 @@ mod tests {
             "package.json",
             "{ \"name\": \"root\", \"workspaces\": [\"packages/*\"] }\n",
         );
+        write(dir.path(), "package-lock.json", "");
         write(
             dir.path(),
             "packages/a/package.json",
