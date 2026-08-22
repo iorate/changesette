@@ -2,4 +2,4 @@
 changesette: major
 ---
 
-In pnpm workspaces, the workspace root package is now always a workspace member as in pnpm 12, whether or not a pattern in `pnpm-workspace.yaml` matches it.
+In pnpm workspaces, the workspace root package is now a workspace member even when no pattern in `pnpm-workspace.yaml` matches it, as pnpm does.
