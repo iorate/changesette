@@ -242,9 +242,9 @@ fn collect_members(
         if body.is_empty() {
             continue;
         }
-        // pnpm 12 treats a `!/...` negation as a no-op: relative workspace
-        // paths never match that absolute form.
-        if negative && body.starts_with('/') {
+        // pnpm 12 keeps the leading `/` of an absolute pattern, so relative
+        // workspace paths never match it, whether positive or negated.
+        if body.starts_with('/') {
             continue;
         }
         let mut normalized = body
@@ -1098,6 +1098,31 @@ mod tests {
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn ignores_an_absolute_positive_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"/packages/*\"\n  - \"apps/*\"\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "apps/b/package.json",
+            "{ \"name\": \"app-b\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("app-b", dir.path().join("apps/b").as_path())]
         );
     }
 
