@@ -94,9 +94,8 @@ pub(crate) fn build(
 }
 
 pub(crate) fn write_file(path: &Path, plan: &ReleasePlan) -> Result<()> {
-    let json = serde_json::to_string_pretty(plan)?;
     if path == Path::new("-") {
-        return output::print_line(&json);
+        return output::print_json(plan);
     }
-    fs::write(path, json).with_context(|| path.display().to_string())
+    fs::write(path, serde_json::to_string_pretty(plan)?).with_context(|| path.display().to_string())
 }

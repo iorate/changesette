@@ -1,6 +1,19 @@
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 
 use anyhow::Result;
+use serde::Serialize;
+
+/// Prints `value` as JSON and a newline to stdout — pretty-printed when
+/// stdout is a terminal, single-line otherwise; a broken pipe counts as
+/// success.
+pub(crate) fn print_json(value: &impl Serialize) -> Result<()> {
+    let json = if io::stdout().is_terminal() {
+        serde_json::to_string_pretty(value)?
+    } else {
+        serde_json::to_string(value)?
+    };
+    print_line(&json)
+}
 
 /// Prints `text` and a newline to stdout, flushing immediately; a broken
 /// pipe counts as success.
