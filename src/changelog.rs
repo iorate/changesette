@@ -63,6 +63,16 @@ pub(crate) fn upsert_section(
     version: &str,
     section: &str,
 ) -> String {
+    // pulldown-cmark does not skip a UTF-8 BOM, which would hide a leading
+    // `# <package_name>` title and prepend a second one; parse without the
+    // BOM and restore it afterwards to keep the copy verbatim.
+    if let Some(stripped) = text.strip_prefix('\u{feff}') {
+        return format!(
+            "\u{feff}{}",
+            upsert_section(stripped, package_name, version, section)
+        );
+    }
+
     // The collected byte ranges are invalidated whenever `text` changes, so
     // each mutation below re-parses; the happy path parses only once.
     let mut text = text.to_owned();
@@ -114,6 +124,9 @@ pub(crate) fn upsert_section(
 /// lines trimmed and no trailing newline, erroring when the section is not
 /// found.
 pub(crate) fn extract_section(text: &str, version: &str) -> Result<String> {
+    // A BOM only hides a `## <version>` heading on the very first line, but
+    // strip it as upsert_section does.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let headings = parse_headings(text);
     let index =
         find_h2(&headings, version).with_context(|| format!("version {version} not found"))?;
@@ -322,6 +335,17 @@ mod tests {
     }
 
     #[test]
+    fn sees_the_h1_behind_a_bom_and_keeps_the_bom() {
+        let result = upsert_section(
+            "\u{feff}# ublacklist\n\n## 1.0.0\n",
+            "ublacklist",
+            "1.1.0",
+            "## 1.1.0",
+        );
+        assert_eq!(result, "\u{feff}# ublacklist\n\n## 1.1.0\n\n## 1.0.0\n");
+    }
+
+    #[test]
     fn extends_the_real_ublacklist_changelog() {
         insta::assert_snapshot!(upsert("ublacklist-head", "10.1.0"));
     }
@@ -339,6 +363,12 @@ mod tests {
     #[test]
     fn keeps_a_code_block_inside_a_section() {
         insta::assert_snapshot!(extract("code-block", "2.0.0").unwrap());
+    }
+
+    #[test]
+    fn extracts_a_section_behind_a_bom() {
+        let section = extract_section("\u{feff}## 1.0.0\n\nbody\n", "1.0.0").unwrap();
+        assert_eq!(section, "body");
     }
 
     #[test]
