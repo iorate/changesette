@@ -62,7 +62,7 @@ enum Command {
         /// Succeed even when there are no unreleased changesets
         #[arg(short, long)]
         allow_no_changesets: bool,
-        /// Write the release plan to the file (or stdout with `-`) as pretty-printed JSON
+        /// Write the release plan to the file (or stdout with `-`) as JSON
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
         /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
@@ -92,7 +92,7 @@ enum Command {
         /// Show the new versions and the changeset files
         #[arg(short, long)]
         verbose: bool,
-        /// Write the release plan to the file (or stdout with `-`) as pretty-printed JSON instead
+        /// Write the release plan to the file (or stdout with `-`) as JSON instead
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
     },
