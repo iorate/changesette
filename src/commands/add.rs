@@ -2,9 +2,11 @@ use std::{
     collections::BTreeMap,
     env, fs,
     io::{self, IsTerminal, Write},
+    path::Path,
+    process,
 };
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
 
 use crate::{
@@ -23,7 +25,13 @@ pub(crate) fn run(
     patch: Vec<String>,
     message: Option<String>,
     empty: bool,
+    open: bool,
 ) -> Result<()> {
+    ensure!(
+        !open || (io::stdin().is_terminal() && io::stderr().is_terminal()),
+        "cannot use --open in non-interactive mode"
+    );
+
     let cwd = env::current_dir()?;
     let workspace = Workspace::discover(&cwd)?;
     ensure!(
@@ -111,6 +119,30 @@ pub(crate) fn run(
         "Added {}",
         workspace.display_path(&cwd, &path).display()
     ))?;
+
+    if open {
+        open_editor(&path)?;
+    }
+    Ok(())
+}
+
+fn open_editor(path: &Path) -> Result<()> {
+    let editor = env::var_os("VISUAL")
+        .or_else(|| env::var_os("EDITOR"))
+        .unwrap_or_else(|| if cfg!(windows) { "notepad.exe" } else { "vi" }.into());
+    let editor = editor
+        .into_string()
+        .map_err(|editor| anyhow!("the editor command is not valid UTF-8: {editor:?}"))?;
+    let (command, args) = match shell_words::split(&editor) {
+        Ok(mut parts) if !parts.is_empty() => (parts.remove(0), parts),
+        _ => (editor, Vec::new()),
+    };
+    process::Command::new(&command)
+        .args(args)
+        .arg(path)
+        .spawn()
+        .and_then(|mut child| child.wait())
+        .with_context(|| format!("failed to open the editor `{command}`"))?;
     Ok(())
 }
 
