@@ -207,7 +207,9 @@ fn read_pnpm_manifest(dir: &Path) -> Result<Option<Vec<String>>> {
     Ok(Some(patterns))
 }
 
-fn read_json(path: &Path) -> Result<Option<Value>> {
+/// Reads `path` as JSON, treating a missing file as `None` and attaching the
+/// path to any error.
+pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),

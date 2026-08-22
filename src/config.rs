@@ -1,8 +1,10 @@
-use std::{fs, io, path::Path};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use wax::{Glob, Program};
+
+use crate::workspace::read_json;
 
 /// The effective settings from `.changeset/config.json`.
 #[derive(Debug, Default)]
@@ -93,16 +95,13 @@ fn parse_ignore_pattern(pattern: &str) -> Result<IgnorePattern> {
 /// missing file as all defaults and ignoring unknown keys.
 pub(crate) fn load(changeset_dir: &Path) -> Result<Config> {
     let path = changeset_dir.join("config.json");
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Config::default()),
-        Err(err) => return Err(err).context(path.display().to_string()),
+    let Some(value) = read_json(&path)? else {
+        return Ok(Config::default());
     };
-    load_text(&text).with_context(|| path.display().to_string())
+    load_value(&value).with_context(|| path.display().to_string())
 }
 
-fn load_text(text: &str) -> Result<Config> {
-    let value: Value = serde_json::from_str(text)?;
+fn load_value(value: &Value) -> Result<Config> {
     let Some(object) = value.as_object() else {
         bail!("the root value must be an object")
     };
@@ -150,6 +149,8 @@ fn load_text(text: &str) -> Result<Config> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     fn load_ok(text: &str) -> Config {
