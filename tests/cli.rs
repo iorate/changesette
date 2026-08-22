@@ -922,7 +922,7 @@ fn version_allow_no_changesets_output_writes_an_empty_plan() {
     assert_eq!(stderr(&output), "");
     assert_eq!(
         fs::read_to_string(dir.path().join("plan.json")).unwrap(),
-        "{\n  \"changesets\": [],\n  \"releases\": []\n}"
+        "{\n  \"changesets\": [],\n  \"releases\": []\n}\n"
     );
 }
 
@@ -1162,7 +1162,7 @@ fn pretty_plan(id: &str) -> String {
             "      \"changelogEntry\": \"### Minor Changes\\n\\n- Add feature\"\n",
             "    }}\n",
             "  ]\n",
-            "}}"
+            "}}\n"
         ),
         id
     )
@@ -2155,7 +2155,7 @@ fn status_output_with_zero_changesets_writes_an_empty_plan() {
     assert_eq!(stdout(&output), "");
     assert_eq!(
         fs::read_to_string(dir.path().join("plan.json")).unwrap(),
-        "{\n  \"changesets\": [],\n  \"releases\": []\n}"
+        "{\n  \"changesets\": [],\n  \"releases\": []\n}\n"
     );
 }
 
