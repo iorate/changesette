@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"{ \\\"snapshot\\\": { \\\"prereleaseTemplate\\\": 1 } }\\n\")"
+---
+.changeset/config.json: "prereleaseTemplate" in "snapshot" must be a non-empty string

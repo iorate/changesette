@@ -1,15 +1,17 @@
 use std::{collections::BTreeMap, env, fs, io, path::PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use semver::Version;
 
 use crate::{
     bump::{self, Bump},
     changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
+    config,
     package_json::PackageJson,
     pre::{self, PreJson, PreMode},
     skip::SkipSet,
+    snapshot::{Snapshot, SnapshotVersions},
     workspace::{Member, Workspace},
 };
 
@@ -44,17 +46,30 @@ impl PlannedVersion {
 
 /// Discovers the workspace containing the current directory and plans the
 /// pending `version` run, resolving the ignore set from the config or
-/// `cli_ignore` (using both is an error), modifying nothing on disk.
-pub(crate) fn plan_version(cli_ignore: &[String]) -> Result<PlannedVersion> {
+/// `cli_ignore` (using both is an error), modifying nothing on disk;
+/// `snapshot` is an error in pre mode.
+pub(crate) fn plan_version(
+    cli_ignore: &[String],
+    snapshot: Option<&Snapshot>,
+) -> Result<PlannedVersion> {
     let workspace = Workspace::discover(&env::current_dir()?)?;
     let changeset_dir = workspace.root().join(".changeset");
-    let skip = SkipSet::load(&workspace, &changeset_dir, cli_ignore)?;
+    let config = config::load(&changeset_dir)?;
+    let skip = SkipSet::load(&workspace, &config, cli_ignore)?;
 
     let pre = PreJson::load(&changeset_dir)?;
     let in_pre = pre_state(pre.as_ref());
     if let Some(pre) = in_pre {
+        if snapshot.is_some() {
+            bail!(
+                "snapshot releases are not allowed in pre mode; run `changesette pre exit` first"
+            );
+        }
         pre::validate_tag(pre.tag())?;
     }
+    let snapshot_versions = snapshot
+        .map(|snapshot| SnapshotVersions::resolve(snapshot, &config))
+        .transpose()?;
 
     let mut changes = changeset::load(&changeset_dir)?;
     if in_pre.is_some() {
@@ -63,7 +78,13 @@ pub(crate) fn plan_version(cli_ignore: &[String]) -> Result<PlannedVersion> {
         changes.retain(|change| !change.in_pre);
     }
     let consumed_changes = skip.filter_changes(&workspace, &changeset_dir, &changes)?;
-    let releases = plan_releases(&workspace, &consumed_changes, pre.as_ref(), &skip)?;
+    let releases = plan_releases(
+        &workspace,
+        &consumed_changes,
+        pre.as_ref(),
+        &skip,
+        snapshot_versions.as_ref(),
+    )?;
 
     Ok(PlannedVersion {
         workspace,
@@ -97,6 +118,7 @@ fn plan_releases(
     changes: &[LoadedChange],
     pre: Option<&PreJson>,
     skip: &SkipSet,
+    snapshot: Option<&SnapshotVersions>,
 ) -> Result<Vec<PlannedRelease>> {
     let mut max_bumps = changeset::max_bumps(changes);
     if matches!(pre, Some(pre) if pre.mode() == PreMode::Exit) {
@@ -126,9 +148,12 @@ fn plan_releases(
                             .map(|bump| (bump, change.summary.as_str()))
                     })
                     .collect();
-                let new_version = match pre_state(pre) {
-                    Some(pre) => bump::next_pre_version(&old_version, max_bump, pre.tag()),
-                    None => bump::next_version(&old_version, max_bump),
+                let new_version = match snapshot {
+                    Some(snapshot) => snapshot.apply(&old_version, max_bump),
+                    None => match pre_state(pre) {
+                        Some(pre) => bump::next_pre_version(&old_version, max_bump, pre.tag()),
+                        None => bump::next_version(&old_version, max_bump),
+                    },
                 };
                 (new_version, Some(render_entry(&summaries)))
             }

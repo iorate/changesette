@@ -1,0 +1,5 @@
+---
+source: src/snapshot.rs
+expression: "render_err(None, Some(\"{tag}-{datetime}\"))"
+---
+the template contains "{tag}" but no snapshot tag is given

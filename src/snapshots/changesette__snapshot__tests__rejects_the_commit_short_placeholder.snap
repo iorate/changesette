@@ -1,0 +1,5 @@
+---
+source: src/snapshot.rs
+expression: "render_err(None, Some(\"{commit-short}-{datetime}\"))"
+---
+the template contains "{commit-short}", which changesette does not support: changesette performs no git operations

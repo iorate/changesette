@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result, bail};
 
-use crate::{output, plan, release_plan};
+use crate::{output, plan, release_plan, snapshot::Snapshot};
 
 /// Consumes every changeset: bumps each named package's package.json,
 /// upserts its CHANGELOG.md section, and deletes the consumed files — in pre
@@ -12,8 +12,9 @@ pub(crate) fn run(
     ignore: &[String],
     allow_no_changesets: bool,
     output_path: Option<&Path>,
+    snapshot: Option<&Snapshot>,
 ) -> Result<()> {
-    let planned = plan::plan_version(ignore)?;
+    let planned = plan::plan_version(ignore, snapshot)?;
     let pre = planned.in_pre();
     if let Some(pre) = pre {
         output::eprint_line(&format!(
@@ -63,9 +64,12 @@ pub(crate) fn run(
             fs::remove_file(&path).with_context(|| path.display().to_string())?;
         }
         // Deleted even with nothing to release, so that an exited pre mode
-        // always ends here.
+        // always ends here; a snapshot run keeps it, leaving the exit to the
+        // next regular `version` once the throwaway tree is discarded.
         if let Some(pre) = &planned.pre {
-            fs::remove_file(pre.path()).with_context(|| pre.path().display().to_string())?;
+            if snapshot.is_none() {
+                fs::remove_file(pre.path()).with_context(|| pre.path().display().to_string())?;
+            }
         }
     }
 

@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::{
     changeset::LoadedChange,
-    config::{self, Config},
+    config::Config,
     workspace::{Member, Workspace},
 };
 
@@ -20,15 +20,14 @@ pub(crate) struct SkipSet {
 }
 
 impl SkipSet {
-    /// Loads `changeset_dir/config.json` and collects the members skipped as
-    /// private, ignored, or versionless, resolving the ignore names from the
-    /// config or `cli_ignore` (using both is an error).
+    /// Collects the members skipped as private, ignored, or versionless,
+    /// resolving the ignore names from the config or `cli_ignore` (using
+    /// both is an error).
     pub(crate) fn load(
         workspace: &Workspace,
-        changeset_dir: &Path,
+        config: &Config,
         cli_ignore: &[String],
     ) -> Result<SkipSet> {
-        let config = config::load(changeset_dir)?;
         let ignore = if config.has_ignore() {
             if !cli_ignore.is_empty() {
                 bail!(
@@ -45,7 +44,7 @@ impl SkipSet {
         let names = workspace
             .members()
             .iter()
-            .filter(|member| should_skip(member, &config, &ignore))
+            .filter(|member| should_skip(member, config, &ignore))
             .map(|member| member.name().to_owned())
             .collect();
         Ok(SkipSet { names })

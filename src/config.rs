@@ -15,6 +15,12 @@ pub(crate) struct Config {
     /// Whether private packages are versioned, per the `privatePackages`
     /// setting.
     pub(crate) private_packages_version: bool,
+    /// Whether snapshot versions build on the normally calculated version
+    /// instead of `0.0.0`, per the `snapshot.useCalculatedVersion` setting.
+    pub(crate) snapshot_use_calculated_version: bool,
+    /// The suffix template from the `snapshot.prereleaseTemplate` setting;
+    /// never empty.
+    pub(crate) snapshot_prerelease_template: Option<String>,
 }
 
 impl Config {
@@ -114,9 +120,36 @@ fn load_value(value: &Value) -> Result<Config> {
         Some(_) => bail!("\"privatePackages\" must be a boolean or an object"),
     };
 
+    let mut snapshot_use_calculated_version = false;
+    let mut snapshot_prerelease_template = None;
+    match object.get("snapshot") {
+        None => {}
+        Some(Value::Object(snapshot)) => {
+            match snapshot.get("useCalculatedVersion") {
+                None => {}
+                Some(Value::Bool(use_calculated_version)) => {
+                    snapshot_use_calculated_version = *use_calculated_version;
+                }
+                Some(_) => bail!("\"useCalculatedVersion\" in \"snapshot\" must be a boolean"),
+            }
+            match snapshot.get("prereleaseTemplate") {
+                None => {}
+                Some(Value::String(template)) if !template.is_empty() => {
+                    snapshot_prerelease_template = Some(template.clone());
+                }
+                Some(_) => {
+                    bail!("\"prereleaseTemplate\" in \"snapshot\" must be a non-empty string")
+                }
+            }
+        }
+        Some(_) => bail!("\"snapshot\" must be an object"),
+    }
+
     Ok(Config {
         ignore,
         private_packages_version,
+        snapshot_use_calculated_version,
+        snapshot_prerelease_template,
     })
 }
 
@@ -153,6 +186,8 @@ mod tests {
     fn assert_default(config: &Config) {
         assert!(!config.has_ignore());
         assert!(!config.private_packages_version);
+        assert!(!config.snapshot_use_calculated_version);
+        assert!(config.snapshot_prerelease_template.is_none());
     }
 
     #[test]
@@ -249,6 +284,47 @@ mod tests {
     #[test]
     fn rejects_a_non_empty_linked() {
         insta::assert_snapshot!(validate_err("{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n"));
+    }
+
+    #[test]
+    fn resolves_snapshot_settings() {
+        let config = load_ok(
+            "{\n  \"snapshot\": {\n    \"useCalculatedVersion\": true,\n    \"prereleaseTemplate\": \"{tag}-{timestamp}\"\n  }\n}\n",
+        );
+        assert!(config.snapshot_use_calculated_version);
+        assert_eq!(
+            config.snapshot_prerelease_template.as_deref(),
+            Some("{tag}-{timestamp}")
+        );
+        let config = load_ok("{ \"snapshot\": {} }\n");
+        assert!(!config.snapshot_use_calculated_version);
+        assert!(config.snapshot_prerelease_template.is_none());
+    }
+
+    #[test]
+    fn rejects_a_non_object_snapshot() {
+        insta::assert_snapshot!(validate_err("{ \"snapshot\": true }\n"));
+    }
+
+    #[test]
+    fn rejects_a_non_boolean_snapshot_use_calculated_version() {
+        insta::assert_snapshot!(validate_err(
+            "{ \"snapshot\": { \"useCalculatedVersion\": \"yes\" } }\n"
+        ));
+    }
+
+    #[test]
+    fn rejects_a_non_string_snapshot_prerelease_template() {
+        insta::assert_snapshot!(validate_err(
+            "{ \"snapshot\": { \"prereleaseTemplate\": 1 } }\n"
+        ));
+    }
+
+    #[test]
+    fn rejects_an_empty_snapshot_prerelease_template() {
+        insta::assert_snapshot!(validate_err(
+            "{ \"snapshot\": { \"prereleaseTemplate\": \"\" } }\n"
+        ));
     }
 
     #[test]
