@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"{ \\\"linked\\\": [[\\\"pkg-a\\\", \\\"pkg-b\\\"]] }\\n\")"
+---
+.changeset/config.json: "linked" is not yet implemented

@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"{ \\\"fixed\\\": [[\\\"pkg-a\\\", \\\"pkg-b\\\"]] }\\n\")"
+---
+.changeset/config.json: "fixed" is not yet implemented

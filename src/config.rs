@@ -95,6 +95,14 @@ fn load_text(text: &str) -> Result<Config> {
         }
     }
 
+    for key in ["fixed", "linked"] {
+        if let Some(value) = object.get(key) {
+            if value.as_array().is_none_or(|groups| !groups.is_empty()) {
+                bail!("\"{key}\" is not yet implemented");
+            }
+        }
+    }
+
     let private_packages_version = match object.get("privatePackages") {
         None => false,
         Some(Value::Bool(version)) => *version,
@@ -223,6 +231,17 @@ mod tests {
             "{\n  \"ignore\": [\"pkg-a\", \"@scope/*\"],\n  \"privatePackages\": {\n    \"version\": true\n  }\n}\n",
         );
         load_ok("{ \"ignore\": [] }\n");
+        load_ok("{ \"fixed\": [], \"linked\": [] }\n");
+    }
+
+    #[test]
+    fn rejects_a_non_empty_fixed() {
+        insta::assert_snapshot!(validate_err("{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n"));
+    }
+
+    #[test]
+    fn rejects_a_non_empty_linked() {
+        insta::assert_snapshot!(validate_err("{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n"));
     }
 
     #[test]
