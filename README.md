@@ -210,7 +210,7 @@ Creates the `.changeset/` directory with a `README.md` and a `config.json` holdi
 
 Creates a changeset file in `.changeset/`. `--empty` creates a changeset that names no packages; `--open` opens the created changeset in your editor; `--message` (short form `-m`) sets the summary; `--major`, `--minor`, and `--patch` each take a comma-separated list of package names. When run in a terminal, missing inputs are prompted for interactively.
 
-### `changesette version [--ignore <pkgs>] [--allow-no-changesets] [--output <file>] [--snapshot [<tag>]] [--snapshot-prerelease-template <template>]`
+### `changesette version [--ignore <pkgs>] [--snapshot [<tag>]] [--snapshot-prerelease-template <template>] [--allow-no-changesets] [--output <file>]`
 
 Applies all pending changesets: bumps each released package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. With zero changesets, nothing changes and the command fails; `--allow-no-changesets` (short form `-a`) makes it succeed instead. In [pre-release mode](#pre-release-mode), `version` bumps to `-<tag>.<n>` prereleases.
 
