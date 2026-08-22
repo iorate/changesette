@@ -32,22 +32,21 @@ pub(crate) fn run(
 
     let changeset_dir = workspace.root().join(".changeset");
     let config = config::load(&changeset_dir)?;
+    let ignore = config.resolve_ignore(workspace.members().iter().map(Member::name))?;
+    let packages: Vec<&Member> = workspace
+        .members()
+        .iter()
+        .filter(|member| !skip::should_skip(member, &config, &ignore))
+        .collect();
+    ensure!(
+        !packages.is_empty(),
+        "no versionable packages found; ensure the packages are not private or ignored and have a version field in package.json"
+    );
     fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
 
     let (releases, summary) = if empty {
         (Vec::new(), message.unwrap_or_default())
     } else {
-        let ignore = config.resolve_ignore(workspace.members().iter().map(Member::name))?;
-        let packages: Vec<&Member> = workspace
-            .members()
-            .iter()
-            .filter(|member| !skip::should_skip(member, &config, &ignore))
-            .collect();
-        ensure!(
-            !packages.is_empty(),
-            "no versionable packages found; ensure the packages are not private or ignored and have a version field in package.json"
-        );
-
         let flags_given = !(major.is_empty() && minor.is_empty() && patch.is_empty());
         if !(io::stdin().is_terminal() && io::stderr().is_terminal()) {
             let mut missing = Vec::new();

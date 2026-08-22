@@ -350,6 +350,24 @@ fn add_fails_without_versionable_packages() {
 }
 
 #[test]
+fn add_empty_fails_without_versionable_packages() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\",\n  \"private\": true\n}\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["add", "--empty", "-m", "Note"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("no versionable packages found"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!dir.path().join(".changeset").exists());
+}
+
+#[test]
 fn add_rejects_a_package_passed_to_multiple_bump_flags() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
