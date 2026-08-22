@@ -2,4 +2,4 @@
 source: src/config.rs
 expression: "validate_err(\"{ \\\"linked\\\": [[\\\"pkg-a\\\"], [\\\"pkg-[\\\"]] }\\n\")"
 ---
-.changeset/config.json: invalid pattern "pkg-[" in "linked"[1]: failed to parse glob expression
+.changeset/config.json: invalid pattern "pkg-[" in "linked"[1]: unclosed character class at byte 4; missing ']' (to match a literal '[', escape it as '\[' or '[[]')

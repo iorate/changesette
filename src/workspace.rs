@@ -5,14 +5,17 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use glob::{MatchOptions, Pattern, glob_with};
 use saphyr::{LoadableYamlNode, Yaml};
 use serde_json::Value;
-use wax::{
-    Glob, Program,
-    walk::{Entry, FileIterator},
-};
 
-const IGNORE_PATTERNS: [&str; 2] = ["**/node_modules/**", "**/bower_components/**"];
+// Matching the upstream tinyglobby defaults: a wildcard never matches a
+// leading dot and never crosses a path separator.
+const MATCH_OPTIONS: MatchOptions = MatchOptions {
+    case_sensitive: true,
+    require_literal_separator: true,
+    require_literal_leading_dot: true,
+};
 
 #[derive(Debug)]
 pub(crate) struct Workspace {
@@ -40,7 +43,7 @@ impl Workspace {
                 let manifest = dir.join("pnpm-workspace.yaml");
                 return Ok(Workspace {
                     root: dir.to_path_buf(),
-                    members: collect_members(dir, &manifest, &patterns, true)?,
+                    members: collect_members(dir, &manifest, &patterns)?,
                 });
             }
             let path = dir.join("package.json");
@@ -50,7 +53,15 @@ impl Workspace {
             let Some(object) = value.as_object() else {
                 bail!("{}: the root value must be an object", path.display())
             };
-            if let Some(workspaces) = object.get("workspaces") {
+            // Upstream's npm / yarn / bun tools recognize `workspaces` as a
+            // workspace root only with the tool's lockfile next to it;
+            // without one the walk keeps climbing and the manifest can only
+            // become the single-package fallback.
+            if let Some(workspaces) = object.get("workspaces")
+                && ["package-lock.json", "yarn.lock", "bun.lockb", "bun.lock"]
+                    .iter()
+                    .any(|name| dir.join(name).exists())
+            {
                 let Some(patterns) = string_array(workspaces) else {
                     bail!(
                         "{}: \"workspaces\" must be an array of strings (the Yarn 1 object form is not supported)",
@@ -59,7 +70,7 @@ impl Workspace {
                 };
                 return Ok(Workspace {
                     root: dir.to_path_buf(),
-                    members: collect_members(dir, &path, &patterns, false)?,
+                    members: collect_members(dir, &path, &patterns)?,
                 });
             }
             if fallback.is_none() {
@@ -154,8 +165,8 @@ impl Member {
     }
 
     /// The member directory relative to the workspace root, `/`-separated
-    /// with leading `..` segments for a directory outside the root; `.` for
-    /// the root itself.
+    /// and spelled as the matching pattern does, `..` segments included; `.`
+    /// for the root itself.
     pub(crate) fn rel_dir(&self) -> &str {
         &self.rel_dir
     }
@@ -182,23 +193,21 @@ fn read_pnpm_manifest(dir: &Path) -> Result<Option<Vec<String>>> {
         Ok(docs) => docs,
         Err(err) => bail!("{}: invalid YAML: {err}", path.display()),
     };
-    // pnpm makes a directory a workspace root on the presence of
-    // pnpm-workspace.yaml alone and defaults `packages` to `["."]`, giving a
-    // workspace whose only member is the root. Since pnpm 10 the file doubles
-    // as a settings file (`onlyBuiltDependencies`, `catalog`, ...), so a
-    // single-package repository really does carry one with no `packages`.
-    let root_only = || Ok(Some(vec![".".to_owned()]));
+    // Upstream recognizes a pnpm workspace root only when the manifest has a
+    // `packages` key, so a settings-only pnpm-workspace.yaml (pnpm 10+ uses
+    // the file for `onlyBuiltDependencies`, `catalog`, ...) does not stop the
+    // walk here.
     let Some(Yaml::Mapping(mapping)) = docs.into_iter().next() else {
-        return root_only();
+        return Ok(None);
     };
     let packages = mapping
         .iter()
         .find_map(|(key, value)| (key.as_str() == Some("packages")).then_some(value));
     let Some(packages) = packages else {
-        return root_only();
+        return Ok(None);
     };
     if packages.is_null() {
-        return root_only();
+        return Ok(None);
     }
     let Yaml::Sequence(items) = packages else {
         bail!("{}: \"packages\" must be a list of strings", path.display())
@@ -243,12 +252,14 @@ fn member_name(value: &Value, path: &Path) -> Result<String> {
     Ok(name.to_owned())
 }
 
-fn collect_members(
-    root: &Path,
-    manifest: &Path,
-    patterns: &[String],
-    include_root: bool,
-) -> Result<Vec<Member>> {
+fn collect_members(root: &Path, manifest: &Path, patterns: &[String]) -> Result<Vec<Member>> {
+    let Some(root_str) = root.to_str() else {
+        bail!(
+            "the workspace root path {} is not valid UTF-8",
+            root.display()
+        )
+    };
+
     let mut positives = Vec::new();
     let mut negatives = Vec::new();
     for original in patterns {
@@ -259,8 +270,8 @@ fn collect_members(
         if body.is_empty() {
             continue;
         }
-        // pnpm 12 keeps the leading `/` of an absolute pattern, so relative
-        // workspace paths never match it, whether positive or negated.
+        // Upstream matches an absolute pattern against nothing: a positive
+        // finds no member and a negative excludes nothing.
         if body.starts_with('/') {
             continue;
         }
@@ -274,106 +285,69 @@ fn collect_members(
         } else {
             normalized.push_str("/package.json");
         }
-        if negative {
-            let compiled = Glob::new(&normalized)
-                .map(Glob::into_owned)
-                .with_context(|| {
-                    format!(
-                        "{}: invalid workspace pattern {original:?}",
-                        manifest.display()
-                    )
-                })?;
-            negatives.push(compiled);
-            continue;
-        }
-        // A leading `../` segment cannot be expressed in a wax glob, so it
-        // walks the ancestor directory it names instead, as pnpm 12 does; a
-        // traversal climbing past the filesystem root matches nothing.
-        // Negations are exempt: they match the path each entry has from the
-        // workspace root, which keeps its `../` segments.
-        let mut walk_root = root;
-        let mut rest = normalized.as_str();
-        let mut escaped = false;
-        while let Some(tail) = rest.strip_prefix("../") {
-            let Some(parent) = walk_root.parent() else {
-                escaped = true;
-                break;
-            };
-            walk_root = parent;
-            rest = tail;
-        }
-        if escaped {
-            continue;
-        }
-        let compiled = Glob::new(rest).map(Glob::into_owned).with_context(|| {
+        let compiled = Pattern::new(&normalized).with_context(|| {
             format!(
                 "{}: invalid workspace pattern {original:?}",
                 manifest.display()
             )
         })?;
-        positives.push((compiled, walk_root));
+        if negative {
+            negatives.push(compiled);
+        } else {
+            positives.push((original, normalized));
+        }
     }
 
-    let ignore = wax::any(IGNORE_PATTERNS)?;
+    let escaped_root = Pattern::escape(root_str);
     let mut dirs = BTreeSet::new();
     let mut members = Vec::new();
-    for (glob, walk_root) in &positives {
-        let walk = glob.walk(walk_root).not(ignore.clone())?;
-        'candidates: for entry in walk {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(err) => {
-                    // NotFound covers a pattern whose base directory does not
-                    // exist and entries deleted mid-walk, and NotADirectory a
-                    // pattern whose path prefix crosses a regular file; pnpm
-                    // 12 matches nothing in both cases. Anything else, such
-                    // as a permission error, is reported.
-                    let err = io::Error::from(err);
-                    if matches!(
-                        err.kind(),
-                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-                    ) {
-                        continue;
-                    }
-                    return Err(err.into());
-                }
+    for (original, normalized) in &positives {
+        // A `..` needs no special handling: it stays a literal component of
+        // the pattern and of every path the walk yields.
+        let full = format!("{escaped_root}/{normalized}");
+        let paths = glob_with(&full, MATCH_OPTIONS).with_context(|| {
+            format!(
+                "{}: invalid workspace pattern {original:?}",
+                manifest.display()
+            )
+        })?;
+        'candidates: for entry in paths {
+            // A missing base directory, a path prefix crossing a regular
+            // file, and an unreadable directory all arrive as an iteration
+            // error, and upstream tinyglobby ignores them alike.
+            let Ok(path) = entry else {
+                continue;
             };
-            let path = entry.into_path();
-            // The nearest ancestor of the root containing the entry; the
-            // walk root is one, so the loop always terminates.
-            let mut base = root;
-            let mut ups = 0;
-            let rel = loop {
-                if let Ok(rel) = path.strip_prefix(base) {
-                    break rel;
-                }
-                let Some(parent) = base.parent() else {
-                    continue 'candidates;
-                };
-                base = parent;
-                ups += 1;
+            let Ok(rel) = path.strip_prefix(root) else {
+                continue;
             };
             let mut rel_parts = Vec::new();
             for component in rel.components() {
                 match component {
                     Component::Normal(part) => match part.to_str() {
+                        Some("node_modules") | None => continue 'candidates,
                         Some(part) => rel_parts.push(part),
-                        None => continue 'candidates,
                     },
+                    Component::ParentDir => rel_parts.push(".."),
+                    Component::CurDir => {}
                     _ => continue 'candidates,
                 }
             }
-            let rel_str = "../".repeat(ups) + &rel_parts.join("/");
+            let rel_str = rel_parts.join("/");
             if negatives
                 .iter()
-                .any(|negative| negative.is_match(rel_str.as_str()))
+                .any(|negative| negative.matches_with(&rel_str, MATCH_OPTIONS))
             {
                 continue;
             }
-            let dir = if rel_parts.len() <= 1 {
-                base.to_path_buf()
+            let parts = &rel_parts[..rel_parts.len() - 1];
+            // Every `..` stays in the path so that the OS resolves it; a
+            // lexical fold would name the wrong directory for a `..` that
+            // follows a symlink.
+            let (dir, rel_dir) = if parts.is_empty() {
+                (root.to_path_buf(), ".".to_owned())
             } else {
-                base.join(rel_parts[..rel_parts.len() - 1].join("/"))
+                (root.join(parts.join("/")), parts.join("/"))
             };
             if !dirs.insert(dir.clone()) {
                 continue;
@@ -385,31 +359,7 @@ fn collect_members(
                 continue;
             };
             let name = member_name(name_value, &path)?;
-            let mut rel_dir_parts = vec![".."; ups];
-            rel_dir_parts.extend(&rel_parts[..rel_parts.len() - 1]);
-            let rel_dir = if rel_dir_parts.is_empty() {
-                ".".to_owned()
-            } else {
-                rel_dir_parts.join("/")
-            };
             members.push(Member::from_manifest(name, dir, rel_dir, &value));
-        }
-    }
-
-    // pnpm always makes the workspace root a project, whatever the patterns
-    // say (pnpm/pnpm#1986).
-    if include_root && !dirs.contains(root) {
-        let path = root.join("package.json");
-        if let Some(value) = read_json(&path)?
-            && let Some(name_value) = value.get("name")
-        {
-            let name = member_name(name_value, &path)?;
-            members.push(Member::from_manifest(
-                name,
-                root.to_path_buf(),
-                ".".to_owned(),
-                &value,
-            ));
         }
     }
 
@@ -468,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn walks_nested_directories_and_dot_directories_skipping_node_modules() {
+    fn walks_nested_directories_skipping_node_modules_and_dot_directories() {
         insta::assert_debug_snapshot!(discover_ok("deep"));
     }
 
@@ -508,11 +458,14 @@ mod tests {
     }
 
     #[test]
-    fn does_not_follow_a_symlinked_member_directory() {
+    fn follows_a_symlinked_member_directory() {
         let workspace = discover_ok("symlink");
         assert_eq!(
             names_and_dirs(&workspace),
-            [("pkg-a", fixture("symlink/packages/a").as_path())]
+            [
+                ("pkg-a", fixture("symlink/packages/a").as_path()),
+                ("pkg-b", fixture("symlink/packages/b").as_path()),
+            ]
         );
     }
 
@@ -558,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn pnpm_manifest_without_packages_wins_over_npm_workspaces() {
+    fn pnpm_manifest_without_packages_does_not_suppress_npm_workspaces() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -570,6 +523,7 @@ mod tests {
             "package.json",
             "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
         );
+        write(dir.path(), "package-lock.json", "");
         write(
             dir.path(),
             "packages/a/package.json",
@@ -577,11 +531,14 @@ mod tests {
         );
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(workspace.root(), dir.path());
-        assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
     }
 
     #[test]
-    fn pnpm_manifest_with_null_packages_is_a_root_only_workspace() {
+    fn pnpm_manifest_with_null_packages_is_not_a_workspace_root() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "pnpm-workspace.yaml", "packages:\n");
         write(
@@ -595,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_pnpm_manifest_is_a_root_only_workspace() {
+    fn an_empty_pnpm_manifest_is_not_a_workspace_root() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "pnpm-workspace.yaml", "");
         write(
@@ -609,13 +566,14 @@ mod tests {
     }
 
     #[test]
-    fn pnpm_manifest_without_packages_shadows_an_outer_workspace() {
+    fn pnpm_manifest_without_packages_does_not_shadow_an_outer_workspace() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             "package.json",
             "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
         );
+        write(dir.path(), "package-lock.json", "");
         write(
             dir.path(),
             "packages/a/package.json",
@@ -633,8 +591,14 @@ mod tests {
         );
         let inner = dir.path().join("packages/inner");
         let workspace = Workspace::discover(&inner).unwrap();
-        assert_eq!(workspace.root(), inner);
-        assert_eq!(names_and_dirs(&workspace), [("inner", inner.as_path())]);
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [
+                ("inner", inner.as_path()),
+                ("pkg-a", dir.path().join("packages/a").as_path()),
+            ]
+        );
     }
 
     #[test]
@@ -772,6 +736,10 @@ mod tests {
             [
                 ("deep", dir.path().join("packages/nested/deep").as_path()),
                 ("direct", dir.path().join("packages").as_path()),
+                (
+                    "old",
+                    dir.path().join("packages/bower_components/old").as_path()
+                ),
             ]
         );
     }
@@ -797,12 +765,13 @@ mod tests {
             "package.json",
             "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\".\"] }\n",
         );
+        write(dir.path(), "package-lock.json", "");
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
     }
 
     #[test]
-    fn always_includes_the_pnpm_root_package() {
+    fn does_not_include_the_pnpm_root_package_without_a_pattern() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -822,10 +791,7 @@ mod tests {
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(
             names_and_dirs(&workspace),
-            [
-                ("pkg-a", dir.path().join("packages/a").as_path()),
-                ("root", dir.path()),
-            ]
+            [("pkg-a", dir.path().join("packages/a").as_path())]
         );
     }
 
@@ -835,7 +801,7 @@ mod tests {
         write(
             dir.path(),
             "pnpm-workspace.yaml",
-            "packages:\n  - \"packages/*\"\n",
+            "packages:\n  - \".\"\n  - \"packages/*\"\n",
         );
         write(dir.path(), "package.json", "{ \"version\": \"1.0.0\" }\n");
         write(
@@ -858,6 +824,7 @@ mod tests {
             "package.json",
             "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
         );
+        write(dir.path(), "package-lock.json", "");
         write(
             dir.path(),
             "packages/a/package.json",
@@ -868,6 +835,81 @@ mod tests {
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("packages/a").as_path())]
         );
+    }
+
+    #[test]
+    fn workspaces_without_a_lockfile_is_a_single_package() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"app\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(names_and_dirs(&workspace), [("app", dir.path())]);
+    }
+
+    #[test]
+    fn any_supported_lockfile_makes_workspaces_a_root() {
+        for lockfile in ["package-lock.json", "yarn.lock", "bun.lockb", "bun.lock"] {
+            let dir = tempfile::tempdir().unwrap();
+            write(
+                dir.path(),
+                "package.json",
+                "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
+            );
+            write(dir.path(), lockfile, "");
+            write(
+                dir.path(),
+                "packages/a/package.json",
+                "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+            );
+            let workspace = Workspace::discover(dir.path()).unwrap();
+            assert_eq!(
+                names_and_dirs(&workspace),
+                [("pkg-a", dir.path().join("packages/a").as_path())],
+                "{lockfile}"
+            );
+        }
+    }
+
+    #[test]
+    fn workspaces_without_a_lockfile_yields_to_an_outer_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"packages/*\"\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": [\"nested/*\"] }\n",
+        );
+        let workspace = Workspace::discover(&dir.path().join("packages/a")).unwrap();
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn the_yarn_1_object_form_without_a_lockfile_is_a_single_package() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"app\", \"version\": \"1.0.0\", \"workspaces\": { \"packages\": [\"packages/*\"] } }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(names_and_dirs(&workspace), [("app", dir.path())]);
     }
 
     #[test]
@@ -924,7 +966,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_dot_directories_with_a_wildcard() {
+    fn does_not_match_dot_directories_with_a_wildcard() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "pnpm-workspace.yaml", "packages:\n  - \"*\"\n");
         write(
@@ -940,35 +982,32 @@ mod tests {
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(
             names_and_dirs(&workspace),
-            [
-                ("pkg-a", dir.path().join("a").as_path()),
-                ("tool", dir.path().join(".tools").as_path()),
-            ]
+            [("pkg-a", dir.path().join("a").as_path())]
         );
     }
 
     #[test]
-    fn matches_brace_alternatives() {
+    fn treats_brace_alternatives_as_a_literal_directory_name() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             "pnpm-workspace.yaml",
             "packages:\n  - \"packages/{a,b}\"\n",
         );
-        for name in ["a", "b", "c"] {
-            write(
-                dir.path(),
-                &format!("packages/{name}/package.json"),
-                &format!("{{ \"name\": \"pkg-{name}\", \"version\": \"1.0.0\" }}\n"),
-            );
-        }
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "packages/{a,b}/package.json",
+            "{ \"name\": \"pkg-braced\", \"version\": \"1.0.0\" }\n",
+        );
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(
             names_and_dirs(&workspace),
-            [
-                ("pkg-a", dir.path().join("packages/a").as_path()),
-                ("pkg-b", dir.path().join("packages/b").as_path()),
-            ]
+            [("pkg-braced", dir.path().join("packages/{a,b}").as_path())]
         );
     }
 
@@ -988,7 +1027,41 @@ mod tests {
         let workspace = Workspace::discover(&dir.path().join("ws")).unwrap();
         assert_eq!(
             names_and_dirs(&workspace),
-            [("pkg-a", dir.path().join("sibling/a").as_path())]
+            [("pkg-a", dir.path().join("ws/../sibling/a").as_path())]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keeps_a_parent_component_that_follows_a_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"packages/link/../other\"\n",
+        );
+        write(
+            dir.path(),
+            "vendor/other/package.json",
+            "{ \"name\": \"pkg-vendored\", \"version\": \"1.0.0\" }\n",
+        );
+        fs::create_dir_all(dir.path().join("vendor/thing")).unwrap();
+        fs::create_dir_all(dir.path().join("packages")).unwrap();
+        std::os::unix::fs::symlink("../vendor/thing", dir.path().join("packages/link")).unwrap();
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [(
+                "pkg-vendored",
+                dir.path().join("packages/link/../other").as_path()
+            )]
+        );
+        assert!(
+            workspace.members()[0]
+                .dir()
+                .join("package.json")
+                .try_exists()
+                .unwrap()
         );
     }
 
@@ -1010,7 +1083,7 @@ mod tests {
         let workspace = Workspace::discover(&dir.path().join("ws")).unwrap();
         assert_eq!(
             names_and_dirs(&workspace),
-            [("pkg-a", dir.path().join("sibling/a").as_path())]
+            [("pkg-a", dir.path().join("ws/../sibling/a").as_path())]
         );
     }
 
@@ -1057,7 +1130,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn reports_a_permission_error_inside_a_pattern() {
+    fn ignores_a_permission_error_inside_a_pattern() {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1083,8 +1156,10 @@ mod tests {
             fs::Permissions::from_mode(0o755),
         )
         .unwrap();
-        let err = format!("{:#}", result.unwrap_err());
-        assert!(err.contains("packages/denied"), "{err}");
+        assert_eq!(
+            names_and_dirs(&result.unwrap()),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
     }
 
     #[cfg(unix)]
@@ -1153,27 +1228,32 @@ mod tests {
     }
 
     #[test]
-    fn ignores_an_absolute_negative_pattern() {
+    fn an_absolute_negative_pattern_excludes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             "pnpm-workspace.yaml",
             "packages:\n  - \"packages/*\"\n  - \"!/packages/a\"\n",
         );
-        write(
-            dir.path(),
-            "packages/a/package.json",
-            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
-        );
+        for name in ["a", "b"] {
+            write(
+                dir.path(),
+                &format!("packages/{name}/package.json"),
+                &format!("{{ \"name\": \"pkg-{name}\", \"version\": \"1.0.0\" }}\n"),
+            );
+        }
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(
             names_and_dirs(&workspace),
-            [("pkg-a", dir.path().join("packages/a").as_path())]
+            [
+                ("pkg-a", dir.path().join("packages/a").as_path()),
+                ("pkg-b", dir.path().join("packages/b").as_path()),
+            ]
         );
     }
 
     #[test]
-    fn ignores_an_absolute_positive_pattern() {
+    fn an_absolute_positive_pattern_matches_nothing() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -1205,6 +1285,7 @@ mod tests {
             "package.json",
             "{ \"name\": \"root\", \"workspaces\": [\"packages/*\"] }\n",
         );
+        write(dir.path(), "package-lock.json", "");
         write(
             dir.path(),
             "packages/a/package.json",
