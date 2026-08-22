@@ -1,29 +1,21 @@
 use std::{collections::BTreeSet, path::Path};
 
 use anyhow::{Context, Result, bail};
+use fast_glob::{glob_match, validate};
 use serde_json::Value;
-use wax::{Glob, Program};
 
 use crate::workspace::read_json;
-
-#[derive(Debug)]
-struct Pattern {
-    negated: bool,
-    glob: Glob<'static>,
-    // The pattern as written in the config, the leading `!` included.
-    text: String,
-}
 
 /// The effective settings from `.changeset/config.json`.
 #[derive(Debug, Default)]
 pub(crate) struct Config {
-    // The parsed patterns of the `ignore` setting; `resolve_ignore` expands
-    // them into package names.
-    ignore: Vec<Pattern>,
-    // The parsed pattern groups of the `fixed` / `linked` settings;
+    // The patterns of the `ignore` setting as written; `resolve_ignore`
+    // expands them into package names.
+    ignore: Vec<String>,
+    // The pattern groups of the `fixed` / `linked` settings as written;
     // `resolve_groups` expands them into package-name groups.
-    fixed: Vec<Vec<Pattern>>,
-    linked: Vec<Vec<Pattern>>,
+    fixed: Vec<Vec<String>>,
+    linked: Vec<Vec<String>>,
     /// Whether private packages are versioned, per the `privatePackages`
     /// setting.
     pub(crate) private_packages_version: bool,
@@ -57,7 +49,7 @@ impl Config {
     /// in multiple same-kind groups or in both a `fixed` and a `linked`
     /// group, and warning on a pattern matching no package.
     pub(crate) fn resolve_groups(&self, names: &[&str]) -> Result<ResolvedGroups> {
-        let expand = |groups: &[Vec<Pattern>]| -> Vec<Vec<String>> {
+        let expand = |groups: &[Vec<String>]| -> Vec<Vec<String>> {
             groups
                 .iter()
                 .map(|patterns| expand_patterns(patterns, names.iter().copied()))
@@ -81,14 +73,12 @@ impl Config {
         for (key, groups) in [("fixed", &self.fixed), ("linked", &self.linked)] {
             for pattern in groups.iter().flatten() {
                 // Following the upstream getUnmatchedPatterns, each pattern
-                // is judged alone, so a `!`-prefixed pattern "matches" any
-                // name its body does not match — unlike the ordered
-                // expansion above.
-                let matches = |name: &&str| pattern.glob.is_match(*name) != pattern.negated;
-                if !names.iter().any(matches) {
+                // is judged alone, which is exactly what the leading `!` of
+                // fast-glob does, so the pattern is matched as written here —
+                // unlike the ordered expansion above.
+                if !names.iter().any(|name| glob_match(pattern, *name)) {
                     warnings.push(format!(
-                        "{key}: the package or glob {:?} does not match any package in the workspace",
-                        pattern.text
+                        "{key}: the package or glob {pattern:?} does not match any package in the workspace"
                     ));
                 }
             }
@@ -112,19 +102,19 @@ pub(crate) struct ResolvedGroups {
 }
 
 fn expand_patterns<'a>(
-    patterns: &[Pattern],
+    patterns: &[String],
     names: impl IntoIterator<Item = &'a str>,
 ) -> Vec<String> {
     let mut resolved = Vec::new();
     for name in names {
         let mut matched = false;
         for pattern in patterns {
-            if pattern.negated {
-                if matched && pattern.glob.is_match(name) {
-                    matched = false;
-                }
-            } else if !matched && pattern.glob.is_match(name) {
-                matched = true;
+            // A negated pattern un-matches what its body matches, which the
+            // negation of fast-glob cannot express, so the leading `!`s are
+            // split off instead of letting fast-glob apply them.
+            let (negated, body) = split_negation(pattern);
+            if glob_match(body, name) {
+                matched = !negated;
             }
         }
         if matched {
@@ -132,6 +122,13 @@ fn expand_patterns<'a>(
         }
     }
     resolved
+}
+
+// Repeated leading `!`s toggle the negation as in the upstream picomatch, so
+// `!!pkg-a` is the plain pattern `pkg-a` again.
+fn split_negation(pattern: &str) -> (bool, &str) {
+    let body = pattern.trim_start_matches('!');
+    ((pattern.len() - body.len()) % 2 == 1, body)
 }
 
 // Each name appears at most once per expanded group, so a duplicate can only
@@ -146,21 +143,6 @@ fn check_group_duplicates(key: &str, groups: &[Vec<String>]) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn parse_pattern(pattern: &str) -> Result<Pattern> {
-    // wax does not parse the leading `!`, so it is stripped here and the
-    // negation applied by expand_patterns.
-    let (negated, body) = match pattern.strip_prefix('!') {
-        Some(body) => (true, body),
-        None => (false, pattern),
-    };
-    let glob = Glob::new(body).map(Glob::into_owned)?;
-    Ok(Pattern {
-        negated,
-        glob,
-        text: pattern.to_owned(),
-    })
 }
 
 /// Loads the supported subset of `changeset_dir/config.json`, treating a
@@ -190,10 +172,8 @@ fn load_value(value: &Value) -> Result<Config> {
             bail!("\"ignore\" must be an array of strings")
         };
         for pattern in patterns {
-            ignore.push(
-                parse_pattern(pattern)
-                    .with_context(|| format!("invalid ignore pattern {pattern:?}"))?,
-            );
+            validate(pattern).with_context(|| format!("invalid ignore pattern {pattern:?}"))?;
+            ignore.push(pattern.to_owned());
         }
     }
 
@@ -221,9 +201,10 @@ fn load_value(value: &Value) -> Result<Config> {
         for (index, raw_group) in raw_groups.into_iter().enumerate() {
             let mut group = Vec::new();
             for pattern in raw_group {
-                group.push(parse_pattern(pattern).with_context(|| {
+                validate(pattern).with_context(|| {
                     format!("invalid pattern {pattern:?} in \"{key}\"[{index}]")
-                })?);
+                })?;
+                group.push(pattern.to_owned());
             }
             parsed.push(group);
         }
@@ -374,6 +355,17 @@ mod tests {
         assert_eq!(
             resolve(
                 "{ \"ignore\": [\"!pkg-b\", \"pkg-*\"] }\n",
+                &["pkg-a", "pkg-b"]
+            ),
+            ["pkg-a", "pkg-b"]
+        );
+    }
+
+    #[test]
+    fn treats_a_doubled_negation_as_a_plain_pattern() {
+        assert_eq!(
+            resolve(
+                "{ \"ignore\": [\"pkg-*\", \"!!pkg-a\"] }\n",
                 &["pkg-a", "pkg-b"]
             ),
             ["pkg-a", "pkg-b"]

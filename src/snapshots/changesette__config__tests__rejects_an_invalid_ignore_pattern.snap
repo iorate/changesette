@@ -2,4 +2,4 @@
 source: src/config.rs
 expression: "validate_err(\"{ \\\"ignore\\\": [\\\"pkg-[\\\"] }\\n\")"
 ---
-.changeset/config.json: invalid ignore pattern "pkg-[": failed to parse glob expression
+.changeset/config.json: invalid ignore pattern "pkg-[": unclosed character class at byte 4; missing ']' (to match a literal '[', escape it as '\[' or '[[]')
