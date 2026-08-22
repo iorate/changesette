@@ -73,7 +73,7 @@ fn init_creates_the_changeset_directory_with_a_readme_and_a_config() {
     let config = fs::read_to_string(dir.path().join(".changeset/config.json")).unwrap();
     assert_eq!(
         config,
-        "{\n  \"fixed\": [],\n  \"linked\": [],\n  \"privatePackages\": {\n    \"version\": false\n  },\n  \"ignore\": []\n}\n"
+        "{\n  \"fixed\": [],\n  \"linked\": [],\n  \"privatePackages\": {\n    \"version\": false\n  },\n  \"ignore\": [],\n  \"snapshot\": {\n    \"useCalculatedVersion\": false\n  }\n}\n"
     );
 }
 
