@@ -9,20 +9,12 @@ use crate::workspace::read_json;
 /// The effective settings from `.changeset/config.json`.
 #[derive(Debug, Default)]
 pub(crate) struct Config {
-    /// The parsed patterns of the `ignore` setting; `resolve_ignore` expands
-    /// them into package names.
-    ignore: Vec<IgnorePattern>,
+    /// The parsed patterns of the `ignore` setting as (negated, glob) pairs;
+    /// `resolve_ignore` expands them into package names.
+    ignore: Vec<(bool, Glob<'static>)>,
     /// Whether private packages are versioned, per the `privatePackages`
     /// setting.
     pub(crate) private_packages_version: bool,
-}
-
-/// One `ignore` entry, parsed by `parse_ignore_pattern`.
-#[derive(Debug)]
-struct IgnorePattern {
-    raw: String,
-    negated: bool,
-    glob: Glob<'static>,
 }
 
 impl Config {
@@ -33,25 +25,21 @@ impl Config {
 
     /// Expands the `ignore` patterns against `names` and returns the matching
     /// names in input order, with a `!`-prefixed pattern un-ignoring the
-    /// names it matches, in order; a non-negated literal entry matching no
-    /// name is an error as in upstream changesets, while a glob matching
-    /// nothing is not.
+    /// names it matches, in order; a pattern matching no name matches
+    /// nothing.
     pub(crate) fn resolve_ignore<'a>(
         &self,
         names: impl IntoIterator<Item = &'a str>,
-    ) -> Result<Vec<String>> {
-        let mut matched = vec![false; self.ignore.len()];
+    ) -> Vec<String> {
         let mut resolved = Vec::new();
         for name in names {
             let mut ignored = false;
-            for (pattern, matched) in self.ignore.iter().zip(&mut matched) {
-                let is_match = pattern.glob.is_match(name);
-                *matched = *matched || is_match;
-                if pattern.negated {
-                    if ignored && is_match {
+            for (negated, glob) in &self.ignore {
+                if *negated {
+                    if ignored && glob.is_match(name) {
                         ignored = false;
                     }
-                } else if !ignored && is_match {
+                } else if !ignored && glob.is_match(name) {
                     ignored = true;
                 }
             }
@@ -59,22 +47,11 @@ impl Config {
                 resolved.push(name.to_owned());
             }
         }
-        // Upstream changesets refuses any ignore entry matching no package;
-        // only entries that name a single package are validated here, keeping
-        // a glob reserved for future packages usable.
-        for (pattern, matched) in self.ignore.iter().zip(matched) {
-            if !pattern.negated && !matched && pattern.glob.text().is_invariant() {
-                bail!(
-                    "package `{}` is specified in the \"ignore\" option in .changeset/config.json but is not a workspace member",
-                    pattern.raw
-                );
-            }
-        }
-        Ok(resolved)
+        resolved
     }
 }
 
-fn parse_ignore_pattern(pattern: &str) -> Result<IgnorePattern> {
+fn parse_ignore_pattern(pattern: &str) -> Result<(bool, Glob<'static>)> {
     // wax does not parse the leading `!`, so it is stripped here and the
     // negation applied by resolve_ignore.
     let (negated, body) = match pattern.strip_prefix('!') {
@@ -84,11 +61,7 @@ fn parse_ignore_pattern(pattern: &str) -> Result<IgnorePattern> {
     let glob = Glob::new(body)
         .map(Glob::into_owned)
         .with_context(|| format!("invalid ignore pattern {pattern:?}"))?;
-    Ok(IgnorePattern {
-        raw: pattern.to_owned(),
-        negated,
-        glob,
-    })
+    Ok((negated, glob))
 }
 
 /// Loads the supported subset of `changeset_dir/config.json`, treating a
@@ -164,7 +137,7 @@ mod tests {
     }
 
     fn resolve(text: &str, names: &[&str]) -> Vec<String> {
-        load_ok(text).resolve_ignore(names.iter().copied()).unwrap()
+        load_ok(text).resolve_ignore(names.iter().copied())
     }
 
     fn validate_err(text: &str) -> String {
@@ -250,28 +223,8 @@ mod tests {
     }
 
     #[test]
-    fn tolerates_an_ignore_glob_matching_nothing() {
+    fn tolerates_an_ignore_pattern_matching_nothing() {
         assert!(resolve("{ \"ignore\": [\"missing-*\"] }\n", &["pkg-a"]).is_empty());
-    }
-
-    #[test]
-    fn tolerates_a_negated_ignore_literal_matching_nothing() {
-        assert_eq!(
-            resolve(
-                "{ \"ignore\": [\"pkg-*\", \"!missing\"] }\n",
-                &["pkg-a", "pkg-b"]
-            ),
-            ["pkg-a", "pkg-b"]
-        );
-    }
-
-    #[test]
-    fn rejects_an_ignore_literal_matching_nothing() {
-        let config = load_ok("{ \"ignore\": [\"pkg-serverr\"] }\n");
-        let err = config
-            .resolve_ignore(["pkg-server", "pkg-client"])
-            .unwrap_err();
-        insta::assert_snapshot!(format!("{err:#}"));
     }
 
     #[test]

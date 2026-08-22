@@ -35,7 +35,7 @@ impl SkipSet {
                     "the --ignore option cannot be used while ignore is defined in .changeset/config.json; use only one of them"
                 );
             }
-            config.resolve_ignore(workspace.members().iter().map(Member::name))?
+            config.resolve_ignore(workspace.members().iter().map(Member::name))
         } else {
             for name in cli_ignore {
                 workspace.member(name).context("invalid `--ignore` value")?;
