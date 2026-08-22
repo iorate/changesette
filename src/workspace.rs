@@ -208,6 +208,11 @@ fn collect_members(root: &Path, manifest: &Path, patterns: &[String]) -> Result<
         if body.is_empty() {
             continue;
         }
+        // pnpm 12 treats a `!/...` negation as a no-op: relative workspace
+        // paths never match that absolute form.
+        if negative && body.starts_with('/') {
+            continue;
+        }
         let mut normalized = body
             .split('/')
             .filter(|segment| !segment.is_empty() && *segment != ".")
@@ -833,6 +838,26 @@ mod tests {
             dir.path(),
             "packages/fixtures/y/package.json",
             "{ \"name\": \"fx-y\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn ignores_an_absolute_negative_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"packages/*\"\n  - \"!/packages/a\"\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(
