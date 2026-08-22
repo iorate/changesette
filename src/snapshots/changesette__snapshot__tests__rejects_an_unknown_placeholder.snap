@@ -1,0 +1,5 @@
+---
+source: src/snapshot.rs
+expression: "render_err(None, Some(\"{datetime}-{branch}\"))"
+---
+invalid snapshot suffix "20250822000000-{branch}": unexpected character in pre-release identifier

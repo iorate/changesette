@@ -14,6 +14,7 @@ mod plan;
 mod pre;
 mod release_plan;
 mod skip;
+mod snapshot;
 mod workspace;
 
 #[derive(Parser)]
@@ -64,6 +65,22 @@ enum Command {
         /// Write the release plan to the file (or stdout with `-`) as pretty-printed JSON
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
+        /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
+        #[arg(
+            long,
+            value_name = "TAG",
+            num_args = 0..=1,
+            value_parser = clap::builder::NonEmptyStringValueParser::new()
+        )]
+        snapshot: Option<Option<String>>,
+        /// The snapshot suffix template; the placeholders are {tag}, {timestamp}, and {datetime}
+        #[arg(
+            long,
+            value_name = "TEMPLATE",
+            requires = "snapshot",
+            value_parser = clap::builder::NonEmptyStringValueParser::new()
+        )]
+        snapshot_prerelease_template: Option<String>,
     },
     /// Enter or exit pre-release mode
     Pre {
@@ -131,7 +148,20 @@ fn run() -> anyhow::Result<()> {
             ignore,
             allow_no_changesets,
             output,
-        } => commands::version::run(&ignore, allow_no_changesets, output.as_deref()),
+            snapshot,
+            snapshot_prerelease_template,
+        } => {
+            let snapshot = snapshot.map(|tag| snapshot::Snapshot {
+                tag,
+                template: snapshot_prerelease_template,
+            });
+            commands::version::run(
+                &ignore,
+                allow_no_changesets,
+                output.as_deref(),
+                snapshot.as_ref(),
+            )
+        }
         Command::Pre { command } => match command {
             PreCommand::Enter { tag } => commands::pre::enter(&tag),
             PreCommand::Exit => commands::pre::exit(),

@@ -2390,6 +2390,387 @@ fn status_output_includes_pre_state_and_prefixed_ids() {
     assert!(plan.contains("\"newVersion\": \"1.3.0\""), "{plan}");
 }
 
+fn manifest_version(dir: &Path, rel: &str) -> String {
+    let text = fs::read_to_string(dir.join(rel)).unwrap();
+    let start = text.find("\"version\": \"").unwrap() + "\"version\": \"".len();
+    let len = text[start..].find('"').unwrap();
+    text[start..start + len].to_owned()
+}
+
+fn assert_datetime(text: &str) {
+    assert_eq!(text.len(), 14, "unexpected datetime: {text}");
+    assert!(
+        text.chars().all(|c| c.is_ascii_digit()),
+        "unexpected datetime: {text}"
+    );
+}
+
+#[test]
+fn version_snapshot_bumps_to_a_zero_based_version() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["version", "--snapshot"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let version = manifest_version(dir.path(), "package.json");
+    let suffix = version.strip_prefix("0.0.0-").unwrap_or_else(|| {
+        panic!("unexpected version: {version}");
+    });
+    assert_datetime(suffix);
+    assert!(
+        stderr(&output).contains(&format!("Bumped ublacklist 1.2.3 -> {version}\n")),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
+        format!("# ublacklist\n\n## {version}\n\n### Minor Changes\n\n- Add feature\n")
+    );
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_snapshot_with_a_tag_prefixes_the_suffix() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["version", "--snapshot", "canary"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let version = manifest_version(dir.path(), "package.json");
+    let suffix = version.strip_prefix("0.0.0-canary-").unwrap_or_else(|| {
+        panic!("unexpected version: {version}");
+    });
+    assert_datetime(suffix);
+}
+
+#[test]
+fn version_snapshot_shares_one_suffix_across_packages() {
+    let dir = two_package_workspace_dir();
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version", "--snapshot", "canary"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let version_a = manifest_version(dir.path(), "packages/a/package.json");
+    let version_b = manifest_version(dir.path(), "packages/b/package.json");
+    assert_eq!(version_a, version_b);
+    assert!(
+        version_a.starts_with("0.0.0-canary-"),
+        "unexpected version: {version_a}"
+    );
+}
+
+#[test]
+fn version_snapshot_uses_the_config_template() {
+    let dir = package_dir();
+    write_config(
+        dir.path(),
+        "{ \"snapshot\": { \"prereleaseTemplate\": \"{tag}.{timestamp}\" } }\n",
+    );
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["version", "--snapshot", "canary"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let version = manifest_version(dir.path(), "package.json");
+    let timestamp = version.strip_prefix("0.0.0-canary.").unwrap_or_else(|| {
+        panic!("unexpected version: {version}");
+    });
+    assert_eq!(timestamp.len(), 13, "unexpected timestamp: {timestamp}");
+    assert!(
+        timestamp.chars().all(|c| c.is_ascii_digit()),
+        "unexpected timestamp: {timestamp}"
+    );
+}
+
+#[test]
+fn version_snapshot_cli_template_overrides_the_config() {
+    let dir = package_dir();
+    write_config(
+        dir.path(),
+        "{ \"snapshot\": { \"prereleaseTemplate\": \"{tag}-config-{datetime}\" } }\n",
+    );
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(
+        dir.path(),
+        &[
+            "version",
+            "--snapshot",
+            "canary",
+            "--snapshot-prerelease-template",
+            "{tag}-cli-{datetime}",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let version = manifest_version(dir.path(), "package.json");
+    assert!(
+        version.starts_with("0.0.0-canary-cli-"),
+        "unexpected version: {version}"
+    );
+}
+
+#[test]
+fn version_snapshot_uses_the_calculated_version() {
+    let dir = package_dir();
+    write_config(
+        dir.path(),
+        "{ \"snapshot\": { \"useCalculatedVersion\": true } }\n",
+    );
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["version", "--snapshot"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let version = manifest_version(dir.path(), "package.json");
+    let suffix = version.strip_prefix("1.3.0-").unwrap_or_else(|| {
+        panic!("unexpected version: {version}");
+    });
+    assert_datetime(suffix);
+}
+
+#[test]
+fn version_snapshot_keeps_a_none_only_package_unchanged() {
+    let dir = package_dir();
+    write_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
+    let output = changesette(dir.path(), &["version", "--snapshot"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "No packages to bump.\n");
+    assert_eq!(manifest_version(dir.path(), "package.json"), "1.2.3");
+    assert!(!dir.path().join("CHANGELOG.md").exists());
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_snapshot_rejects_the_commit_placeholders() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    for template in ["sha-{commit}", "sha-{commit-short}"] {
+        let output = changesette(
+            dir.path(),
+            &[
+                "version",
+                "--snapshot",
+                "--snapshot-prerelease-template",
+                template,
+            ],
+        );
+        assert!(!output.status.success(), "{template} should be rejected");
+        assert!(
+            stderr(&output).contains("no git operations"),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(dir_snapshot(dir.path()), before);
+    }
+}
+
+#[test]
+fn version_snapshot_fails_in_pre_mode() {
+    let dir = package_dir();
+    write_pre_json(dir.path(), PRE_JSON);
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "--snapshot"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("not allowed in pre mode"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_snapshot_after_exit_keeps_pre_json() {
+    let dir = prerelease_package_dir("1.3.0-beta.1");
+    write_pre_json(dir.path(), EXITED_PRE_JSON);
+    write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    let output = changesette(dir.path(), &["version", "--snapshot"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let version = manifest_version(dir.path(), "package.json");
+    assert!(
+        version.starts_with("0.0.0-"),
+        "unexpected version: {version}"
+    );
+    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert_eq!(read_pre_json(dir.path()), EXITED_PRE_JSON);
+}
+
+#[test]
+fn version_snapshot_after_exit_rescues_to_a_snapshot_version() {
+    let dir = prerelease_package_dir("1.3.0-beta.1");
+    write_pre_json(dir.path(), EXITED_PRE_JSON);
+    let output = changesette(dir.path(), &["version", "--snapshot"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let version = manifest_version(dir.path(), "package.json");
+    let suffix = version.strip_prefix("0.0.0-").unwrap_or_else(|| {
+        panic!("unexpected version: {version}");
+    });
+    assert_datetime(suffix);
+    assert_eq!(read_pre_json(dir.path()), EXITED_PRE_JSON);
+}
+
+#[test]
+fn version_snapshot_rejects_a_tag_without_the_tag_placeholder() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(
+        dir.path(),
+        &[
+            "version",
+            "--snapshot",
+            "canary",
+            "--snapshot-prerelease-template",
+            "{datetime}",
+        ],
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("does not contain \"{tag}\""),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_snapshot_rejects_the_tag_placeholder_without_a_tag() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(
+        dir.path(),
+        &[
+            "version",
+            "--snapshot",
+            "--snapshot-prerelease-template",
+            "{tag}-{datetime}",
+        ],
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("no snapshot tag is given"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_snapshot_rejects_an_invalid_tag() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version", "--snapshot", "pr#123"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("invalid snapshot suffix"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_snapshot_rejects_an_empty_tag() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(dir.path(), &["version", "--snapshot", ""]);
+    assert!(!output.status.success());
+    assert!(dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_snapshot_template_requires_the_snapshot_flag() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(
+        dir.path(),
+        &["version", "--snapshot-prerelease-template", "{datetime}"],
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("--snapshot"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(dir.path().join(".changeset").join(ULID_B).exists());
+}
+
+#[test]
+fn version_snapshot_output_writes_snapshot_versions() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let output = changesette(
+        dir.path(),
+        &["version", "--snapshot", "canary", "-o", "plan.json"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let plan = fs::read_to_string(dir.path().join("plan.json")).unwrap();
+    assert!(plan.contains("\"oldVersion\": \"1.2.3\""), "{plan}");
+    assert!(plan.contains("\"newVersion\": \"0.0.0-canary-"), "{plan}");
+}
+
 #[test]
 fn get_changelog_entry_reads_a_prerelease_section() {
     let dir = package_dir();

@@ -210,11 +210,13 @@ Creates the `.changeset/` directory with a README.md and a config.json holding t
 
 Creates a changeset file in `.changeset/`. `--empty` creates a changeset that names no packages; `--open` opens the created changeset in your editor; `--message` (short form `-m`) sets the summary; `--major`, `--minor`, and `--patch` each take a comma-separated list of package names. When run in a terminal, missing inputs are prompted for interactively.
 
-### `changesette version [--ignore <pkgs>] [--allow-no-changesets] [--output <file>]`
+### `changesette version [--ignore <pkgs>] [--allow-no-changesets] [--output <file>] [--snapshot [<tag>]] [--snapshot-prerelease-template <template>]`
 
 Applies all pending changesets: bumps each named package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. Each package receives the widest bump across the changesets naming it. With zero changesets, nothing changes and the command fails; `--allow-no-changesets` (short form `-a`) makes it succeed instead. In [pre-release mode](#pre-release-mode), `version` bumps to `-<tag>.<n>` prereleases.
 
 `--ignore` skips packages by exact name for this run.
+
+`--snapshot` and `--snapshot-prerelease-template` create a [snapshot release](#snapshot-releases) instead, bumping to throwaway `0.0.0-<suffix>` versions.
 
 `--output` (short form `-o`) suppresses the report and writes the release plan to the given file (`-` for stdout) as JSON, extending the changesets `ReleasePlan` type with `changelogEntry`:
 
@@ -281,11 +283,21 @@ Prints the body of the `## <version>` section of the named package's `CHANGELOG.
 
 ### `ignore`
 
-Names of packages to skip; glob patterns like `"@scope/*"` are also supported, and a `!`-prefixed entry un-ignores, in order, so `["pkg-*", "!pkg-b"]` ignores every `pkg-*` package except `pkg-b`. Defaults to `[]`.
+Default: `[]`.
+
+Names of packages to skip; glob patterns like `"@scope/*"` are also supported, and a `!`-prefixed entry un-ignores, in order, so `["pkg-*", "!pkg-b"]` ignores every `pkg-*` package except `pkg-b`.
 
 ### `privatePackages`
 
-Whether private packages (`"private": true` in package.json) are versioned. Set `{ "version": true }` (or the shorthand `true`) to version them. Defaults to `{ "version": false }`: private packages are skipped.
+Default: `{ "version": false }`.
+
+Whether private packages (`"private": true` in package.json) are versioned. Set `{ "version": true }` (or the shorthand `true`) to version them; by default they are skipped.
+
+### `snapshot`
+
+Default: `{ "useCalculatedVersion": false }`.
+
+Options for [snapshot releases](#snapshot-releases). `useCalculatedVersion` bases snapshot versions on the calculated next version instead of `0.0.0`; `prereleaseTemplate`, unset by default, sets the suffix template (`--snapshot-prerelease-template` overrides it).
 
 ## Workspaces
 
@@ -314,6 +326,18 @@ npm publish
 ```
 
 While in pre mode, `version` moves the changesets it consumes to `.changeset/pre/` instead of deleting them. Once pre mode is exited, the next `version` plans the parked changesets together with the new ones into the final version and deletes both the consumed changesets and `pre.json`. A package left on a prerelease version that no changeset names is bumped to its final version too.
+
+## Snapshot releases
+
+`version --snapshot [<tag>]` creates a snapshot release for publishing work-in-progress changes under a temporary dist-tag. Every package that would be bumped gets a throwaway `0.0.0-<suffix>` version, so that no ordinary semver range resolves to a snapshot; the [`snapshot.useCalculatedVersion`](#snapshot) setting bases snapshot versions on the calculated next version instead of `0.0.0`. Changesets are consumed and `CHANGELOG.md` sections written as usual, so run `version --snapshot` on a throwaway working tree:
+
+```sh
+changesette version --snapshot canary         # 1.2.3 -> 0.0.0-canary-20260822123456
+npm publish --tag canary
+git checkout .                                # discard the version changes
+```
+
+By default the suffix is `<tag>-<datetime>`, or just `<datetime>` when no tag is given. It can be customized with `--snapshot-prerelease-template`, or the [`snapshot.prereleaseTemplate`](#snapshot) setting, using the `{tag}`, `{timestamp}`, and `{datetime}` placeholders; changesets' `{commit}` and `{commit-short}` are not supported.
 
 ## Differences from changesets
 

@@ -8,7 +8,7 @@ use crate::{bump::Bump, output, plan, release_plan};
 /// the release plan as JSON — following the same plan as `version` without
 /// applying it.
 pub(crate) fn run(verbose: bool, output_path: Option<&Path>) -> Result<()> {
-    let planned = plan::plan_version(&[])?;
+    let planned = plan::plan_version(&[], None)?;
 
     if let Some(path) = output_path {
         return release_plan::write_file(

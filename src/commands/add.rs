@@ -11,7 +11,7 @@ use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
 
 use crate::{
     bump::Bump,
-    output,
+    config, output,
     skip::SkipSet,
     workspace::{Member, Workspace},
 };
@@ -40,7 +40,8 @@ pub(crate) fn run(
     );
 
     let changeset_dir = workspace.root().join(".changeset");
-    let skip = SkipSet::load(&workspace, &changeset_dir, &[])?;
+    let config = config::load(&changeset_dir)?;
+    let skip = SkipSet::load(&workspace, &config, &[])?;
     let packages: Vec<&Member> = workspace
         .members()
         .iter()

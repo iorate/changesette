@@ -1,0 +1,5 @@
+---
+source: src/snapshot.rs
+expression: "render_err(Some(\"pr#123\"), None)"
+---
+invalid snapshot suffix "pr#123-20250822000000": unexpected character in pre-release identifier

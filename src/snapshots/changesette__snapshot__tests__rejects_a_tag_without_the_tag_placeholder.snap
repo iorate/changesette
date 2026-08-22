@@ -1,0 +1,5 @@
+---
+source: src/snapshot.rs
+expression: "render_err(Some(\"canary\"), Some(\"{datetime}\"))"
+---
+the snapshot tag "canary" is given but the template does not contain "{tag}"

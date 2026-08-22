@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"{ \\\"snapshot\\\": { \\\"useCalculatedVersion\\\": \\\"yes\\\" } }\\n\")"
+---
+.changeset/config.json: "useCalculatedVersion" in "snapshot" must be a boolean
