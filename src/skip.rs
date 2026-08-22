@@ -37,19 +37,19 @@ impl SkipSet {
         self.names.contains(name)
     }
 
-    /// Drops from `changes` every changeset whose releases are all skipped,
-    /// leaving its file on disk; a changeset mixing skipped and not skipped
-    /// packages is an error, as is one naming a non-member package.
+    /// Returns the changesets in `changes` whose releases are not all
+    /// skipped; a changeset mixing skipped and not skipped packages is an
+    /// error, as is one naming a non-member package.
     pub(crate) fn filter_changes(
         &self,
         workspace: &Workspace,
         changeset_dir: &Path,
-        changes: Vec<LoadedChange>,
+        changes: &[LoadedChange],
     ) -> Result<Vec<LoadedChange>> {
         // Membership is checked before the skip judgment so that a changeset
         // naming an unknown package always reports that rather than a
         // mixed-changeset error.
-        for change in &changes {
+        for change in changes {
             for (name, _) in &change.releases {
                 workspace
                     .member(name)
@@ -65,7 +65,7 @@ impl SkipSet {
                 .map(|(name, _)| name.as_str())
                 .partition(|name| self.contains(name));
             if skipped.is_empty() {
-                consumed.push(change);
+                consumed.push(change.clone());
             } else if !not_skipped.is_empty() {
                 bail!(
                     "{}: cannot mix skipped packages ({}) and not skipped packages ({})",

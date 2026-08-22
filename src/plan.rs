@@ -20,10 +20,11 @@ pub(crate) struct PlannedVersion {
     pub(crate) workspace: Workspace,
     pub(crate) changeset_dir: PathBuf,
     pub(crate) pre: Option<PreJson>,
-    /// Whether there were no unreleased changesets before skip filtering.
-    pub(crate) no_changes: bool,
-    /// The changesets `version` consumes, skip-filtered.
+    /// Every unreleased changeset, the ones naming only skipped packages
+    /// included; the release plan reports all of them.
     pub(crate) changes: Vec<LoadedChange>,
+    /// The changesets `version` consumes, skip-filtered.
+    pub(crate) consumed_changes: Vec<LoadedChange>,
     pub(crate) releases: Vec<PlannedRelease>,
 }
 
@@ -71,16 +72,15 @@ pub(crate) fn plan_version(cli_ignore: &[String]) -> Result<PlannedVersion> {
         // cycle.
         changes.retain(|change| !change.in_pre);
     }
-    let no_changes = changes.is_empty();
-    let changes = skip.filter_changes(&workspace, &changeset_dir, changes)?;
-    let releases = plan_releases(&workspace, &changes, pre.as_ref(), &skip)?;
+    let consumed_changes = skip.filter_changes(&workspace, &changeset_dir, &changes)?;
+    let releases = plan_releases(&workspace, &consumed_changes, pre.as_ref(), &skip)?;
 
     Ok(PlannedVersion {
         workspace,
         changeset_dir,
         pre,
-        no_changes,
         changes,
+        consumed_changes,
         releases,
     })
 }

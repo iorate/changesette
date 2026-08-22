@@ -22,7 +22,7 @@ pub(crate) fn run(
     }
     let in_pre = planned.in_pre().is_some();
     let exiting = planned.exiting_pre();
-    if planned.no_changes && !exiting && !allow_no_changesets {
+    if planned.changes.is_empty() && !exiting && !allow_no_changesets {
         bail!("no unreleased changesets found");
     }
 
@@ -30,7 +30,7 @@ pub(crate) fn run(
     // Checked before the writes are applied: a rename failing afterwards
     // would leave the versions bumped with their changesets still pending.
     if in_pre {
-        for change in &planned.changes {
+        for change in &planned.consumed_changes {
             let path = pre_dir.join(&change.file_name);
             if path
                 .try_exists()
@@ -47,17 +47,17 @@ pub(crate) fn run(
     }
 
     if in_pre {
-        if !planned.changes.is_empty() {
+        if !planned.consumed_changes.is_empty() {
             fs::create_dir_all(&pre_dir).with_context(|| pre_dir.display().to_string())?;
         }
-        for change in &planned.changes {
+        for change in &planned.consumed_changes {
             let path = planned.changeset_dir.join(change.rel_path());
             let pre_path = pre_dir.join(&change.file_name);
             fs::rename(&path, &pre_path)
                 .with_context(|| format!("{} -> {}", path.display(), pre_path.display()))?;
         }
     } else {
-        for change in &planned.changes {
+        for change in &planned.consumed_changes {
             let path = planned.changeset_dir.join(change.rel_path());
             fs::remove_file(&path).with_context(|| path.display().to_string())?;
         }
@@ -74,7 +74,7 @@ pub(crate) fn run(
             &release_plan::build(&planned.changes, &planned.releases, planned.pre.as_ref()),
         ),
         None => {
-            if planned.no_changes && !exiting {
+            if planned.changes.is_empty() && !exiting {
                 return output::eprint_line("No unreleased changesets found.");
             }
             let mut bumped = false;
@@ -87,7 +87,7 @@ pub(crate) fn run(
                     bumped = true;
                 }
             }
-            if !bumped && !planned.no_changes {
+            if !bumped && !planned.changes.is_empty() {
                 output::eprint_line("No packages to bump.")?;
             }
             Ok(())

@@ -1201,7 +1201,7 @@ fn version_ignore_skips_the_package_and_keeps_its_changeset() {
 }
 
 #[test]
-fn version_ignore_excludes_the_changeset_from_the_plan() {
+fn version_ignore_includes_the_skipped_changeset_in_the_plan_without_a_release() {
     let dir = two_package_workspace_dir();
     write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
     write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
@@ -1212,8 +1212,9 @@ fn version_ignore_excludes_the_changeset_from_the_plan() {
     assert!(output.status.success(), "{}", stderr(&output));
     let plan = fs::read_to_string(dir.path().join("plan.json")).unwrap();
     assert!(plan.contains(ID_A), "{plan}");
-    assert!(!plan.contains(ID_B), "{plan}");
-    assert!(!plan.contains("pkg-b"), "{plan}");
+    assert!(plan.contains(ID_B), "{plan}");
+    assert!(plan.contains("pkg-b"), "{plan}");
+    assert!(!plan.contains("2.0.0"), "{plan}");
 }
 
 #[test]
@@ -1454,6 +1455,61 @@ fn version_succeeds_when_every_changeset_is_skipped() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stderr(&output), "No packages to bump.\n");
     assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn version_output_includes_a_skipped_changeset_without_a_release() {
+    let dir = private_two_package_workspace_dir();
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = changesette(dir.path(), &["version", "--output", "-"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        format!(
+            concat!(
+                "{{\n",
+                "  \"changesets\": [\n",
+                "    {{\n",
+                "      \"id\": \"{0}\",\n",
+                "      \"summary\": \"Improve pkg-a\",\n",
+                "      \"releases\": [\n",
+                "        {{\n",
+                "          \"name\": \"pkg-a\",\n",
+                "          \"type\": \"minor\"\n",
+                "        }}\n",
+                "      ]\n",
+                "    }},\n",
+                "    {{\n",
+                "      \"id\": \"{1}\",\n",
+                "      \"summary\": \"Fix pkg-b\",\n",
+                "      \"releases\": [\n",
+                "        {{\n",
+                "          \"name\": \"pkg-b\",\n",
+                "          \"type\": \"patch\"\n",
+                "        }}\n",
+                "      ]\n",
+                "    }}\n",
+                "  ],\n",
+                "  \"releases\": [\n",
+                "    {{\n",
+                "      \"name\": \"pkg-a\",\n",
+                "      \"type\": \"minor\",\n",
+                "      \"oldVersion\": \"3.1.4\",\n",
+                "      \"newVersion\": \"3.2.0\",\n",
+                "      \"changesets\": [\n",
+                "        \"{0}\"\n",
+                "      ],\n",
+                "      \"changelogEntry\": \"### Minor Changes\\n\\n- Improve pkg-a\"\n",
+                "    }}\n",
+                "  ]\n",
+                "}}\n"
+            ),
+            ID_A, ID_B
+        )
+    );
+    assert!(!dir.path().join(".changeset").join(ULID_A).exists());
+    assert!(dir.path().join(".changeset").join(ULID_B).exists());
 }
 
 #[test]

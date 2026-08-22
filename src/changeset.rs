@@ -18,7 +18,7 @@ const IGNORED_FILE_NAMES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "GEMINI.md"];
 static FRONTMATTER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)\s*---(.*?)\r?\n\s*---(\s*(?:\n|$).*)").unwrap());
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct LoadedChange {
     pub(crate) file_name: String,
     /// Whether the file was loaded from `pre/` in the changeset directory.
