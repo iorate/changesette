@@ -1,5 +1,51 @@
 # changesette
 
+## 5.0.0
+
+### Major Changes
+
+- Private packages and packages without a `version` field are no longer versioned by default; set `privatePackages.version` to `true` in `.changeset/config.json` to keep versioning private packages. The `add` command follows suit: skipped packages are excluded from the interactive prompt, naming one in a bump flag is an error, and `add` (`--empty` included) fails when the workspace has no versionable packages.
+
+- Packages whose `package.json` has no `version` field are now included as workspace members, and `get-packages` reports a `private` field for every package and omits `version` when the `package.json` has none.
+
+- A `package.json` with `workspaces` is now a workspace root only when a `package-lock.json`, `yarn.lock`, `bun.lockb`, or `bun.lock` sits next to it, as changesets requires; without one, discovery keeps climbing and the manifest can only become a single package.
+
+- The `get-packages` command now lists only the packages managed by `version` by default; pass `--all` to list every workspace member.
+
+### Minor Changes
+
+- The `add` command now creates the `.changeset` directory when it is missing, `init` also creates a default `config.json` and backfills missing files, and `version` and `status` treat a missing `.changeset` directory as having no changesets. When `.changeset/config.json` exists, it is now validated as the supported subset of the changesets config format.
+
+- Add the `--open` flag to `add`: after the changeset is created, it opens the file in your editor (`VISUAL`, `EDITOR`, or `vi`) and waits for the editor to exit.
+
+- Add snapshot releases: `version --snapshot [<tag>]` bumps every released package to a throwaway `0.0.0-<suffix>` version, with the suffix rendered from `--snapshot-prerelease-template` or the new `snapshot` config setting (`useCalculatedVersion`, `prereleaseTemplate`) using the `{tag}`, `{timestamp}`, and `{datetime}` placeholders.
+
+- The skip judgment for private, ignored, and versionless packages uses the manifest data gathered during workspace discovery, counting `private` only when it is boolean `true`; `add` and `get-packages` no longer read every member's `package.json`, so a member with an invalid version breaks neither of them, and strict `package.json` validation applies only to the packages being bumped.
+
+- Support the `fixed` and `linked` config settings.
+
+- The release plan JSON written by `version --output` and `status --output` now includes changesets that name only skipped packages, matching the changesets `ReleasePlan`; their files are still left on disk and they produce no releases.
+
+- The `ignore` option in `.changeset/config.json` is now supported with glob patterns including ordered negation, and cannot be combined with the `--ignore` CLI option.
+
+- Add `fixed` and `linked` to the default config written by `init`.
+
+### Patch Changes
+
+- Recognize the title heading of a `CHANGELOG.md` that starts with a UTF-8 BOM, instead of prepending a duplicate title and leaving the BOM in the middle of the file.
+
+- The `init` command now mentions workspaces in the generated `README.md`.
+
+- The JSON output of `get-packages`, and of `version` and `status` with `--output -`, is pretty-printed when stdout is a terminal and single-line otherwise.
+
+- The `--output` help for `version` and `status` no longer claims the JSON is pretty-printed, since it is single-line when stdout is not a terminal.
+
+- Workspace patterns starting with a slash, such as `/packages/*` or `!/packages/a`, are now ignored as in changesets and pnpm instead of being matched as relative paths.
+
+- Fail loudly when bumping a pathologically large version overflows, instead of silently wrapping around in release builds.
+
+- The release plan written to a file by `version` and `status` with `--output` now ends with a newline.
+
 ## 4.0.1
 
 ### Patch Changes
