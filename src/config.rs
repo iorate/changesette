@@ -23,8 +23,9 @@ impl Config {
 
     /// Expands the `ignore` patterns against `names` and returns the matching
     /// names in input order, with a `!`-prefixed pattern un-ignoring the
-    /// names it matches, in order; a pattern matching no name is not an
-    /// error.
+    /// names it matches, in order; a non-negated literal entry matching no
+    /// name is an error as in upstream changesets, while a glob matching
+    /// nothing is not.
     pub(crate) fn resolve_ignore<'a>(
         &self,
         names: impl IntoIterator<Item = &'a str>,
@@ -34,20 +35,35 @@ impl Config {
             .iter()
             .map(|pattern| parse_ignore_pattern(pattern))
             .collect::<Result<Vec<_>>>()?;
+        let mut matched = vec![false; patterns.len()];
         let mut resolved = Vec::new();
         for name in names {
             let mut ignored = false;
-            for (negated, glob) in &patterns {
+            for ((negated, glob), matched) in patterns.iter().zip(&mut matched) {
+                let is_match = glob.is_match(name);
+                *matched = *matched || is_match;
                 if *negated {
-                    if ignored && glob.is_match(name) {
+                    if ignored && is_match {
                         ignored = false;
                     }
-                } else if !ignored && glob.is_match(name) {
+                } else if !ignored && is_match {
                     ignored = true;
                 }
             }
             if ignored {
                 resolved.push(name.to_owned());
+            }
+        }
+        // Upstream changesets refuses any ignore entry matching no package;
+        // only entries that name a single package are validated here, keeping
+        // a glob reserved for future packages usable.
+        for (pattern, ((negated, glob), matched)) in
+            self.ignore.iter().zip(patterns.iter().zip(matched))
+        {
+            if !negated && !matched && glob.text().is_invariant() {
+                bail!(
+                    "package `{pattern}` is specified in the \"ignore\" option in .changeset/config.json but is not a workspace member"
+                );
             }
         }
         Ok(resolved)
@@ -221,8 +237,28 @@ mod tests {
     }
 
     #[test]
-    fn tolerates_an_ignore_pattern_matching_nothing() {
+    fn tolerates_an_ignore_glob_matching_nothing() {
         assert!(resolve("{ \"ignore\": [\"missing-*\"] }\n", &["pkg-a"]).is_empty());
+    }
+
+    #[test]
+    fn tolerates_a_negated_ignore_literal_matching_nothing() {
+        assert_eq!(
+            resolve(
+                "{ \"ignore\": [\"pkg-*\", \"!missing\"] }\n",
+                &["pkg-a", "pkg-b"]
+            ),
+            ["pkg-a", "pkg-b"]
+        );
+    }
+
+    #[test]
+    fn rejects_an_ignore_literal_matching_nothing() {
+        let config = load_ok("{ \"ignore\": [\"pkg-serverr\"] }\n");
+        let err = config
+            .resolve_ignore(["pkg-server", "pkg-client"])
+            .unwrap_err();
+        insta::assert_snapshot!(format!("{err:#}"));
     }
 
     #[test]

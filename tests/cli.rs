@@ -1372,6 +1372,20 @@ fn version_resolves_config_ignore_globs_with_negation() {
 }
 
 #[test]
+fn version_rejects_a_literal_config_ignore_entry_naming_no_member() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"ignore\": [\"pkg-bb\"] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["version"]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains("`pkg-bb`"), "{err}");
+    assert!(err.contains("not a workspace member"), "{err}");
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
 fn version_rejects_the_ignore_flag_with_a_config_ignore() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"ignore\": [\"pkg-b\"] }\n");
