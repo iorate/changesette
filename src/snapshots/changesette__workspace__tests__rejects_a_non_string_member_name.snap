@@ -1,5 +1,0 @@
----
-source: src/workspace.rs
-expression: "discover_err(\"bad-name\")"
----
-tests/fixtures/workspace/bad-name/packages/a/package.json: top-level "name" must be a string

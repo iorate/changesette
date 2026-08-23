@@ -9,9 +9,22 @@ Workspace {
             name: "pkg-a",
             dir: "tests/fixtures/workspace/pnpm/packages/a",
             rel_dir: "packages/a",
-            version: Some(
-                "1.0.0",
-            ),
+            version: Version {
+                major: 1,
+                minor: 0,
+                patch: 0,
+            },
+            private: false,
+        },
+        Member {
+            name: "root",
+            dir: "tests/fixtures/workspace/pnpm",
+            rel_dir: ".",
+            version: Version {
+                major: 0,
+                minor: 0,
+                patch: 0,
+            },
             private: false,
         },
     ],

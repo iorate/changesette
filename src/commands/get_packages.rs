@@ -6,8 +6,7 @@ use crate::{config, output, skip::SkipSet, workspace::Workspace};
 #[derive(Serialize)]
 struct Package<'a> {
     name: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    version: Option<String>,
+    version: String,
     private: bool,
     dir: &'a str,
 }
@@ -26,7 +25,7 @@ pub(crate) fn run(all: bool) -> Result<()> {
         }
         packages.push(Package {
             name: member.name(),
-            version: member.version().map(str::to_owned),
+            version: member.version().to_string(),
             private: member.private(),
             dir: member.rel_dir(),
         });
