@@ -58,13 +58,23 @@ impl Workspace {
             let Some(value) = read_manifest(&path)? else {
                 continue;
             };
-            // Only an array or object `workspaces` marks an npm-family
-            // root; any other type reads as an absent field, which also
-            // lets a stray non-object manifest pass by.
+            // An array or object `workspaces` marks an npm-family root and
+            // a null one reads as an absent field, as npm and pnpm both
+            // tolerate a null pattern container; any other type is an error
+            // even mid-walk — npm fails the same way wherever the walk
+            // reads a truthy invalid type, and a false or 0, which npm
+            // passes over, is too clearly a mistake to ignore. A stray
+            // non-object manifest still passes by.
             if let Some(workspaces) = value.get("workspaces")
-                && (workspaces.is_array() || workspaces.is_object())
+                && !workspaces.is_null()
             {
-                let patterns = npm_patterns(workspaces, &path);
+                if !workspaces.is_array() && !workspaces.is_object() {
+                    bail!(
+                        "{}: \"workspaces\" must be an array or an object",
+                        path.display()
+                    )
+                }
+                let patterns = npm_patterns(workspaces, &path)?;
                 return Ok(Workspace {
                     root: dir.to_path_buf(),
                     members: collect_members(dir, &path, &patterns, false)?,
@@ -187,17 +197,26 @@ pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
     Ok(Some(value))
 }
 
-// Reads the `packages` patterns from a pnpm-workspace.yaml, treating any
-// type mismatch as an absent value; only unparsable YAML is fatal, in the
-// same class as a broken manifest.
+// Reads the `packages` patterns from a pnpm-workspace.yaml. A null
+// `packages` is the plain YAML spelling of an empty list and reads as
+// absent, matching pnpm; any other type mismatch is an error, as it is in
+// pnpm itself.
 fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
     let text = fs::read_to_string(path).with_context(|| path.display().to_string())?;
     let docs = match Yaml::load_from_str(&text) {
         Ok(docs) => docs,
         Err(err) => bail!("{}: invalid YAML: {err}", path.display()),
     };
-    let Some(Yaml::Mapping(mapping)) = docs.into_iter().next() else {
+    // A missing or null document keeps an empty or comment-only file a
+    // valid settings-only root.
+    let Some(doc) = docs.into_iter().next() else {
         return Ok(Vec::new());
+    };
+    if doc.is_null() {
+        return Ok(Vec::new());
+    }
+    let Yaml::Mapping(mapping) = doc else {
+        bail!("{}: not a YAML mapping", path.display())
     };
     let packages = mapping
         .iter()
@@ -207,61 +226,48 @@ fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
     };
     let items = match packages {
         Yaml::Sequence(items) => items,
-        // A null `packages` is the plain YAML spelling of an empty list.
         _ if packages.is_null() => return Ok(Vec::new()),
-        _ => {
-            eprintln!(
-                "warning: {}: ignoring \"packages\": not a list",
-                path.display()
-            );
-            return Ok(Vec::new());
-        }
+        _ => bail!("{}: \"packages\" must be a list of strings", path.display()),
     };
     let mut patterns = Vec::new();
     for item in items {
-        match item.as_str() {
-            Some(pattern) => patterns.push(pattern.to_owned()),
-            None => eprintln!(
-                "warning: {}: ignoring a non-string entry in \"packages\"",
-                path.display()
-            ),
-        }
+        let Some(pattern) = item.as_str() else {
+            bail!("{}: \"packages\" must be a list of strings", path.display())
+        };
+        patterns.push(pattern.to_owned());
     }
     Ok(patterns)
 }
 
 // Reads the patterns from an npm-family `workspaces` field, already known to
-// be an array or an object; like the pnpm side, a type mismatch inside reads
-// as an absent value.
-fn npm_patterns(workspaces: &Value, path: &Path) -> Vec<String> {
+// be an array or an object; like the pnpm side, a null `packages` reads as
+// absent and any other type mismatch is an error.
+fn npm_patterns(workspaces: &Value, path: &Path) -> Result<Vec<String>> {
     let items = match workspaces {
         Value::Array(items) => items,
         // The Yarn 1 object form `{packages: [...], nohoist: [...]}`; every
         // key but `packages` is ignored.
         Value::Object(object) => match object.get("packages") {
             Some(Value::Array(items)) => items,
-            None | Some(Value::Null) => return Vec::new(),
-            Some(_) => {
-                eprintln!(
-                    "warning: {}: ignoring \"packages\" in \"workspaces\": not a list",
-                    path.display()
-                );
-                return Vec::new();
-            }
+            None | Some(Value::Null) => return Ok(Vec::new()),
+            Some(_) => bail!(
+                "{}: \"packages\" in \"workspaces\" must be a list of strings",
+                path.display()
+            ),
         },
         _ => unreachable!(),
     };
     let mut patterns = Vec::new();
     for item in items {
-        match item.as_str() {
-            Some(pattern) => patterns.push(pattern.to_owned()),
-            None => eprintln!(
-                "warning: {}: ignoring a non-string entry in \"workspaces\"",
+        let Some(pattern) = item.as_str() else {
+            bail!(
+                "{}: \"workspaces\" patterns must be strings",
                 path.display()
-            ),
-        }
+            )
+        };
+        patterns.push(pattern.to_owned());
     }
-    patterns
+    Ok(patterns)
 }
 
 fn collect_members(
@@ -431,11 +437,11 @@ mod tests {
     }
 
     #[test]
-    fn treats_non_list_pnpm_packages_as_absent() {
-        let workspace = discover_ok("pnpm-bad-packages");
-        assert_eq!(
-            names_and_dirs(&workspace),
-            [("root", fixture("pnpm-bad-packages").as_path())]
+    fn rejects_a_non_list_pnpm_packages() {
+        let err = discover_err("pnpm-bad-packages");
+        assert!(
+            err.contains("\"packages\" must be a list of strings"),
+            "{err}"
         );
     }
 
@@ -574,6 +580,14 @@ mod tests {
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(workspace.root(), dir.path());
         assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
+    }
+
+    #[test]
+    fn rejects_a_non_mapping_pnpm_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "pnpm-workspace.yaml", "- packages/*\n");
+        let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
+        assert!(err.contains("not a YAML mapping"), "{err}");
     }
 
     #[test]
@@ -1444,8 +1458,20 @@ mod tests {
     }
 
     #[test]
-    fn passes_over_an_invalid_workspaces_type() {
-        for workspaces in ["\"packages/*\"", "42", "null", "true"] {
+    fn passes_over_a_null_workspaces() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"app\", \"version\": \"1.0.0\", \"workspaces\": null }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(names_and_dirs(&workspace), [("app", dir.path())]);
+    }
+
+    #[test]
+    fn rejects_an_invalid_workspaces_type() {
+        for workspaces in ["\"packages/*\"", "42", "true", "false", "0", "\"\""] {
             let dir = tempfile::tempdir().unwrap();
             write(
                 dir.path(),
@@ -1454,13 +1480,31 @@ mod tests {
                     "{{ \"name\": \"app\", \"version\": \"1.0.0\", \"workspaces\": {workspaces} }}\n"
                 ),
             );
-            let workspace = Workspace::discover(dir.path()).unwrap();
-            assert_eq!(
-                names_and_dirs(&workspace),
-                [("app", dir.path())],
-                "{workspaces}"
+            let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
+            assert!(
+                err.contains("\"workspaces\" must be an array or an object"),
+                "{workspaces}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn rejects_an_invalid_workspaces_type_during_the_walk() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "package.json", "{ \"workspaces\": 42 }\n");
+        write(
+            dir.path(),
+            "pkg/package.json",
+            "{ \"name\": \"leaf\", \"version\": \"1.0.0\" }\n",
+        );
+        let err = format!(
+            "{:#}",
+            Workspace::discover(&dir.path().join("pkg")).unwrap_err()
+        );
+        assert!(
+            err.contains("\"workspaces\" must be an array or an object"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1477,17 +1521,12 @@ mod tests {
     }
 
     #[test]
-    fn ignores_a_non_list_packages_in_the_workspaces_object() {
+    fn a_null_packages_in_the_workspaces_object_is_absent() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             "package.json",
-            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": { \"packages\": \"packages/*\" } }\n",
-        );
-        write(
-            dir.path(),
-            "packages/a/package.json",
-            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": { \"packages\": null } }\n",
         );
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(workspace.root(), dir.path());
@@ -1495,22 +1534,32 @@ mod tests {
     }
 
     #[test]
-    fn ignores_non_string_pattern_entries() {
+    fn rejects_a_non_list_packages_in_the_workspaces_object() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": { \"packages\": \"packages/*\" } }\n",
+        );
+        let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
+        assert!(
+            err.contains("\"packages\" in \"workspaces\" must be a list of strings"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_non_string_pattern_entries() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             "pnpm-workspace.yaml",
             "packages:\n  - \"packages/*\"\n  - 42\n",
         );
-        write(
-            dir.path(),
-            "packages/a/package.json",
-            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
-        );
-        let workspace = Workspace::discover(dir.path()).unwrap();
-        assert_eq!(
-            names_and_dirs(&workspace),
-            [("pkg-a", dir.path().join("packages/a").as_path())]
+        let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
+        assert!(
+            err.contains("\"packages\" must be a list of strings"),
+            "{err}"
         );
 
         let dir = tempfile::tempdir().unwrap();
@@ -1519,15 +1568,10 @@ mod tests {
             "package.json",
             "{ \"workspaces\": [42, \"packages/*\"] }\n",
         );
-        write(
-            dir.path(),
-            "packages/a/package.json",
-            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
-        );
-        let workspace = Workspace::discover(dir.path()).unwrap();
-        assert_eq!(
-            names_and_dirs(&workspace),
-            [("pkg-a", dir.path().join("packages/a").as_path())]
+        let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
+        assert!(
+            err.contains("\"workspaces\" patterns must be strings"),
+            "{err}"
         );
     }
 
@@ -1556,7 +1600,7 @@ mod tests {
 
     #[test]
     fn passes_over_a_type_invalid_stray_manifest() {
-        for stray in ["[1, 2]", "{ \"workspaces\": \"packages/*\" }"] {
+        for stray in ["[1, 2]", "\"hello\""] {
             let dir = tempfile::tempdir().unwrap();
             write(
                 dir.path(),
