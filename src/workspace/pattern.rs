@@ -20,17 +20,25 @@ pub(crate) struct Pattern {
 /// negation) and matcher; the errors name only the offense, and the caller
 /// attaches the manifest path and the original pattern.
 pub(crate) fn compile(original: &str) -> Result<(bool, Pattern)> {
-    // Only the first `!` flips the polarity; any further `!` stays in the
-    // pattern body.
-    let (negated, body) = match original.strip_prefix('!') {
-        Some(body) => (true, body),
-        None => (false, original),
-    };
+    // Every leading `!` flips the polarity, as npm counts them; leaving one
+    // in the body would hand it to the glob matcher.
+    let mut negated = false;
+    let mut body = original;
+    while let Some(rest) = body.strip_prefix('!') {
+        negated = !negated;
+        body = rest;
+    }
     // An absolute path and a `..` segment are the patterns the upstream
     // tools silently break on or resolve outside the root, so they are loud
     // errors rather than a silent no-match.
     if body.starts_with('/') {
         bail!("absolute patterns are not supported")
+    }
+    // An empty pattern is a plain mistake — npm matches nothing and pnpm
+    // errors — and reading it as `.` would silently opt the root into
+    // versioning. An intentional root reference has a `.` segment.
+    if body.split('/').all(str::is_empty) {
+        bail!("empty patterns are not supported")
     }
     let mut segs = Vec::new();
     // Splitting runs before any glob parsing, so a `/` can be neither
@@ -169,9 +177,22 @@ mod tests {
             positive("x//y").segs(),
             [lit("x"), lit("y"), lit("package.json")]
         );
-        for pattern in [".", "./", ""] {
+        for pattern in [".", "./"] {
             assert_eq!(positive(pattern).segs(), [lit("package.json")], "{pattern}");
         }
+    }
+
+    #[test]
+    fn rejects_an_empty_pattern() {
+        for pattern in ["", "!", "!!"] {
+            assert!(error(pattern).contains("empty"), "{pattern}");
+        }
+    }
+
+    #[test]
+    fn leading_bangs_toggle_the_polarity_by_parity() {
+        assert_eq!(positive("!!x").segs(), [lit("x"), lit("package.json")]);
+        assert_eq!(negation("!!!x").segs(), [lit("x"), lit("package.json")]);
     }
 
     #[test]
