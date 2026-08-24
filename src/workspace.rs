@@ -240,8 +240,9 @@ fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
 }
 
 // Reads the patterns from an npm-family `workspaces` field, already known to
-// be an array or an object; like the pnpm side, a null `packages` reads as
-// absent and any other type mismatch is an error.
+// be an array or an object; the object form must carry a `packages` list —
+// npm errors on any object without one, a missing or null key included —
+// and a non-string entry is an error too.
 fn npm_patterns(workspaces: &Value, path: &Path) -> Result<Vec<String>> {
     let items = match workspaces {
         Value::Array(items) => items,
@@ -249,8 +250,7 @@ fn npm_patterns(workspaces: &Value, path: &Path) -> Result<Vec<String>> {
         // key but `packages` is ignored.
         Value::Object(object) => match object.get("packages") {
             Some(Value::Array(items)) => items,
-            None | Some(Value::Null) => return Ok(Vec::new()),
-            Some(_) => bail!(
+            _ => bail!(
                 "{}: \"packages\" in \"workspaces\" must be a list of strings",
                 path.display()
             ),
@@ -1508,44 +1508,26 @@ mod tests {
     }
 
     #[test]
-    fn an_object_workspaces_without_packages_is_a_root() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            "package.json",
-            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": {} }\n",
-        );
-        let workspace = Workspace::discover(dir.path()).unwrap();
-        assert_eq!(workspace.root(), dir.path());
-        assert_eq!(names_and_dirs(&workspace), []);
-    }
-
-    #[test]
-    fn a_null_packages_in_the_workspaces_object_is_absent() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            "package.json",
-            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": { \"packages\": null } }\n",
-        );
-        let workspace = Workspace::discover(dir.path()).unwrap();
-        assert_eq!(workspace.root(), dir.path());
-        assert_eq!(names_and_dirs(&workspace), []);
-    }
-
-    #[test]
-    fn rejects_a_non_list_packages_in_the_workspaces_object() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            "package.json",
-            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": { \"packages\": \"packages/*\" } }\n",
-        );
-        let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
-        assert!(
-            err.contains("\"packages\" in \"workspaces\" must be a list of strings"),
-            "{err}"
-        );
+    fn rejects_a_workspaces_object_without_a_packages_list() {
+        for workspaces in [
+            "{}",
+            "{ \"packages\": null }",
+            "{ \"packages\": \"packages/*\" }",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            write(
+                dir.path(),
+                "package.json",
+                &format!(
+                    "{{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": {workspaces} }}\n"
+                ),
+            );
+            let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
+            assert!(
+                err.contains("\"packages\" in \"workspaces\" must be a list of strings"),
+                "{workspaces}: {err}"
+            );
+        }
     }
 
     #[test]
