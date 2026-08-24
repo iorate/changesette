@@ -115,7 +115,7 @@ fn init_does_nothing_when_everything_exists() {
     let output = changesette(dir.path(), &["init"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
-    assert_eq!(stderr(&output), "");
+    assert_eq!(stderr(&output), ".changeset is already initialized\n");
     assert_eq!(dir_snapshot(dir.path()), before);
 }
 
@@ -705,10 +705,16 @@ fn version_fails_for_a_changeset_naming_an_excluded_package() {
     .unwrap();
     write_changeset(dir.path(), "a.md", &[("ublacklist", "patch")], "Fix bug");
     let before = dir_snapshot(dir.path());
-    let output = changesette(dir.path(), &["version"]);
+    let output = changesette(dir.path(), &["version", "--log-level", "debug"]);
     assert!(!output.status.success());
     let err = stderr(&output);
-    assert!(err.contains("not a workspace member"), "{err}");
+    assert!(
+        err.contains(&format!(
+            "debug: {}: not a workspace member: \"version\" is missing",
+            dir.path().join("package.json").display()
+        )),
+        "{err}"
+    );
     assert!(err.contains("`ublacklist` not found"), "{err}");
     assert_eq!(dir_snapshot(dir.path()), before);
 }
@@ -784,17 +790,39 @@ fn get_packages_warns_about_excluded_candidates_and_omits_them() {
             .display()
             .to_string()
     };
-    assert!(err.contains(&manifest("b")), "{err}");
-    assert!(err.contains("\"name\" must be a nonempty string"), "{err}");
-    assert!(err.contains(&manifest("c")), "{err}");
+    assert!(!err.contains(&manifest("b")), "{err}");
+    assert!(!err.contains(&manifest("c")), "{err}");
     assert!(
-        err.contains("\"version\" must be a valid semver string"),
+        err.contains(&format!(
+            "warning: {}: not a workspace member: \"version\" \"1.0\" is not a valid semver",
+            manifest("d")
+        )),
         "{err}"
     );
-    assert!(err.contains(&manifest("d")), "{err}");
     assert!(err.contains(&manifest("e")), "{err}");
     assert!(err.contains(&manifest("f")), "{err}");
     assert!(err.contains("`dup`"), "{err}");
+
+    let output = changesette(
+        dir.path(),
+        &["get-packages", "--all", "--log-level", "debug"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let err = stderr(&output);
+    assert!(
+        err.contains(&format!(
+            "debug: {}: not a workspace member: \"name\" is missing",
+            manifest("b")
+        )),
+        "{err}"
+    );
+    assert!(
+        err.contains(&format!(
+            "debug: {}: not a workspace member: \"version\" is missing",
+            manifest("c")
+        )),
+        "{err}"
+    );
 }
 
 #[test]
@@ -967,7 +995,7 @@ fn version_allow_no_changesets_output_writes_an_empty_plan() {
     let output = changesette(dir.path(), &["version", "-a", "--output", "plan.json"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
-    assert_eq!(stderr(&output), "");
+    assert_eq!(stderr(&output), "Wrote the release plan to plan.json\n");
     assert_eq!(
         fs::read_to_string(dir.path().join("plan.json")).unwrap(),
         "{\n  \"changesets\": [],\n  \"releases\": []\n}\n"
@@ -1722,6 +1750,37 @@ fn version_warns_on_an_unmatched_group_pattern() {
 }
 
 #[test]
+fn version_log_level_warn_keeps_warnings_and_drops_info() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"missing-*\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    let output = changesette(dir.path(), &["version", "--log-level", "warn"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stderr(&output),
+        "warning: fixed: the package or glob \"missing-*\" does not match any package in the workspace\n"
+    );
+}
+
+#[test]
+fn version_log_level_error_drops_warnings_but_reports_failures() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"missing-*\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    let output = changesette(dir.path(), &["version", "--log-level", "error"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "");
+
+    let output = changesette(dir.path(), &["version", "--log-level", "error"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).starts_with("error: "),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn status_warns_on_an_unmatched_group_pattern() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"linked\": [[\"missing-*\"]] }\n");
@@ -2402,6 +2461,7 @@ fn version_in_pre_mode_bumps_to_a_prerelease() {
     assert_eq!(stdout(&output), "");
     let err = stderr(&output);
     assert!(err.contains("in pre mode with tag `beta`"), "{err}");
+    assert!(!err.contains("warning:"), "{err}");
     assert!(
         err.contains("Bumped ublacklist 1.2.3 -> 1.3.0-beta.0\n"),
         "{err}"

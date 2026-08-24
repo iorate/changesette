@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use semver::Version;
+use tracing::debug;
 
 use crate::{
     bump::{self, Bump},
@@ -31,8 +32,6 @@ pub(crate) struct PlannedVersion {
     /// The changesets `version` consumes, skip-filtered.
     pub(crate) consumed_changes: Vec<LoadedChange>,
     pub(crate) releases: Vec<PlannedRelease>,
-    /// The config warnings to print to stderr, without a `warning: ` prefix.
-    pub(crate) warnings: Vec<String>,
 }
 
 fn pre_state(pre: Option<&PreJson>) -> Option<&PreJson> {
@@ -104,7 +103,6 @@ pub(crate) fn plan_version(
         changes,
         consumed_changes,
         releases,
-        warnings: groups.warnings,
     })
 }
 
@@ -238,7 +236,13 @@ fn apply_groups<'a>(
             if skip.contains(name) {
                 continue;
             }
-            max_bumps.insert(workspace.member(name)?.name(), Some(max_bump));
+            let previous = max_bumps.insert(workspace.member(name)?.name(), Some(max_bump));
+            if previous.flatten() != Some(max_bump) {
+                debug!(
+                    "`{name}`: the \"fixed\" group raises the bump to {} (planning against {highest})",
+                    max_bump.as_str()
+                );
+            }
             old_versions.insert(name.clone(), highest.clone());
         }
     }
@@ -251,6 +255,12 @@ fn apply_groups<'a>(
             if let Some(entry) = max_bumps.get_mut(name.as_str())
                 && entry.is_some()
             {
+                if *entry != Some(max_bump) {
+                    debug!(
+                        "`{name}`: the \"linked\" group raises the bump to {} (planning against {highest})",
+                        max_bump.as_str()
+                    );
+                }
                 *entry = Some(max_bump);
                 old_versions.insert(name.clone(), highest.clone());
             }

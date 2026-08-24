@@ -4,6 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use tracing::debug;
+
 use super::pattern::{Pattern, Seg, seg_matches};
 
 /// Collects the member candidate directories under `root` matching
@@ -71,15 +73,21 @@ fn literal_fast_path(
     candidates.entry(rel_dir).or_insert(dir);
 }
 
+// Both callers check the manifest's existence first, so the debug line only
+// names real candidates.
 fn excluded(rel_dir: &str, negations: &[Pattern]) -> bool {
     let rel_manifest = if rel_dir == "." {
         "package.json".to_owned()
     } else {
         format!("{rel_dir}/package.json")
     };
-    negations
+    let excluded = negations
         .iter()
-        .any(|negation| negation.matches(&rel_manifest, true))
+        .any(|negation| negation.matches(&rel_manifest, true));
+    if excluded {
+        debug!("{rel_dir}: excluded by a negative workspace pattern");
+    }
+    excluded
 }
 
 // A walker state is a pattern (as an index into the walked patterns) and the
@@ -119,7 +127,7 @@ fn walk(
         .any(|&(pattern, seg)| seg == patterns[pattern].segs().len() - 1)
     {
         let rel_dir = if rel.is_empty() { "." } else { rel };
-        if !excluded(rel_dir, negations) && dir.join("package.json").is_file() {
+        if dir.join("package.json").is_file() && !excluded(rel_dir, negations) {
             candidates
                 .entry(rel_dir.to_owned())
                 .or_insert_with(|| dir.to_path_buf());
@@ -154,6 +162,7 @@ fn walk(
             continue;
         }
         let mut next = Vec::new();
+        let mut symlink_skipped = false;
         for &(pattern, seg_index) in states {
             let segs = patterns[pattern].segs();
             // The final `package.json` segment names a file, so consuming it
@@ -170,6 +179,7 @@ fn walk(
             // literal consumption always advances the index, which bounds
             // symlink descent by the pattern length and keeps cycles safe.
             if is_symlink && !matches!(seg, Seg::Literal(_)) {
+                symlink_skipped = true;
                 continue;
             }
             let advanced = match seg {
@@ -181,6 +191,20 @@ fn walk(
             }
         }
         if next.is_empty() {
+            // Reported only when nothing else descends: a literal segment
+            // elsewhere may still enter the symlink. The path is built inside
+            // the macro so that this hot path allocates nothing at the
+            // default level.
+            if symlink_skipped {
+                debug!(
+                    "{}: a symlinked directory is not entered by a wildcard",
+                    if rel.is_empty() {
+                        name.to_owned()
+                    } else {
+                        format!("{rel}/{name}")
+                    }
+                );
+            }
             continue;
         }
         let next = closure(patterns, next);

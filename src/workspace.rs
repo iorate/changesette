@@ -11,6 +11,7 @@ use anyhow::{Context, Result, bail};
 use saphyr::{LoadableYamlNode, Yaml};
 use semver::Version;
 use serde_json::Value;
+use tracing::{debug, warn};
 
 #[derive(Debug)]
 pub(crate) struct Workspace {
@@ -42,10 +43,10 @@ impl Workspace {
             if dir.join("pnpm-workspace.yaml").is_file() {
                 let manifest = dir.join("pnpm-workspace.yaml");
                 let patterns = pnpm_patterns(&manifest)?;
-                return Ok(Workspace {
-                    root: dir.to_path_buf(),
-                    members: collect_members(dir, &manifest, &patterns, true)?,
-                });
+                return Ok(Workspace::new(
+                    dir.to_path_buf(),
+                    collect_members(dir, &manifest, &patterns, true)?,
+                ));
             }
             let path = dir.join("package.json");
             if !path.is_file() {
@@ -75,10 +76,10 @@ impl Workspace {
                     )
                 }
                 let patterns = npm_patterns(workspaces, &path)?;
-                return Ok(Workspace {
-                    root: dir.to_path_buf(),
-                    members: collect_members(dir, &path, &patterns, false)?,
-                });
+                return Ok(Workspace::new(
+                    dir.to_path_buf(),
+                    collect_members(dir, &path, &patterns, false)?,
+                ));
             }
             if fallback.is_none() {
                 fallback = Some((dir.to_path_buf(), path, value));
@@ -97,7 +98,29 @@ impl Workspace {
         let members = qualify(&value, dir.clone(), ".".to_owned(), &path)
             .into_iter()
             .collect();
-        Ok(Workspace { root: dir, members })
+        Ok(Workspace::new(dir, members))
+    }
+
+    // The one construction point, so that every discovery path reports the
+    // final member list — the shortest answer to "why is my package not
+    // found".
+    fn new(root: PathBuf, members: Vec<Member>) -> Workspace {
+        if members.is_empty() {
+            debug!("workspace {}: no members", root.display());
+        } else {
+            // The list is built inside the macro so that the event macro's
+            // enabled check makes it free at the default level.
+            debug!(
+                "workspace {}: members: {}",
+                root.display(),
+                members
+                    .iter()
+                    .map(|member| format!("{} ({})", member.name, member.rel_dir))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        Workspace { root, members }
     }
 
     pub(crate) fn root(&self) -> &Path {
@@ -316,37 +339,65 @@ fn collect_members(
 }
 
 // Applies the member qualification: a candidate without a nonempty string
-// `name` and a valid semver `version` is warned about and excluded rather
-// than erroring, so a repository with fixture or junk manifests still works;
-// changesette cannot address a nameless package anyway, and cannot bump a
-// versionless one.
+// `name` and a valid semver `version` is excluded rather than erroring, so a
+// repository with fixture or junk manifests still works; changesette cannot
+// address a nameless package anyway, and cannot bump a versionless one. A
+// missing `name` or `version` key is only reported at debug level — fixture,
+// private-root, and docs-site manifests omit them legitimately — while a key
+// carrying an invalid value can only be a mistake and warns.
 fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<Member> {
-    if !value.is_object() {
-        eprintln!(
-            "warning: {}: not a workspace member: the manifest is not a JSON object",
+    let Some(object) = value.as_object() else {
+        warn!(
+            "{}: not a workspace member: the manifest is not a JSON object",
             path.display()
         );
         return None;
-    }
-    let name = match value.get("name").and_then(Value::as_str) {
-        Some(name) if !name.is_empty() => name.to_owned(),
-        _ => {
-            eprintln!(
-                "warning: {}: not a workspace member: \"name\" must be a nonempty string",
+    };
+    let name = match object.get("name") {
+        None => {
+            debug!(
+                "{}: not a workspace member: \"name\" is missing",
+                path.display()
+            );
+            return None;
+        }
+        Some(Value::String(name)) if name.is_empty() => {
+            warn!(
+                "{}: not a workspace member: \"name\" is an empty string",
+                path.display()
+            );
+            return None;
+        }
+        Some(Value::String(name)) => name.clone(),
+        Some(_) => {
+            warn!(
+                "{}: not a workspace member: \"name\" is not a string",
                 path.display()
             );
             return None;
         }
     };
-    let version = match value
-        .get("version")
-        .and_then(Value::as_str)
-        .and_then(|version| version.parse::<Version>().ok())
-    {
-        Some(version) => version,
+    let version = match object.get("version") {
         None => {
-            eprintln!(
-                "warning: {}: not a workspace member: \"version\" must be a valid semver string",
+            debug!(
+                "{}: not a workspace member: \"version\" is missing",
+                path.display()
+            );
+            return None;
+        }
+        Some(Value::String(version)) => match version.parse::<Version>() {
+            Ok(version) => version,
+            Err(_) => {
+                warn!(
+                    "{}: not a workspace member: \"version\" {version:?} is not a valid semver",
+                    path.display()
+                );
+                return None;
+            }
+        },
+        Some(_) => {
+            warn!(
+                "{}: not a workspace member: \"version\" is not a string",
                 path.display()
             );
             return None;
@@ -357,7 +408,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
         dir,
         rel_dir,
         version,
-        private: value
+        private: object
             .get("private")
             .and_then(Value::as_bool)
             .unwrap_or(false),
@@ -376,8 +427,8 @@ fn exclude_duplicate_names(members: &mut Vec<Member>) {
     }
     members.retain(|member| {
         if counts[&member.name] > 1 {
-            eprintln!(
-                "warning: {}: not a workspace member: the name `{}` is used by more than one package",
+            warn!(
+                "{}: not a workspace member: the name `{}` is used by more than one package",
                 member.dir.join("package.json").display(),
                 member.name
             );

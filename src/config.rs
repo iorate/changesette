@@ -3,6 +3,7 @@ use std::{collections::BTreeSet, path::Path};
 use anyhow::{Context, Result, bail};
 use fast_glob::{glob_match, validate};
 use serde_json::Value;
+use tracing::warn;
 
 use crate::workspace::read_json;
 
@@ -69,7 +70,6 @@ impl Config {
             }
         }
 
-        let mut warnings = Vec::new();
         for (key, groups) in [("fixed", &self.fixed), ("linked", &self.linked)] {
             for pattern in groups.iter().flatten() {
                 // Following the upstream getUnmatchedPatterns, each pattern
@@ -77,18 +77,14 @@ impl Config {
                 // fast-glob does, so the pattern is matched as written here —
                 // unlike the ordered expansion above.
                 if !names.iter().any(|name| glob_match(pattern, *name)) {
-                    warnings.push(format!(
+                    warn!(
                         "{key}: the package or glob {pattern:?} does not match any package in the workspace"
-                    ));
+                    );
                 }
             }
         }
 
-        Ok(ResolvedGroups {
-            fixed,
-            linked,
-            warnings,
-        })
+        Ok(ResolvedGroups { fixed, linked })
     }
 }
 
@@ -97,8 +93,6 @@ impl Config {
 pub(crate) struct ResolvedGroups {
     pub(crate) fixed: Vec<Vec<String>>,
     pub(crate) linked: Vec<Vec<String>>,
-    /// The unmatched-pattern warnings, without a `warning: ` prefix.
-    pub(crate) warnings: Vec<String>,
 }
 
 fn expand_patterns<'a>(
@@ -392,8 +386,38 @@ mod tests {
         load_ok("{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]], \"linked\": [[\"@scope/*\"]] }\n");
     }
 
-    fn resolve_groups(text: &str, names: &[&str]) -> ResolvedGroups {
-        load_ok(text).resolve_groups(names).unwrap()
+    // Runs `f` under a subscriber writing to a buffer, and returns what the
+    // stderr layer would have printed.
+    fn capture_output(f: impl FnOnce()) -> String {
+        #[derive(Clone, Default)]
+        struct Buffer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+        impl std::io::Write for Buffer {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let buffer = Buffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .event_format(crate::output::Formatter)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, f);
+        let bytes = buffer.0.lock().unwrap().clone();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    fn resolve_groups(text: &str, names: &[&str]) -> (ResolvedGroups, String) {
+        let mut groups = None;
+        let output = capture_output(|| groups = Some(load_ok(text).resolve_groups(names).unwrap()));
+        (groups.unwrap(), output)
     }
 
     fn resolve_groups_err(text: &str, names: &[&str]) -> String {
@@ -403,21 +427,21 @@ mod tests {
 
     #[test]
     fn resolves_group_globs_with_negation() {
-        let groups = resolve_groups(
+        let (groups, output) = resolve_groups(
             "{ \"fixed\": [[\"pkg-*\", \"!pkg-b\"]], \"linked\": [[\"pkg-b\"]] }\n",
             &["pkg-a", "pkg-b", "pkg-c"],
         );
         assert_eq!(groups.fixed, [["pkg-a", "pkg-c"]]);
         assert_eq!(groups.linked, [["pkg-b"]]);
-        assert!(groups.warnings.is_empty());
+        assert_eq!(output, "");
     }
 
     #[test]
     fn resolves_empty_groups_without_warnings() {
-        let groups = resolve_groups("{}\n", &["pkg-a"]);
+        let (groups, output) = resolve_groups("{}\n", &["pkg-a"]);
         assert!(groups.fixed.is_empty());
         assert!(groups.linked.is_empty());
-        assert!(groups.warnings.is_empty());
+        assert_eq!(output, "");
     }
 
     #[test]
@@ -446,40 +470,38 @@ mod tests {
 
     #[test]
     fn warns_on_a_group_pattern_matching_nothing() {
-        let groups = resolve_groups(
+        let (groups, output) = resolve_groups(
             "{ \"fixed\": [[\"pkg-a\", \"missing-*\"]] }\n",
             &["pkg-a", "pkg-b"],
         );
         assert_eq!(groups.fixed, [["pkg-a"]]);
         assert_eq!(
-            groups.warnings,
-            [
-                "fixed: the package or glob \"missing-*\" does not match any package in the workspace"
-            ]
+            output,
+            "warning: fixed: the package or glob \"missing-*\" does not match any package in the workspace\n"
         );
     }
 
     #[test]
     fn warns_on_a_negated_pattern_whose_body_matches_everything() {
-        let groups = resolve_groups(
+        let (groups, output) = resolve_groups(
             "{ \"linked\": [[\"pkg-*\", \"!pkg-*\"]] }\n",
             &["pkg-a", "pkg-b"],
         );
         assert_eq!(groups.linked, [[] as [&str; 0]]);
         assert_eq!(
-            groups.warnings,
-            ["linked: the package or glob \"!pkg-*\" does not match any package in the workspace"]
+            output,
+            "warning: linked: the package or glob \"!pkg-*\" does not match any package in the workspace\n"
         );
     }
 
     #[test]
     fn does_not_warn_on_a_negated_pattern_whose_body_misses_a_name() {
-        let groups = resolve_groups(
+        let (groups, output) = resolve_groups(
             "{ \"linked\": [[\"pkg-*\", \"!pkg-b\"]] }\n",
             &["pkg-a", "pkg-b"],
         );
         assert_eq!(groups.linked, [["pkg-a"]]);
-        assert!(groups.warnings.is_empty());
+        assert_eq!(output, "");
     }
 
     #[test]

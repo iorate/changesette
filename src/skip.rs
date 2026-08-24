@@ -1,17 +1,13 @@
 use std::{collections::BTreeSet, path::Path};
 
 use anyhow::{Context, Result, bail};
+use tracing::debug;
 
 use crate::{
     changeset::LoadedChange,
     config::Config,
     workspace::{Member, Workspace},
 };
-
-fn should_skip(member: &Member, config: &Config, ignore: &[String]) -> bool {
-    ignore.iter().any(|name| name == member.name())
-        || (member.private() && !config.private_packages_version)
-}
 
 /// The names of the workspace members `version` skips.
 pub(crate) struct SkipSet {
@@ -40,12 +36,17 @@ impl SkipSet {
             }
             cli_ignore.to_vec()
         };
-        let names = workspace
-            .members()
-            .iter()
-            .filter(|member| should_skip(member, config, &ignore))
-            .map(|member| member.name().to_owned())
-            .collect();
+        let mut names = BTreeSet::new();
+        for member in workspace.members() {
+            if ignore.iter().any(|name| name == member.name()) {
+                debug!("`{}` is skipped: ignored", member.name());
+            } else if member.private() && !config.private_packages_version {
+                debug!("`{}` is skipped: private", member.name());
+            } else {
+                continue;
+            }
+            names.insert(member.name().to_owned());
+        }
         Ok(SkipSet { names })
     }
 

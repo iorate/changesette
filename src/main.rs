@@ -24,6 +24,29 @@ struct Cli {
     command: Option<Command>,
     #[command(flatten)]
     add: AddArgs,
+    /// The lowest level of messages to print to stderr
+    #[arg(long, value_name = "LEVEL", global = true, default_value = "info")]
+    log_level: LogLevel,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+}
+
+impl LogLevel {
+    fn filter(self) -> tracing::level_filters::LevelFilter {
+        use tracing::level_filters::LevelFilter;
+        match self {
+            LogLevel::Error => LevelFilter::ERROR,
+            LogLevel::Warn => LevelFilter::WARN,
+            LogLevel::Info => LevelFilter::INFO,
+            LogLevel::Debug => LevelFilter::DEBUG,
+        }
+    }
 }
 
 #[derive(clap::Args)]
@@ -123,17 +146,18 @@ enum PreCommand {
 }
 
 fn main() -> ExitCode {
-    match run() {
+    let cli = Cli::parse();
+    output::init_subscriber(cli.log_level.filter());
+    match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("error: {err:#}");
+            tracing::error!("{err:#}");
             ExitCode::FAILURE
         }
     }
 }
 
-fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command.unwrap_or(Command::Add(cli.add)) {
         Command::Init => commands::init::run(),
         Command::Add(AddArgs {

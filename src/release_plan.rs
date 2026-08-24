@@ -2,6 +2,7 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
 use serde::Serialize;
+use tracing::info;
 
 use crate::{bump::Bump, changeset::LoadedChange, output, plan::PlannedRelease, pre::PreJson};
 
@@ -98,5 +99,7 @@ pub(crate) fn write_file(path: &Path, plan: &ReleasePlan) -> Result<()> {
         return output::print_json(plan);
     }
     let json = serde_json::to_string_pretty(plan)? + "\n";
-    fs::write(path, json).with_context(|| path.display().to_string())
+    fs::write(path, json).with_context(|| path.display().to_string())?;
+    info!("Wrote the release plan to {}", path.display());
+    Ok(())
 }
