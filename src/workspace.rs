@@ -321,7 +321,13 @@ fn collect_members(
 // changesette cannot address a nameless package anyway, and cannot bump a
 // versionless one.
 fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<Member> {
-    // A non-object manifest has no fields, so it falls out here too.
+    if !value.is_object() {
+        eprintln!(
+            "warning: {}: not a workspace member: the manifest is not a JSON object",
+            path.display()
+        );
+        return None;
+    }
     let name = match value.get("name").and_then(Value::as_str) {
         Some(name) if !name.is_empty() => name.to_owned(),
         _ => {
@@ -1372,6 +1378,27 @@ mod tests {
         let workspace = Workspace::discover(dir.path()).unwrap();
         assert_eq!(workspace.root(), dir.path());
         assert_eq!(names_and_dirs(&workspace), []);
+    }
+
+    #[test]
+    fn excludes_a_non_object_member_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"packages/*\"\n",
+        );
+        write(dir.path(), "packages/a/package.json", "[1, 2]\n");
+        write(
+            dir.path(),
+            "packages/b/package.json",
+            "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-b", dir.path().join("packages/b").as_path())]
+        );
     }
 
     #[test]
