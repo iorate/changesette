@@ -1,3 +1,6 @@
+use std::iter::Peekable;
+use std::str::CharIndices;
+
 use anyhow::{Result, bail};
 
 #[derive(Debug, PartialEq)]
@@ -18,7 +21,8 @@ pub(crate) struct Pattern {
 
 /// Compiles one workspace pattern into its polarity (`true` for a `!`
 /// negation) and matcher; the errors name only the offense, and the caller
-/// attaches the manifest path and the original pattern.
+/// attaches the manifest path and the original pattern. The body is read as
+/// one fast-glob glob and split at its top-level separators.
 pub(crate) fn compile(original: &str) -> Result<(bool, Pattern)> {
     // Every leading `!` flips the polarity, as npm counts them; leaving one
     // in the body would hand it to the glob matcher.
@@ -31,22 +35,18 @@ pub(crate) fn compile(original: &str) -> Result<(bool, Pattern)> {
     // An absolute path and a `..` segment are the patterns the upstream
     // tools silently break on or resolve outside the root, so they are loud
     // errors rather than a silent no-match.
-    if body.starts_with('/') {
+    if body.starts_with('/') || body.starts_with("\\/") {
         bail!("absolute patterns are not supported")
     }
+    let parts = split(body)?;
     // An empty pattern is a plain mistake — npm matches nothing and pnpm
     // errors — and reading it as `.` would silently opt the root into
     // versioning. An intentional root reference has a `.` segment.
-    if body.split('/').all(str::is_empty) {
+    if parts.iter().all(|part| part.is_empty()) {
         bail!("empty patterns are not supported")
     }
     let mut segs = Vec::new();
-    // Splitting runs before any glob parsing, so a `/` can be neither
-    // escaped (`a\/b`) nor put inside braces (`{a,b/c}`): both are
-    // deliberately unsupported (zero occurrences in the wild), and the
-    // shattered halves (`a\`, `{a,b`) fail the glob validation loudly
-    // rather than matching anything by accident.
-    for part in body.split('/') {
+    for part in parts {
         if part.is_empty() || part == "." {
             continue;
         }
@@ -61,12 +61,91 @@ pub(crate) fn compile(original: &str) -> Result<(bool, Pattern)> {
     Ok((negated, Pattern { segs }))
 }
 
+fn split(body: &str) -> Result<Vec<&str>> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut brace_depth: usize = 0;
+    let mut chars = body.char_indices().peekable();
+    while let Some((index, c)) = chars.next() {
+        match c {
+            '\\' => {
+                // A separator cannot be escaped: fast-glob unescapes `\/`
+                // right back into one, so `\/` splits like a bare `/` (with
+                // the `\` dropped) rather than diverging from the matcher.
+                if let Some(&(slash_index, '/')) = chars.peek() {
+                    if brace_depth > 0 {
+                        bail!("`/` inside braces is not supported")
+                    }
+                    chars.next();
+                    parts.push(&body[start..index]);
+                    start = slash_index + 1;
+                } else {
+                    // An escaped character, or a trailing `\` that the
+                    // per-segment validation rejects.
+                    chars.next();
+                }
+            }
+            '/' => {
+                // Braces spanning segments are deliberately unsupported
+                // (zero occurrences in the wild): an intended error now,
+                // where the shattered halves used to fail the glob
+                // validation by accident.
+                if brace_depth > 0 {
+                    bail!("`/` inside braces is not supported")
+                }
+                parts.push(&body[start..index]);
+                start = index + 1;
+            }
+            '{' => brace_depth += 1,
+            // A `}` without a matching `{` is an ordinary character.
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            '[' => skip_class(&mut chars)?,
+            _ => {}
+        }
+    }
+    parts.push(&body[start..]);
+    Ok(parts)
+}
+
+fn skip_class(chars: &mut Peekable<CharIndices<'_>>) -> Result<()> {
+    // Mirrors fast-glob's class parsing: an optional `^`/`!` prefix, then
+    // the first character is a literal member (so a leading `]` does not
+    // close the class), and `\` escapes the next character. An unclosed
+    // class swallows the rest of the body and is left for the per-segment
+    // validation to reject.
+    if matches!(chars.peek(), Some((_, '^' | '!'))) {
+        chars.next();
+    }
+    let mut first = true;
+    while let Some((_, c)) = chars.next() {
+        match c {
+            ']' if !first => return Ok(()),
+            '/' => bail!("`/` inside character classes is not supported"),
+            '\\' => {
+                if matches!(chars.peek(), Some((_, '/'))) {
+                    bail!("`/` inside character classes is not supported")
+                }
+                chars.next();
+            }
+            _ => {}
+        }
+        first = false;
+    }
+    Ok(())
+}
+
 fn classify(part: &str) -> Result<Seg> {
     if part == "**" {
         return Ok(Seg::Globstar);
     }
     if part.contains(['*', '?', '[', ']', '{', '}', '\\']) {
         fast_glob::validate(part)?;
+        // fast_glob reads every leading `!` of the string it is handed as a
+        // negation, while in the whole pattern this `!` sits mid-glob and is
+        // literal — escape it so the matcher reads it that way too.
+        if part.starts_with('!') {
+            return Ok(Seg::Wildcard(format!("\\{part}")));
+        }
         return Ok(Seg::Wildcard(part.to_owned()));
     }
     Ok(Seg::Literal(part.to_owned()))
@@ -230,6 +309,72 @@ mod tests {
     fn rejects_invalid_glob_syntax() {
         assert!(compile("packages/[").is_err());
         assert!(compile("src/{a,b").is_err());
+        assert!(compile("x\\").is_err());
+    }
+
+    #[test]
+    fn a_bang_after_the_leading_run_is_literal() {
+        let pattern = positive("packages/!foo*");
+        assert_eq!(
+            pattern.segs(),
+            [lit("packages"), wild("\\!foo*"), lit("package.json")]
+        );
+        assert!(pattern.matches("packages/!foox/package.json", false));
+        assert!(!pattern.matches("packages/foox/package.json", false));
+        assert!(!pattern.matches("packages/bar/package.json", false));
+        assert_eq!(
+            positive("packages/!foo").segs(),
+            [lit("packages"), lit("!foo"), lit("package.json")]
+        );
+        assert_eq!(
+            positive("a/\\!b*").segs(),
+            [lit("a"), wild("\\!b*"), lit("package.json")]
+        );
+    }
+
+    #[test]
+    fn an_escaped_slash_is_a_separator() {
+        assert_eq!(
+            positive("a\\/b").segs(),
+            [lit("a"), lit("b"), lit("package.json")]
+        );
+        assert_eq!(positive("a\\/").segs(), [lit("a"), lit("package.json")]);
+        assert!(error("\\/").contains("absolute"));
+        assert!(error("\\/x").contains("absolute"));
+    }
+
+    #[test]
+    fn rejects_a_slash_inside_braces() {
+        for pattern in ["{a,b/c}", "{a,b\\/c}", "x/{a,b/c}", "{a,{b/c,d}}"] {
+            assert!(error(pattern).contains("braces"), "{pattern}");
+        }
+        assert_eq!(
+            positive("x/{a,b}/y").segs(),
+            [lit("x"), wild("{a,b}"), lit("y"), lit("package.json")]
+        );
+        assert_eq!(
+            positive("\\{a,b\\}/c").segs(),
+            [wild("\\{a,b\\}"), lit("c"), lit("package.json")]
+        );
+        assert_eq!(
+            positive("a}b/c").segs(),
+            [wild("a}b"), lit("c"), lit("package.json")]
+        );
+    }
+
+    #[test]
+    fn rejects_a_slash_inside_a_character_class() {
+        for pattern in ["[a/b]", "[a\\/b]", "x[/]y", "[!/]", "x/[a/b]"] {
+            assert!(error(pattern).contains("character class"), "{pattern}");
+        }
+        assert_eq!(
+            positive("[]]x/y").segs(),
+            [wild("[]]x"), lit("y"), lit("package.json")]
+        );
+        assert_eq!(
+            positive("[{]/a").segs(),
+            [wild("[{]"), lit("a"), lit("package.json")]
+        );
     }
 
     #[test]
