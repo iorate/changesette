@@ -33,6 +33,11 @@ pub(crate) fn compile(original: &str) -> Result<(bool, Pattern)> {
         bail!("absolute patterns are not supported")
     }
     let mut segs = Vec::new();
+    // Splitting runs before any glob parsing, so a `/` can be neither
+    // escaped (`a\/b`) nor put inside braces (`{a,b/c}`): both are
+    // deliberately unsupported (zero occurrences in the wild), and the
+    // shattered halves (`a\`, `{a,b`) fail the glob validation loudly
+    // rather than matching anything by accident.
     for part in body.split('/') {
         if part.is_empty() || part == "." {
             continue;
