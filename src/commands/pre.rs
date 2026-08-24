@@ -1,9 +1,9 @@
 use std::{env, fs};
 
 use anyhow::{Context, Result, bail};
+use tracing::info;
 
 use crate::{
-    output,
     pre::{self, PreJson, PreMode},
     workspace::Workspace,
 };
@@ -35,9 +35,10 @@ pub(crate) fn enter(tag: &str) -> Result<()> {
         }
     }
 
-    output::eprint_line(&format!(
+    info!(
         "Entered pre mode with tag `{tag}`\nRun `changesette version` to bump to prerelease versions"
-    ))
+    );
+    Ok(())
 }
 
 /// Exits pre-release mode by flipping `.changeset/pre.json` to the exited
@@ -53,5 +54,6 @@ pub(crate) fn exit() -> Result<()> {
     pre.set_mode(PreMode::Exit);
     fs::write(pre.path(), pre.text()).with_context(|| pre.path().display().to_string())?;
 
-    output::eprint_line("Exited pre mode\nRun `changesette version` to bump to final versions")
+    info!("Exited pre mode\nRun `changesette version` to bump to final versions");
+    Ok(())
 }

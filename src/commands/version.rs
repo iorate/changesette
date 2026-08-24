@@ -1,8 +1,9 @@
 use std::{fs, path::Path};
 
 use anyhow::{Context, Result, bail};
+use tracing::info;
 
-use crate::{output, plan, release_plan, snapshot::Snapshot};
+use crate::{plan, release_plan, snapshot::Snapshot};
 
 /// Consumes every changeset: bumps each named package's package.json,
 /// upserts its CHANGELOG.md section, and deletes the consumed files — in pre
@@ -15,15 +16,12 @@ pub(crate) fn run(
     snapshot: Option<&Snapshot>,
 ) -> Result<()> {
     let planned = plan::plan_version(ignore, snapshot)?;
-    for warning in &planned.warnings {
-        output::eprint_line(&format!("warning: {warning}"))?;
-    }
     let pre = planned.in_pre();
     if let Some(pre) = pre {
-        output::eprint_line(&format!(
-            "warning: in pre mode with tag `{}`; versions will be prereleases. Run `changesette pre exit` first for a normal release.",
+        info!(
+            "in pre mode with tag `{}`; versions will be prereleases. Run `changesette pre exit` first for a normal release.",
             pre.tag()
-        ))?;
+        );
     }
     let in_pre = pre.is_some();
     let exiting = planned.exiting_pre();
@@ -83,20 +81,21 @@ pub(crate) fn run(
         ),
         None => {
             if planned.changes.is_empty() && !exiting {
-                return output::eprint_line("No unreleased changesets found.");
+                info!("No unreleased changesets found.");
+                return Ok(());
             }
             let mut bumped = false;
             for release in &planned.releases {
                 if release.bump.is_some() {
-                    output::eprint_line(&format!(
+                    info!(
                         "Bumped {} {} -> {}",
                         release.name, release.old_version, release.new_version
-                    ))?;
+                    );
                     bumped = true;
                 }
             }
             if !bumped && !planned.changes.is_empty() {
-                output::eprint_line("No packages to bump.")?;
+                info!("No packages to bump.");
             }
             Ok(())
         }

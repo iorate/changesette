@@ -202,6 +202,8 @@ jobs:
 
 ## CLI
 
+Every command accepts `--log-level <error|warn|info|debug>` (default `info`) after the subcommand, setting the lowest level of the messages printed to stderr.
+
 ### `changesette init`
 
 Creates the `.changeset/` directory with a `README.md` and a `config.json` holding the default configuration. Optional: every command works without the directory, and `add` creates it on demand.

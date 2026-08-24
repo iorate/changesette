@@ -1,8 +1,9 @@
 use std::{env, fs, io, io::Write};
 
 use anyhow::{Context, Result};
+use tracing::info;
 
-use crate::{output, workspace::Workspace};
+use crate::workspace::Workspace;
 
 const README: &str = "# Changesets
 
@@ -35,7 +36,7 @@ pub(crate) fn run() -> Result<()> {
     let changeset_dir = workspace.root().join(".changeset");
     fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
 
-    let mut lines = Vec::new();
+    let mut created = false;
     for (file_name, content) in [("README.md", README), ("config.json", CONFIG)] {
         let path = changeset_dir.join(file_name);
         match fs::OpenOptions::new()
@@ -46,18 +47,19 @@ pub(crate) fn run() -> Result<()> {
             Ok(mut file) => {
                 file.write_all(content.as_bytes())
                     .with_context(|| path.display().to_string())?;
-                lines.push(format!(
-                    "Created {}",
-                    workspace.display_path(&cwd, &path).display()
-                ));
+                info!("Created {}", workspace.display_path(&cwd, &path).display());
+                created = true;
             }
             Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
             Err(err) => return Err(err).context(path.display().to_string()),
         }
     }
 
-    if !lines.is_empty() {
-        output::eprint_line(&lines.join("\n"))?;
+    if !created {
+        info!(
+            "{} is already initialized",
+            workspace.display_path(&cwd, &changeset_dir).display()
+        );
     }
     Ok(())
 }

@@ -9,9 +9,6 @@ use crate::{bump::Bump, output, plan, release_plan};
 /// applying it.
 pub(crate) fn run(verbose: bool, output_path: Option<&Path>) -> Result<()> {
     let planned = plan::plan_version(&[], None)?;
-    for warning in &planned.warnings {
-        output::eprint_line(&format!("warning: {warning}"))?;
-    }
 
     if let Some(path) = output_path {
         return release_plan::write_file(

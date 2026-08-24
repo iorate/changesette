@@ -8,10 +8,11 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
+use tracing::info;
 
 use crate::{
     bump::Bump,
-    config, output,
+    config,
     skip::SkipSet,
     workspace::{Member, Workspace},
 };
@@ -113,13 +114,10 @@ pub(crate) fn run(
                 confirmation.push_str(&format!("\n{}:  {}", bump.as_str(), names.join(", ")));
             }
         }
-        output::eprint_line(&confirmation)?;
+        info!("{confirmation}");
     }
 
-    output::eprint_line(&format!(
-        "Added {}",
-        workspace.display_path(&cwd, &path).display()
-    ))?;
+    info!("Added {}", workspace.display_path(&cwd, &path).display());
 
     if open {
         open_editor(&path)?;
@@ -257,7 +255,7 @@ fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Bump)>> {
         );
     }
     if !remaining.is_empty() {
-        eprintln!(
+        info!(
             "The following packages will be patch bumped:\n{}",
             remaining
                 .iter()
