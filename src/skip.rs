@@ -11,7 +11,6 @@ use crate::{
 fn should_skip(member: &Member, config: &Config, ignore: &[String]) -> bool {
     ignore.iter().any(|name| name == member.name())
         || (member.private() && !config.private_packages_version)
-        || member.version().is_none()
 }
 
 /// The names of the workspace members `version` skips.
@@ -20,9 +19,9 @@ pub(crate) struct SkipSet {
 }
 
 impl SkipSet {
-    /// Collects the members skipped as private, ignored, or versionless,
-    /// resolving the ignore names from the config or `cli_ignore` (using
-    /// both is an error).
+    /// Collects the members skipped as private or ignored, resolving the
+    /// ignore names from the config or `cli_ignore` (using both is an
+    /// error).
     pub(crate) fn load(
         workspace: &Workspace,
         config: &Config,

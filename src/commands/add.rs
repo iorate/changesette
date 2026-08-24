@@ -203,13 +203,11 @@ fn releases_from_flags(
 fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Bump)>> {
     if let [member] = packages {
         const ITEMS: [Bump; 3] = [Bump::Patch, Bump::Minor, Bump::Major];
-        let prompt = match member.version() {
-            Some(version) => format!(
-                "What kind of change is this for {}? (current version is {version})",
-                member.name()
-            ),
-            None => format!("What kind of change is this for {}?", member.name()),
-        };
+        let prompt = format!(
+            "What kind of change is this for {}? (current version is {})",
+            member.name(),
+            member.version()
+        );
         let index = dialoguer::Select::new()
             .with_prompt(prompt)
             .items(ITEMS.map(Bump::as_str))
@@ -233,10 +231,7 @@ fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Bump)>> {
 
     let labels: Vec<String> = affected
         .iter()
-        .map(|member| match member.version() {
-            Some(version) => format!("{}@{version}", member.name()),
-            None => member.name().to_owned(),
-        })
+        .map(|member| format!("{}@{}", member.name(), member.version()))
         .collect();
 
     let mut releases = Vec::new();

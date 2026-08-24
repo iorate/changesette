@@ -545,7 +545,6 @@ fn add_fails_in_a_memberless_workspace() {
         "{\n  \"workspaces\": []\n}\n",
     )
     .unwrap();
-    fs::write(dir.path().join("package-lock.json"), "").unwrap();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(dir.path(), &["add", "--empty"]);
     assert!(!output.status.success());
@@ -563,7 +562,6 @@ fn workspace_dir() -> TempDir {
         "{\n  \"workspaces\": [\"packages/*\"]\n}\n",
     )
     .unwrap();
-    fs::write(dir.path().join("package-lock.json"), "").unwrap();
     fs::create_dir_all(dir.path().join("packages/a")).unwrap();
     fs::write(
         dir.path().join("packages/a/package.json"),
@@ -674,7 +672,7 @@ fn get_packages_keeps_dirs_relative_to_the_root_from_a_subdirectory() {
 }
 
 #[test]
-fn get_packages_renders_a_parent_directory_member_dir() {
+fn get_packages_fails_on_a_parent_directory_pattern() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join("ws")).unwrap();
     fs::write(
@@ -689,15 +687,16 @@ fn get_packages_renders_a_parent_directory_member_dir() {
     )
     .unwrap();
     let output = changesette(&dir.path().join("ws"), &["get-packages"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        "[{\"name\":\"pkg-a\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"../sibling/a\"}]\n"
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(
+        err.contains("invalid workspace pattern \"../sibling/*\""),
+        "{err}"
     );
 }
 
 #[test]
-fn version_skips_a_versionless_package_and_keeps_its_changeset() {
+fn version_fails_for_a_changeset_naming_an_excluded_package() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("package.json"),
@@ -707,8 +706,10 @@ fn version_skips_a_versionless_package_and_keeps_its_changeset() {
     write_changeset(dir.path(), "a.md", &[("ublacklist", "patch")], "Fix bug");
     let before = dir_snapshot(dir.path());
     let output = changesette(dir.path(), &["version"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stderr(&output), "No packages to bump.\n");
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains("not a workspace member"), "{err}");
+    assert!(err.contains("`ublacklist` not found"), "{err}");
     assert_eq!(dir_snapshot(dir.path()), before);
 }
 
@@ -717,7 +718,7 @@ fn mixed_workspace_dir() -> TempDir {
     fs::create_dir_all(dir.path().join("packages/b")).unwrap();
     fs::write(
         dir.path().join("packages/b/package.json"),
-        "{\n  \"name\": \"pkg-b\",\n  \"private\": true\n}\n",
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"1.0.0\",\n  \"private\": true\n}\n",
     )
     .unwrap();
     fs::create_dir_all(dir.path().join("packages/c")).unwrap();
@@ -741,14 +742,59 @@ fn get_packages_excludes_skipped_packages_by_default() {
 }
 
 #[test]
-fn get_packages_all_lists_every_member_and_omits_a_missing_version() {
+fn get_packages_all_lists_every_member() {
     let dir = mixed_workspace_dir();
     let output = changesette(dir.path(), &["get-packages", "--all"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"pkg-b\",\"private\":true,\"dir\":\"packages/b\"},{\"name\":\"pkg-c\",\"version\":\"2.0.0\",\"private\":false,\"dir\":\"packages/c\"}]\n"
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"pkg-b\",\"version\":\"1.0.0\",\"private\":true,\"dir\":\"packages/b\"},{\"name\":\"pkg-c\",\"version\":\"2.0.0\",\"private\":false,\"dir\":\"packages/c\"}]\n"
     );
+}
+
+#[test]
+fn get_packages_warns_about_excluded_candidates_and_omits_them() {
+    let dir = workspace_dir();
+    for (name, manifest) in [
+        ("b", "{ \"version\": \"1.0.0\" }\n"),
+        ("c", "{ \"name\": \"pkg-c\" }\n"),
+        ("d", "{ \"name\": \"pkg-d\", \"version\": \"1.0\" }\n"),
+        ("e", "{ \"name\": \"dup\", \"version\": \"1.0.0\" }\n"),
+        ("f", "{ \"name\": \"dup\", \"version\": \"2.0.0\" }\n"),
+    ] {
+        fs::create_dir_all(dir.path().join("packages").join(name)).unwrap();
+        fs::write(
+            dir.path().join("packages").join(name).join("package.json"),
+            manifest,
+        )
+        .unwrap();
+    }
+    let output = changesette(dir.path(), &["get-packages", "--all"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"}]\n"
+    );
+    let err = stderr(&output);
+    let manifest = |name: &str| {
+        dir.path()
+            .join("packages")
+            .join(name)
+            .join("package.json")
+            .display()
+            .to_string()
+    };
+    assert!(err.contains(&manifest("b")), "{err}");
+    assert!(err.contains("\"name\" must be a nonempty string"), "{err}");
+    assert!(err.contains(&manifest("c")), "{err}");
+    assert!(
+        err.contains("\"version\" must be a valid semver string"),
+        "{err}"
+    );
+    assert!(err.contains(&manifest("d")), "{err}");
+    assert!(err.contains(&manifest("e")), "{err}");
+    assert!(err.contains(&manifest("f")), "{err}");
+    assert!(err.contains("`dup`"), "{err}");
 }
 
 #[test]
@@ -804,7 +850,6 @@ fn get_packages_prints_an_empty_array_for_a_memberless_workspace() {
         "{\n  \"workspaces\": []\n}\n",
     )
     .unwrap();
-    fs::write(dir.path().join("package-lock.json"), "").unwrap();
     let output = changesette(dir.path(), &["get-packages"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "[]\n");
@@ -1941,7 +1986,7 @@ fn version_output_includes_a_skipped_changeset_without_a_release() {
 }
 
 #[test]
-fn version_tolerates_a_broken_manifest_in_an_unreleased_member() {
+fn version_excludes_a_member_with_an_invalid_version_and_bumps_the_rest() {
     let dir = workspace_dir();
     fs::create_dir_all(dir.path().join("packages/b")).unwrap();
     fs::write(
@@ -1952,7 +1997,17 @@ fn version_tolerates_a_broken_manifest_in_an_unreleased_member() {
     write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stderr(&output), "Bumped pkg-a 3.1.4 -> 3.2.0\n");
+    let err = stderr(&output);
+    assert!(
+        err.contains(
+            &dir.path()
+                .join("packages/b/package.json")
+                .display()
+                .to_string()
+        ),
+        "{err}"
+    );
+    assert!(err.ends_with("Bumped pkg-a 3.1.4 -> 3.2.0\n"), "{err}");
 }
 
 #[test]

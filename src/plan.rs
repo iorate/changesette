@@ -152,7 +152,7 @@ fn plan_releases(
         let member = workspace.member(name)?;
         let old_version = match overrides.old_versions.get(name) {
             Some(version) => version.clone(),
-            None => member_version(member)?,
+            None => member.version().clone(),
         };
         let changeset_ids = changes
             .iter()
@@ -265,11 +265,7 @@ fn apply_groups<'a>(
         for group in groups.fixed.iter().chain(&groups.linked) {
             let mut counter = 0;
             for name in group {
-                let member = workspace.member(name)?;
-                if member.version().is_none() {
-                    continue;
-                }
-                counter = counter.max(bump::pre_counter(&member_version(member)?, tag));
+                counter = counter.max(bump::pre_counter(workspace.member(name)?.version(), tag));
             }
             for name in group {
                 pre_counters.insert(name.clone(), counter);
@@ -293,21 +289,18 @@ fn group_max_bump(group: &[String], max_bumps: &BTreeMap<&str, Option<Bump>>) ->
 }
 
 // The highest current version among all group members, the skipped ones
-// included as in the upstream getCurrentHighestVersion; versionless members
-// contribute nothing.
+// included as in the upstream getCurrentHighestVersion.
 fn group_highest_version(workspace: &Workspace, group: &[String]) -> Result<Version> {
-    let mut highest: Option<Version> = None;
+    let mut highest: Option<&Version> = None;
     for name in group {
-        let member = workspace.member(name)?;
-        if member.version().is_none() {
-            continue;
-        }
-        let version = member_version(member)?;
-        if highest.as_ref().is_none_or(|h| version > *h) {
+        let version = workspace.member(name)?.version();
+        if highest.is_none_or(|h| version > h) {
             highest = Some(version);
         }
     }
-    Ok(highest.expect("a group with a releasing member has a versioned member"))
+    Ok(highest
+        .expect("a group with a releasing member is nonempty")
+        .clone())
 }
 
 // Forces a patch bump on every member left on a pre-release version that no
@@ -328,8 +321,7 @@ fn rescue_prereleases<'a>(
         // getHighestPreVersion; only the rescue itself excludes them.
         let mut on_prerelease = false;
         for name in group {
-            let member = workspace.member(name)?;
-            if member.version().is_some() && !member_version(member)?.pre.is_empty() {
+            if !workspace.member(name)?.version().pre.is_empty() {
                 on_prerelease = true;
                 break;
             }
@@ -343,26 +335,11 @@ fn rescue_prereleases<'a>(
         {
             continue;
         }
-        if group_rescued.contains(member.name()) || !member_version(member)?.pre.is_empty() {
+        if group_rescued.contains(member.name()) || !member.version().pre.is_empty() {
             max_bumps.insert(member.name(), Some(Bump::Patch));
         }
     }
     Ok(())
-}
-
-// Parses the semver version the member's manifest held at discovery; a
-// missing or invalid version is an error.
-fn member_version(member: &Member) -> Result<Version> {
-    let path = member.dir().join("package.json");
-    let raw = member
-        .version()
-        .with_context(|| format!("{}: missing top-level \"version\"", path.display()))?;
-    raw.parse().with_context(|| {
-        format!(
-            "{}: top-level \"version\" ({raw:?}) is not a valid semver version",
-            path.display()
-        )
-    })
 }
 
 pub(crate) struct StagedWrite {
