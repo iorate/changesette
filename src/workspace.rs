@@ -48,6 +48,9 @@ impl Workspace {
                 });
             }
             let path = dir.join("package.json");
+            if !path.is_file() {
+                continue;
+            }
             // A parse failure is always an error: walking past a broken npm
             // root would silently pick another root (an outer marker or the
             // single-package fallback), and merge conflict markers left in a
@@ -1564,6 +1567,19 @@ mod tests {
             let workspace = Workspace::discover(&dir.path().join("sub")).unwrap();
             assert_eq!(workspace.root(), dir.path(), "{stray}");
         }
+    }
+
+    #[test]
+    fn passes_over_a_directory_named_package_json() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [] }\n",
+        );
+        fs::create_dir_all(dir.path().join("sub/package.json")).unwrap();
+        let workspace = Workspace::discover(&dir.path().join("sub")).unwrap();
+        assert_eq!(workspace.root(), dir.path());
     }
 
     #[test]
