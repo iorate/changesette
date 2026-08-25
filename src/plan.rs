@@ -13,6 +13,7 @@ use crate::{
     changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
     config::{self, ResolvedGroups},
+    output::display_path,
     package_json::PackageJson,
     pre::{self, PreJson, PreMode},
     skip::SkipSet,
@@ -64,7 +65,7 @@ pub(crate) fn plan_version(
     let names: Vec<&str> = workspace.members().iter().map(Member::name).collect();
     let groups = config
         .resolve_groups(&names)
-        .with_context(|| changeset_dir.join("config.json").display().to_string())?;
+        .with_context(|| display_path(&changeset_dir.join("config.json")))?;
 
     let pre = PreJson::load(&changeset_dir)?;
     let in_pre = pre_state(pre.as_ref());
@@ -359,7 +360,7 @@ pub(crate) struct StagedWrite {
 
 impl StagedWrite {
     pub(crate) fn apply(&self) -> Result<()> {
-        fs::write(&self.path, &self.content).with_context(|| self.path.display().to_string())
+        fs::write(&self.path, &self.content).with_context(|| display_path(&self.path))
     }
 }
 
@@ -386,7 +387,7 @@ pub(crate) fn stage_writes(
         let changelog_text = match fs::read_to_string(&changelog_path) {
             Ok(text) => text,
             Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
-            Err(err) => return Err(err).context(changelog_path.display().to_string()),
+            Err(err) => return Err(err).context(display_path(&changelog_path)),
         };
         let section = render_section(&release.new_version, entry);
         writes.push(StagedWrite {

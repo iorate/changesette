@@ -9,7 +9,10 @@ use jsonc_parser::{
     cst::{CstRootNode, CstStringLit},
 };
 
-use crate::jsonc::{set_string_value, string_prop};
+use crate::{
+    jsonc::{set_string_value, string_prop},
+    output::display_path,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PreMode {
@@ -44,9 +47,9 @@ impl PreJson {
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => return Err(err).context(path.display().to_string()),
+            Err(err) => return Err(err).context(display_path(&path)),
         };
-        let context = path.display().to_string();
+        let context = display_path(&path);
         Self::parse(path, &text).context(context).map(Some)
     }
 
@@ -130,7 +133,7 @@ pub(crate) fn validate_tag(tag: &str) -> Result<()> {
 pub(crate) fn write_new(changeset_dir: &Path, tag: &str) -> Result<()> {
     let path = changeset_dir.join("pre.json");
     let text = format!("{{\n  \"mode\": \"pre\",\n  \"tag\": \"{tag}\"\n}}\n");
-    fs::write(&path, text).with_context(|| path.display().to_string())
+    fs::write(&path, text).with_context(|| display_path(&path))
 }
 
 #[cfg(test)]
@@ -154,7 +157,7 @@ mod tests {
         fs::write(dir.path().join("pre.json"), text).unwrap();
         let err = PreJson::load(dir.path()).err().unwrap();
         format!("{err:#}").replace(
-            &dir.path().join("pre.json").display().to_string(),
+            &display_path(&dir.path().join("pre.json")),
             ".changeset/pre.json",
         )
     }

@@ -13,6 +13,7 @@ use tracing::info;
 use crate::{
     bump::Bump,
     config,
+    output::display_path,
     skip::SkipSet,
     workspace::{Member, Workspace},
 };
@@ -52,7 +53,7 @@ pub(crate) fn run(
         !packages.is_empty(),
         "no versionable packages found; ensure the packages are not private or ignored and have a version field in package.json"
     );
-    fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
+    fs::create_dir_all(&changeset_dir).with_context(|| display_path(&changeset_dir))?;
 
     let (releases, summary) = if empty {
         (Vec::new(), message.unwrap_or_default())
@@ -100,7 +101,7 @@ pub(crate) fn run(
         .create_new(true)
         .open(&path)
         .and_then(|mut file| file.write_all(content.as_bytes()))
-        .with_context(|| path.display().to_string())?;
+        .with_context(|| display_path(&path))?;
 
     if !empty {
         let mut confirmation = String::from("Summary of changesets:");
@@ -117,7 +118,7 @@ pub(crate) fn run(
         info!("{confirmation}");
     }
 
-    info!("Added {}", workspace.display_path(&cwd, &path).display());
+    info!("Added {}", workspace.display_path(&cwd, &path));
 
     if open {
         open_editor(&path)?;

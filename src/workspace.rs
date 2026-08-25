@@ -13,6 +13,8 @@ use semver::Version;
 use serde_json::Value;
 use tracing::{debug, warn};
 
+use crate::output::display_path;
+
 #[derive(Debug)]
 pub(crate) struct Workspace {
     root: PathBuf,
@@ -72,7 +74,7 @@ impl Workspace {
                 if !workspaces.is_array() && !workspaces.is_object() {
                     bail!(
                         "{}: \"workspaces\" must be an array or an object",
-                        path.display()
+                        display_path(&path)
                     )
                 }
                 let patterns = npm_patterns(workspaces, &path)?;
@@ -89,7 +91,7 @@ impl Workspace {
         let Some((dir, path, value)) = fallback else {
             bail!(
                 "no package.json found in {} or any parent directory",
-                cwd.display()
+                display_path(cwd)
             )
         };
         // The fallback manifest takes the same qualification as any member;
@@ -106,13 +108,13 @@ impl Workspace {
     // found".
     fn new(root: PathBuf, members: Vec<Member>) -> Workspace {
         if members.is_empty() {
-            debug!("workspace {}: no members", root.display());
+            debug!("workspace {}: no members", display_path(&root));
         } else {
             // The list is built inside the macro so that the event macro's
             // enabled check makes it free at the default level.
             debug!(
                 "workspace {}: members: {}",
-                root.display(),
+                display_path(&root),
                 members
                     .iter()
                     .map(|member| format!("{} ({})", member.name, member.rel_dir))
@@ -149,9 +151,9 @@ impl Workspace {
         bail!("package `{name}` not found; known packages: {known}")
     }
 
-    /// Renders `path` relative to `cwd` for display; returns `path`
-    /// unchanged when either path is not under the workspace root.
-    pub(crate) fn display_path(&self, cwd: &Path, path: &Path) -> PathBuf {
+    /// Renders `path` relative to `cwd` for display; renders `path` as is
+    /// when either path is not under the workspace root.
+    pub(crate) fn display_path(&self, cwd: &Path, path: &Path) -> String {
         match (cwd.strip_prefix(&self.root), path.strip_prefix(&self.root)) {
             (Ok(cwd_rel), Ok(path_rel)) => {
                 let mut display = PathBuf::new();
@@ -159,9 +161,9 @@ impl Workspace {
                     display.push("..");
                 }
                 display.push(path_rel);
-                display
+                display_path(&display)
             }
-            _ => path.to_path_buf(),
+            _ => display_path(path),
         }
     }
 }
@@ -215,7 +217,7 @@ pub(crate) fn report_fs_error(path: &Path, err: &io::Error) {
         err.kind(),
         io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
     ) {
-        warn!("{}: {err}", path.display());
+        warn!("{}: {err}", display_path(path));
     }
 }
 
@@ -226,10 +228,10 @@ fn read_manifest(path: &Path) -> Result<Option<Value>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err).context(path.display().to_string()),
+        Err(err) => return Err(err).context(display_path(path)),
     };
     let value = serde_json::from_str(text.strip_prefix('\u{feff}').unwrap_or(&text))
-        .with_context(|| path.display().to_string())?;
+        .with_context(|| display_path(path))?;
     Ok(Some(value))
 }
 
@@ -240,9 +242,9 @@ pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err).context(path.display().to_string()),
+        Err(err) => return Err(err).context(display_path(path)),
     };
-    let value = serde_json::from_str(&text).with_context(|| path.display().to_string())?;
+    let value = serde_json::from_str(&text).with_context(|| display_path(path))?;
     Ok(Some(value))
 }
 
@@ -251,10 +253,10 @@ pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
 // absent, matching pnpm; any other type mismatch is an error, as it is in
 // pnpm itself.
 fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
-    let text = fs::read_to_string(path).with_context(|| path.display().to_string())?;
+    let text = fs::read_to_string(path).with_context(|| display_path(path))?;
     let docs = match Yaml::load_from_str(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
         Ok(docs) => docs,
-        Err(err) => bail!("{}: invalid YAML: {err}", path.display()),
+        Err(err) => bail!("{}: invalid YAML: {err}", display_path(path)),
     };
     // A missing or null document keeps an empty or comment-only file a
     // valid settings-only root.
@@ -265,7 +267,7 @@ fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
         return Ok(Vec::new());
     }
     let Yaml::Mapping(mapping) = doc else {
-        bail!("{}: not a YAML mapping", path.display())
+        bail!("{}: not a YAML mapping", display_path(path))
     };
     let packages = mapping
         .iter()
@@ -276,12 +278,18 @@ fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
     let items = match packages {
         Yaml::Sequence(items) => items,
         _ if packages.is_null() => return Ok(Vec::new()),
-        _ => bail!("{}: \"packages\" must be a list of strings", path.display()),
+        _ => bail!(
+            "{}: \"packages\" must be a list of strings",
+            display_path(path)
+        ),
     };
     let mut patterns = Vec::new();
     for item in items {
         let Some(pattern) = item.as_str() else {
-            bail!("{}: \"packages\" must be a list of strings", path.display())
+            bail!(
+                "{}: \"packages\" must be a list of strings",
+                display_path(path)
+            )
         };
         patterns.push(pattern.to_owned());
     }
@@ -301,7 +309,7 @@ fn npm_patterns(workspaces: &Value, path: &Path) -> Result<Vec<String>> {
             Some(Value::Array(items)) => items,
             _ => bail!(
                 "{}: \"packages\" in \"workspaces\" must be a list of strings",
-                path.display()
+                display_path(path)
             ),
         },
         _ => unreachable!(),
@@ -311,7 +319,7 @@ fn npm_patterns(workspaces: &Value, path: &Path) -> Result<Vec<String>> {
         let Some(pattern) = item.as_str() else {
             bail!(
                 "{}: \"workspaces\" patterns must be strings",
-                path.display()
+                display_path(path)
             )
         };
         patterns.push(pattern.to_owned());
@@ -331,7 +339,7 @@ fn collect_members(
         let (negated, compiled) = pattern::compile(original).with_context(|| {
             format!(
                 "{}: invalid workspace pattern {original:?}",
-                manifest.display()
+                display_path(manifest)
             )
         })?;
         if negated {
@@ -375,7 +383,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
     let Some(object) = value.as_object() else {
         warn!(
             "{}: not a workspace member: the manifest is not a JSON object",
-            path.display()
+            display_path(path)
         );
         return None;
     };
@@ -383,14 +391,14 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
         None => {
             debug!(
                 "{}: not a workspace member: \"name\" is missing",
-                path.display()
+                display_path(path)
             );
             return None;
         }
         Some(Value::String(name)) if name.is_empty() => {
             warn!(
                 "{}: not a workspace member: \"name\" is an empty string",
-                path.display()
+                display_path(path)
             );
             return None;
         }
@@ -398,7 +406,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
         Some(_) => {
             warn!(
                 "{}: not a workspace member: \"name\" is not a string",
-                path.display()
+                display_path(path)
             );
             return None;
         }
@@ -407,7 +415,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
         None => {
             debug!(
                 "{}: not a workspace member: \"version\" is missing",
-                path.display()
+                display_path(path)
             );
             return None;
         }
@@ -416,7 +424,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
             Err(_) => {
                 warn!(
                     "{}: not a workspace member: \"version\" {version:?} is not a valid semver",
-                    path.display()
+                    display_path(path)
                 );
                 return None;
             }
@@ -424,7 +432,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
         Some(_) => {
             warn!(
                 "{}: not a workspace member: \"version\" is not a string",
-                path.display()
+                display_path(path)
             );
             return None;
         }
@@ -468,7 +476,7 @@ fn exclude_duplicate_names(members: &mut Vec<Member>) {
             for member in group {
                 warn!(
                     "{}: not a workspace member: the name `{}` is used by more than one package",
-                    member.dir.join("package.json").display(),
+                    display_path(&member.dir.join("package.json")),
                     member.name
                 );
             }
@@ -488,6 +496,10 @@ mod tests {
 
     fn discover_ok(case: &str) -> Workspace {
         Workspace::discover(&fixture(case)).unwrap()
+    }
+
+    fn discover_debug(case: &str) -> String {
+        format!("{:#?}", discover_ok(case)).replace(r"\\", "/")
     }
 
     fn discover_err(case: &str) -> String {
@@ -510,17 +522,17 @@ mod tests {
 
     #[test]
     fn discovers_npm_workspace_members_sorted_by_name() {
-        insta::assert_debug_snapshot!(discover_ok("npm"));
+        insta::assert_snapshot!(discover_debug("npm"));
     }
 
     #[test]
     fn discovers_pnpm_workspace_members_with_exclusions() {
-        insta::assert_debug_snapshot!(discover_ok("pnpm"));
+        insta::assert_snapshot!(discover_debug("pnpm"));
     }
 
     #[test]
     fn walks_nested_directories_skipping_node_modules_and_dot_directories() {
-        insta::assert_debug_snapshot!(discover_ok("deep"));
+        insta::assert_snapshot!(discover_debug("deep"));
     }
 
     #[test]
@@ -1766,7 +1778,7 @@ mod tests {
             Workspace::discover(&dir.path().join("app")).unwrap_err()
         );
         assert!(
-            err.contains(&dir.path().join("app/package.json").display().to_string()),
+            err.contains(&display_path(&dir.path().join("app/package.json"))),
             "{err}"
         );
     }
@@ -1851,12 +1863,7 @@ mod tests {
         write(dir.path(), "packages/a/package.json", "{ broken");
         let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
         assert!(
-            err.contains(
-                &dir.path()
-                    .join("packages/a/package.json")
-                    .display()
-                    .to_string()
-            ),
+            err.contains(&display_path(&dir.path().join("packages/a/package.json"))),
             "{err}"
         );
     }

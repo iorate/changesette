@@ -1,6 +1,6 @@
 ---
 source: src/workspace.rs
-expression: "discover_ok(\"npm\")"
+expression: "discover_debug(\"npm\")"
 ---
 Workspace {
     root: "tests/fixtures/workspace/npm",
