@@ -2466,7 +2466,7 @@ fn version_in_pre_mode_bumps_to_a_prerelease() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
     let err = stderr(&output);
-    assert!(err.contains("in pre mode with tag `beta`"), "{err}");
+    assert!(err.contains("In pre mode with tag `beta`"), "{err}");
     assert!(!err.contains("warning:"), "{err}");
     assert!(
         err.contains("Bumped ublacklist 1.2.3 -> 1.3.0-beta.0\n"),
