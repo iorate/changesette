@@ -226,7 +226,7 @@ pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
 // pnpm itself.
 fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
     let text = fs::read_to_string(path).with_context(|| path.display().to_string())?;
-    let docs = match Yaml::load_from_str(&text) {
+    let docs = match Yaml::load_from_str(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
         Ok(docs) => docs,
         Err(err) => bail!("{}: invalid YAML: {err}", path.display()),
     };
@@ -645,6 +645,34 @@ mod tests {
         write(dir.path(), "pnpm-workspace.yaml", "- packages/*\n");
         let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
         assert!(err.contains("not a YAML mapping"), "{err}");
+    }
+
+    #[test]
+    fn accepts_a_bom_prefixed_pnpm_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "\u{feff}packages:\n  - \"packages/*\"\n",
+        );
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [
+                ("pkg-a", dir.path().join("packages/a").as_path()),
+                ("root", dir.path()),
+            ]
+        );
     }
 
     #[test]
