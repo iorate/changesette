@@ -6,7 +6,7 @@ use std::{
 
 use tracing::{debug, warn};
 
-use super::pattern::{Pattern, Seg, seg_matches};
+use super::pattern::{Pattern, Seg, is_plain_component, seg_matches};
 use super::{probe_is_file, report_fs_error};
 
 /// Collects the member candidate directories under `root` matching
@@ -55,6 +55,12 @@ fn literal_fast_path(
             unreachable!()
         };
         if name == "node_modules" {
+            return;
+        }
+        // Such a name (a `C:` drive prefix) can never be a real entry, so
+        // the pattern cannot match and skipping it changes nothing; pushing
+        // it would replace the accumulated path and probe outside the root.
+        if !is_plain_component(name) {
             return;
         }
         dir.push(name);
@@ -390,6 +396,25 @@ mod tests {
         std::os::unix::fs::symlink("../target", dir.path().join("packages/link")).unwrap();
         std::os::unix::fs::symlink(".", dir.path().join("packages/loop")).unwrap();
         assert_eq!(rel_dirs(dir.path(), &["packages/**"]), ["packages/a"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_drive_prefixed_literal_is_skipped_by_the_fast_path() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "packages/a/package.json");
+        assert_eq!(
+            rel_dirs(dir.path(), &["packages/a", "packages/C:/x", "./C:/x"]),
+            ["packages/a"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_drive_like_literal_is_an_ordinary_name_on_unix() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "C:/x/package.json");
+        assert_eq!(rel_dirs(dir.path(), &["C:/x"]), ["C:/x"]);
     }
 
     #[test]

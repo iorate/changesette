@@ -1,4 +1,5 @@
 use std::iter::Peekable;
+use std::path::{Component, Path};
 use std::str::CharIndices;
 
 use anyhow::{Result, bail};
@@ -46,14 +47,25 @@ pub(crate) fn compile(original: &str) -> Result<(bool, Pattern)> {
         bail!("empty patterns are not supported")
     }
     let mut segs = Vec::new();
-    for part in parts {
+    for (index, part) in parts.into_iter().enumerate() {
         if part.is_empty() || part == "." {
             continue;
         }
         if part == ".." {
             bail!("`..` segments are not supported")
         }
-        segs.push(classify(part)?);
+        let seg = classify(part)?;
+        // A leading Windows drive prefix (`C:/x`, or the drive-relative
+        // `C:x`) addresses a location outside the root like an absolute
+        // path, so it is the same loud error; on Unix nothing parses as a
+        // prefix and `C:` stays an ordinary name.
+        if index == 0
+            && let Seg::Literal(name) = &seg
+            && !is_plain_component(name)
+        {
+            bail!("drive-prefixed patterns are not supported")
+        }
+        segs.push(seg);
     }
     // Appending the manifest name gives the pnpm-style idioms for free: the
     // zero-width `**` makes `x/**` cover `x` itself and `!x/**` exclude it.
@@ -132,6 +144,14 @@ fn skip_class(chars: &mut Peekable<CharIndices<'_>>) -> Result<()> {
         first = false;
     }
     Ok(())
+}
+
+/// Whether `name` parses as exactly one normal path component. Meant for
+/// `Literal` segments, which are free of `\` and glob syntax, so the std
+/// parser reads them unambiguously; only a Windows prefix like `C:` fails.
+pub(crate) fn is_plain_component(name: &str) -> bool {
+    let mut components = Path::new(name).components();
+    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
 }
 
 fn classify(part: &str) -> Result<Seg> {
@@ -279,6 +299,41 @@ mod tests {
         for pattern in ["/abs", "!/abs", "/"] {
             assert!(error(pattern).contains("absolute"), "{pattern}");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_a_leading_drive_prefix() {
+        for pattern in ["C:/packages/*", "C:x", "c:/x", "C:", "!C:/x"] {
+            assert!(error(pattern).contains("drive"), "{pattern}");
+        }
+        assert!(!is_plain_component("C:"));
+        assert!(!is_plain_component("C:x"));
+        assert!(is_plain_component("x"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_drive_prefix_after_the_first_raw_segment_compiles() {
+        assert_eq!(
+            positive("packages/C:/x").segs(),
+            [lit("packages"), lit("C:"), lit("x"), lit("package.json")]
+        );
+        assert_eq!(
+            positive("./C:/x").segs(),
+            [lit("C:"), lit("x"), lit("package.json")]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_drive_like_segment_is_an_ordinary_name_on_unix() {
+        assert_eq!(
+            positive("C:/x").segs(),
+            [lit("C:"), lit("x"), lit("package.json")]
+        );
+        assert_eq!(positive("C:x").segs(), [lit("C:x"), lit("package.json")]);
+        assert!(is_plain_component("C:"));
     }
 
     #[test]
