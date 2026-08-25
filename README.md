@@ -114,9 +114,7 @@ jobs:
           fi
           if ! gh release view "v$version" > /dev/null 2>&1; then
             if notes="$(changesette get-changelog-entry my-package "$version")"; then
-              gh release create "v$version" \
-                --target "$GITHUB_SHA" \
-                --notes "$notes"
+              gh release create "v$version" --target "$GITHUB_SHA" --notes "$notes"
             fi
           fi
         env:
@@ -163,7 +161,10 @@ jobs:
             delim="$(openssl rand -hex 16)"
             {
               echo "body<<$delim"
-              jq -r '[.releases[] | select(.type != "none") | "## \(.name)@\(.newVersion)\n\n\(.changelogEntry)"] | join("\n\n")' <<< "$plan"
+              jq -r '[.releases[]
+                | select(.type != "none")
+                | "## \(.name)@\(.newVersion)\n\n\(.changelogEntry)"]
+                | join("\n\n")' <<< "$plan"
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
             pnpm install --lockfile-only
@@ -190,9 +191,7 @@ jobs:
             version="$(jq -re .version <<< "$package")"
             if ! gh release view "$name@$version" > /dev/null 2>&1; then
               if notes="$(changesette get-changelog-entry "$name" "$version")"; then
-                gh release create "$name@$version" \
-                  --target "$GITHUB_SHA" \
-                  --notes "$notes"
+                gh release create "$name@$version" --target "$GITHUB_SHA" --notes "$notes"
               fi
             fi
           done
