@@ -19,7 +19,7 @@ pub(crate) fn run(
     let pre = planned.in_pre();
     if let Some(pre) = pre {
         info!(
-            "in pre mode with tag `{}`; versions will be prereleases. Run `changesette pre exit` first for a normal release.",
+            "In pre mode with tag `{}`; versions will be prereleases.",
             pre.tag()
         );
     }
