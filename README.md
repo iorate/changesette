@@ -162,8 +162,8 @@ jobs:
             {
               echo "body<<$delim"
               jq -r '[.releases[]
-                | select(.type != "none")
-                | "## \(.name)@\(.newVersion)\n\n\(.changelogEntry)"]
+                  | select(.type != "none")
+                  | "## \(.name)@\(.newVersion)\n\n\(.changelogEntry)"]
                 | join("\n\n")' <<< "$plan"
               echo "$delim"
             } >> "$GITHUB_OUTPUT"
