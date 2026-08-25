@@ -771,6 +771,9 @@ fn get_packages_warns_about_excluded_candidates_and_omits_them() {
         ("d", "{ \"name\": \"pkg-d\", \"version\": \"1.0\" }\n"),
         ("e", "{ \"name\": \"dup\", \"version\": \"1.0.0\" }\n"),
         ("f", "{ \"name\": \"dup\", \"version\": \"2.0.0\" }\n"),
+        ("g", "{ \"name\": 1, \"version\": \"1.0.0\" }\n"),
+        ("h", "{ \"name\": \"\", \"version\": \"1.0.0\" }\n"),
+        ("i", "{ \"name\": \"pkg-i\", \"version\": 1 }\n"),
     ] {
         fs::create_dir_all(dir.path().join("packages").join(name)).unwrap();
         fs::write(
@@ -808,6 +811,27 @@ fn get_packages_warns_about_excluded_candidates_and_omits_them() {
     assert!(err.contains(&manifest("e")), "{err}");
     assert!(err.contains(&manifest("f")), "{err}");
     assert!(err.contains("`dup`"), "{err}");
+    assert!(
+        err.contains(&format!(
+            "warning: {}: not a workspace member: \"name\" is not a string",
+            manifest("g")
+        )),
+        "{err}"
+    );
+    assert!(
+        err.contains(&format!(
+            "warning: {}: not a workspace member: \"name\" is an empty string",
+            manifest("h")
+        )),
+        "{err}"
+    );
+    assert!(
+        err.contains(&format!(
+            "warning: {}: not a workspace member: \"version\" is not a string",
+            manifest("i")
+        )),
+        "{err}"
+    );
 
     let output = changesette(
         dir.path(),
@@ -829,6 +853,144 @@ fn get_packages_warns_about_excluded_candidates_and_omits_them() {
         )),
         "{err}"
     );
+}
+
+#[test]
+fn get_packages_debug_reports_the_member_list() {
+    let dir = workspace_dir();
+    let output = changesette(dir.path(), &["get-packages", "--log-level", "debug"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let err = stderr(&output);
+    assert!(
+        err.contains(&format!(
+            "debug: workspace {}: members: pkg-a (packages/a)",
+            dir.path().canonicalize().unwrap().display()
+        )),
+        "{err}"
+    );
+}
+
+#[test]
+fn get_packages_debug_reports_an_empty_member_list() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}\n").unwrap();
+    let output = changesette(
+        dir.path(),
+        &["get-packages", "--all", "--log-level", "debug"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "[]\n");
+    let err = stderr(&output);
+    assert!(
+        err.contains(&format!(
+            "debug: workspace {}: no members",
+            dir.path().canonicalize().unwrap().display()
+        )),
+        "{err}"
+    );
+}
+
+#[test]
+fn get_packages_debug_reports_skip_reasons() {
+    let dir = private_two_package_workspace_dir();
+    write_config(dir.path(), "{ \"ignore\": [\"pkg-a\"] }\n");
+    let output = changesette(dir.path(), &["get-packages", "--log-level", "debug"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "[]\n");
+    let err = stderr(&output);
+    assert!(err.contains("debug: `pkg-a` is skipped: ignored"), "{err}");
+    assert!(err.contains("debug: `pkg-b` is skipped: private"), "{err}");
+}
+
+#[test]
+fn get_packages_debug_reports_a_negation_exclusion() {
+    let dir = workspace_dir();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"packages/*\", \"!packages/b\"]\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages", "--log-level", "debug"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(!stdout(&output).contains("pkg-b"), "{}", stdout(&output));
+    let err = stderr(&output);
+    assert!(
+        err.contains("debug: packages/b: excluded by a negative workspace pattern"),
+        "{err}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn get_packages_debug_reports_a_symlink_not_entered_by_a_wildcard() {
+    let dir = workspace_dir();
+    fs::create_dir_all(dir.path().join("target")).unwrap();
+    fs::write(
+        dir.path().join("target/package.json"),
+        "{ \"name\": \"pkg-t\", \"version\": \"1.0.0\" }\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("../target", dir.path().join("packages/link")).unwrap();
+    let output = changesette(dir.path(), &["get-packages", "--log-level", "debug"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(!stdout(&output).contains("pkg-t"), "{}", stdout(&output));
+    let err = stderr(&output);
+    assert!(
+        err.contains("debug: packages/link: a symlinked directory is not entered by a wildcard"),
+        "{err}"
+    );
+}
+
+#[test]
+fn get_packages_treats_an_escaped_slash_pattern_as_a_path() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"a\\\\/b\"]\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("a/b")).unwrap();
+    fs::write(
+        dir.path().join("a/b/package.json"),
+        "{ \"name\": \"pkg-ab\", \"version\": \"1.0.0\" }\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-ab\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"a/b\"}]\n"
+    );
+}
+
+#[test]
+fn get_packages_applies_leading_bang_parity() {
+    let dir = workspace_dir();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"!!packages/a\"]\n}\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"}]\n"
+    );
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"packages/*\", \"!!!packages/a\"]\n}\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "[]\n");
 }
 
 #[test]
@@ -1659,6 +1821,39 @@ fn version_linked_aligns_the_releasing_members() {
     assert_eq!(
         fs::read_to_string(dir.path().join("packages/b/package.json")).unwrap(),
         "{\n  \"name\": \"pkg-b\",\n  \"version\": \"3.2.0\"\n}\n"
+    );
+}
+
+#[test]
+fn version_fixed_debug_reports_the_raised_bump() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    let output = changesette(dir.path(), &["version", "--log-level", "debug"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let err = stderr(&output);
+    assert!(
+        err.contains(
+            "debug: `pkg-b`: the \"fixed\" group raises the bump to minor (planning against 3.1.4)"
+        ),
+        "{err}"
+    );
+}
+
+#[test]
+fn version_linked_debug_reports_the_raised_bump() {
+    let dir = two_package_workspace_dir();
+    write_config(dir.path(), "{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    write_changeset(dir.path(), ULID_B, &[("pkg-b", "minor")], "Improve pkg-b");
+    let output = changesette(dir.path(), &["version", "--log-level", "debug"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let err = stderr(&output);
+    assert!(
+        err.contains(
+            "debug: `pkg-a`: the \"linked\" group raises the bump to minor (planning against 3.1.4)"
+        ),
+        "{err}"
     );
 }
 
