@@ -1,5 +1,33 @@
 # changesette
 
+## 6.0.0
+
+### Major Changes
+
+- A `package.json` with an array or object `workspaces` field is now a workspace root on its own: the lockfile requirement is gone, and the Yarn 1 object form is read instead of rejected. During the upward root search, a non-object `package.json` and a directory named `package.json` are now passed over instead of being errors. The `package.json` at a pnpm workspace root is now read even when no pattern matches it, and a parse failure there is an error.
+
+- A `pnpm-workspace.yaml` now marks a pnpm workspace root by its presence alone, a settings-only or empty file included, and it wins over a `workspaces` field in the same directory. The pnpm root package is always a workspace member when its `package.json` qualifies, whether or not a pattern matches it, and no negation excludes it.
+
+- Workspace member candidates are now excluded when their `package.json` lacks a nonempty string `name` or a valid semver `version`, or when their name is shared by another candidate; a non-string name or a duplicated name is no longer an error. The single-package fallback takes the same qualification: a nearest `package.json` failing it now yields a workspace with no members instead of an error. Candidates that are the same physical directory reached under different paths (through a symlink, for example) collapse into a single member instead of counting as a duplicated name. A key holding an invalid value and a duplicated name are reported with a warning on stderr, while a missing `name` or `version` key is reported only at the debug log level. Every member therefore has a unique name and a valid version: `get-packages` always reports `version`, and a changeset naming an excluded package makes `version` fail with a not-found error instead of being silently kept.
+
+- Workspace glob patterns are now matched against manifest file paths with a single built-in dialect: `x/**` includes `x` itself and `!x/**` excludes it, negations are order-independent, every leading `!` toggles the polarity, braces such as `{a,b}` are expanded, explicitly dotted segments such as `.github/*` match, a wildcard-matched symlinked directory is no longer a member (a symlink behind a literal pattern segment still is), and manifests and pnpm-workspace.yaml files starting with a UTF-8 BOM are accepted. Empty patterns (`""`, `"!"`), a `/` inside braces or a character class, and absolute, Windows drive-prefixed (`C:/x`), or `../` patterns are errors instead of being ignored, skipped, or followed.
+
+- A null `packages` in `pnpm-workspace.yaml` and a null `workspaces` in `package.json` are now read as absent, matching npm and pnpm; any other type mismatch — a non-mapping `pnpm-workspace.yaml`, a non-list `packages`, a `workspaces` that is neither an array nor an object carrying a `packages` list, or a non-string pattern entry — is an error, and the `workspaces` type is checked in every `package.json` the upward root search reads.
+
+### Minor Changes
+
+- New info messages report when `init` finds everything already initialized and when `--output` writes the release plan to a file, and `--log-level debug` now reports the discovered workspace members, the reason each package is skipped, candidates excluded by negative patterns or symlinks, and bumps raised by `fixed` / `linked` groups.
+
+- The new `--log-level <LEVEL>` option (`error`, `warn`, `info`, or `debug`; the default is `info`) sets the lowest level of the messages printed to stderr; write the option after the subcommand. Debug messages carry a `debug:` prefix in the style of the existing `warning:` and `error:` ones.
+
+- Filesystem errors swallowed during workspace discovery — an unreadable directory or manifest, a directory entry that cannot be read, or a symlink loop — are now reported as warnings instead of silently dropping the affected candidates, as is a directory entry whose name is not valid UTF-8; discovery still skips over them without aborting, and a plainly missing file or a dangling symlink stays silent.
+
+### Patch Changes
+
+- Error and log messages now render paths with `/` as the separator on Windows instead of `\`.
+
+- The notice that `version` runs in pre mode is now printed at the info level instead of as a warning.
+
 ## 5.0.0
 
 ### Major Changes
