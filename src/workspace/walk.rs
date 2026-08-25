@@ -8,6 +8,7 @@ use tracing::{debug, warn};
 
 use super::pattern::{Pattern, Seg, is_plain_component, seg_matches};
 use super::{probe_is_file, report_fs_error};
+use crate::output::display_path;
 
 /// Collects the member candidate directories under `root` matching
 /// `positives` minus `negations`, keyed by the root-relative `/`-separated
@@ -163,7 +164,7 @@ fn walk(
             // pattern, which can drop a package just as silently.
             warn!(
                 "{}: the file name is not valid UTF-8",
-                entry.path().display()
+                display_path(&entry.path())
             );
             continue;
         };

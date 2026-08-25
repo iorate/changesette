@@ -9,7 +9,10 @@ use jsonc_parser::{
     cst::{CstRootNode, CstStringLit},
 };
 
-use crate::jsonc::{set_string_value, string_prop};
+use crate::{
+    jsonc::{set_string_value, string_prop},
+    output::display_path,
+};
 
 /// A loaded `package.json` whose serialization preserves the original
 /// formatting, changing only the rewritten values.
@@ -25,11 +28,11 @@ impl PackageJson {
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                bail!("{} not found", path.display())
+                bail!("{} not found", display_path(&path))
             }
-            Err(err) => return Err(err).context(path.display().to_string()),
+            Err(err) => return Err(err).context(display_path(&path)),
         };
-        let context = path.display().to_string();
+        let context = display_path(&path);
         Self::parse(path, &text).context(context)
     }
 
@@ -65,7 +68,10 @@ impl PackageJson {
 
     pub(crate) fn set_version(&mut self, version: &semver::Version) -> Result<()> {
         let Some(version_lit) = &self.version_lit else {
-            bail!("{}: missing top-level \"version\"", self.path.display())
+            bail!(
+                "{}: missing top-level \"version\"",
+                display_path(&self.path)
+            )
         };
         set_string_value(version_lit, &version.to_string());
         Ok(())

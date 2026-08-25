@@ -1,6 +1,6 @@
 ---
 source: src/workspace.rs
-expression: "discover_ok(\"pnpm\")"
+expression: "discover_debug(\"pnpm\")"
 ---
 Workspace {
     root: "tests/fixtures/workspace/pnpm",

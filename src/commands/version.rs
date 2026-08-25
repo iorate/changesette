@@ -3,7 +3,7 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result, bail};
 use tracing::info;
 
-use crate::{plan, release_plan, snapshot::Snapshot};
+use crate::{output::display_path, plan, release_plan, snapshot::Snapshot};
 
 /// Consumes every changeset: bumps each named package's package.json,
 /// upserts its CHANGELOG.md section, and deletes the consumed files — in pre
@@ -35,11 +35,11 @@ pub(crate) fn run(
     if in_pre {
         for change in &planned.consumed_changes {
             let path = pre_dir.join(&change.file_name);
-            if path
-                .try_exists()
-                .with_context(|| path.display().to_string())?
-            {
-                bail!("{}: already exists; refusing to overwrite", path.display());
+            if path.try_exists().with_context(|| display_path(&path))? {
+                bail!(
+                    "{}: already exists; refusing to overwrite",
+                    display_path(&path)
+                );
             }
         }
     }
@@ -51,18 +51,19 @@ pub(crate) fn run(
 
     if in_pre {
         if !planned.consumed_changes.is_empty() {
-            fs::create_dir_all(&pre_dir).with_context(|| pre_dir.display().to_string())?;
+            fs::create_dir_all(&pre_dir).with_context(|| display_path(&pre_dir))?;
         }
         for change in &planned.consumed_changes {
             let path = planned.changeset_dir.join(change.rel_path());
             let pre_path = pre_dir.join(&change.file_name);
-            fs::rename(&path, &pre_path)
-                .with_context(|| format!("{} -> {}", path.display(), pre_path.display()))?;
+            fs::rename(&path, &pre_path).with_context(|| {
+                format!("{} -> {}", display_path(&path), display_path(&pre_path))
+            })?;
         }
     } else {
         for change in &planned.consumed_changes {
             let path = planned.changeset_dir.join(change.rel_path());
-            fs::remove_file(&path).with_context(|| path.display().to_string())?;
+            fs::remove_file(&path).with_context(|| display_path(&path))?;
         }
         // Deleted even with nothing to release, so that an exited pre mode
         // always ends here; a snapshot run keeps it, leaving the exit to the
@@ -70,7 +71,7 @@ pub(crate) fn run(
         if let Some(pre) = &planned.pre
             && snapshot.is_none()
         {
-            fs::remove_file(pre.path()).with_context(|| pre.path().display().to_string())?;
+            fs::remove_file(pre.path()).with_context(|| display_path(pre.path()))?;
         }
     }
 

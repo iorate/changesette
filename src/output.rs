@@ -1,6 +1,7 @@
 use std::{
     fmt,
     io::{self, IsTerminal, Write},
+    path::Path,
 };
 
 use anyhow::Result;
@@ -72,6 +73,17 @@ impl Write for LenientStderr {
             Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(()),
             result => result,
         }
+    }
+}
+
+/// Renders `path` for user-facing messages, with `/` as the separator on
+/// every platform.
+pub(crate) fn display_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text
     }
 }
 

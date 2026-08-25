@@ -1,15 +1,10 @@
-use std::{
-    collections::BTreeMap,
-    fs, io,
-    path::{Path, PathBuf},
-    sync::LazyLock,
-};
+use std::{collections::BTreeMap, fs, io, path::Path, sync::LazyLock};
 
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use saphyr::{LoadableYamlNode, Yaml};
 
-use crate::bump::Bump;
+use crate::{bump::Bump, output::display_path};
 
 const IGNORED_FILE_NAMES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "GEMINI.md"];
 
@@ -46,12 +41,13 @@ impl LoadedChange {
         }
     }
 
-    /// The path of the file relative to the changeset directory.
-    pub(crate) fn rel_path(&self) -> PathBuf {
+    /// The path of the file relative to the changeset directory,
+    /// `/`-separated.
+    pub(crate) fn rel_path(&self) -> String {
         if self.in_pre {
-            Path::new("pre").join(&self.file_name)
+            format!("pre/{}", self.file_name)
         } else {
-            PathBuf::from(&self.file_name)
+            self.file_name.clone()
         }
     }
 }
@@ -82,12 +78,12 @@ fn scan(dir: &Path) -> Result<Option<Vec<String>>> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err).context(dir.display().to_string()),
+        Err(err) => return Err(err).context(display_path(dir)),
     };
 
     let mut file_names = Vec::new();
     for entry in entries {
-        let entry = entry.with_context(|| dir.display().to_string())?;
+        let entry = entry.with_context(|| display_path(dir))?;
         let Ok(file_name) = entry.file_name().into_string() else {
             continue;
         };
@@ -123,12 +119,11 @@ pub(crate) fn max_bumps(changes: &[LoadedChange]) -> BTreeMap<&str, Option<Bump>
 fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
     let file_path = dir.join(file_name);
 
-    let content =
-        fs::read_to_string(&file_path).with_context(|| file_path.display().to_string())?;
+    let content = fs::read_to_string(&file_path).with_context(|| display_path(&file_path))?;
     let Some(captures) = FRONTMATTER.captures(&content) else {
         bail!(
             "{}: missing frontmatter (expected `---`-delimited YAML)",
-            file_path.display()
+            display_path(&file_path)
         )
     };
     let frontmatter = &captures[1];
@@ -138,7 +133,7 @@ fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
         Ok(docs) => docs,
         Err(err) => bail!(
             "{}: invalid YAML in frontmatter: {err}",
-            file_path.display()
+            display_path(&file_path)
         ),
     };
 
@@ -151,7 +146,7 @@ fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
                 let Some(name) = key.as_str() else {
                     bail!(
                         "{}: invalid package name in frontmatter",
-                        file_path.display()
+                        display_path(&file_path)
                     )
                 };
                 let bump = match value.as_str() {
@@ -161,11 +156,11 @@ fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
                     Some("none") => None,
                     Some(other) => bail!(
                         "{}: unknown bump type {other:?}; expected major, minor, patch, or none",
-                        file_path.display()
+                        display_path(&file_path)
                     ),
                     None => bail!(
                         "{}: invalid bump type; expected major, minor, patch, or none",
-                        file_path.display()
+                        display_path(&file_path)
                     ),
                 };
                 releases.push((name.to_owned(), bump));
@@ -173,7 +168,7 @@ fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
         }
         Some(_) => bail!(
             "{}: frontmatter must be a mapping of package names to bump types",
-            file_path.display()
+            display_path(&file_path)
         ),
     }
 
