@@ -2,12 +2,12 @@ mod pattern;
 mod walk;
 
 use std::{
-    collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, bail};
+use same_file::is_same_file;
 use saphyr::{LoadableYamlNode, Yaml};
 use semver::Version;
 use serde_json::Value;
@@ -333,8 +333,8 @@ fn collect_members(
             members.push(member);
         }
     }
-    exclude_duplicate_names(&mut members);
     members.sort_by(|a, b| (&a.name, &a.dir).cmp(&(&b.name, &b.dir)));
+    exclude_duplicate_names(&mut members);
     Ok(members)
 }
 
@@ -419,24 +419,37 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
 // packages by name, so a duplicated one cannot be referred to at all, and an
 // error here would make repositories with duplicated fixture names unusable.
 // Qualification runs first, so a disqualified candidate sharing a real
-// package's name does not evict it.
+// package's name does not evict it. Candidates that are the same physical
+// directory under different paths (a symlink alias, a case variant) are one
+// package, not a duplication, and collapse into the first of the (name, dir)
+// order; an `is_same_file` error counts as a distinct directory, falling back
+// to the exclusion. Expects `members` sorted by (name, dir), so name groups
+// are contiguous and the kept alias is deterministic.
 fn exclude_duplicate_names(members: &mut Vec<Member>) {
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for member in members.iter() {
-        *counts.entry(member.name.clone()).or_insert(0) += 1;
-    }
-    members.retain(|member| {
-        if counts[&member.name] > 1 {
-            warn!(
-                "{}: not a workspace member: the name `{}` is used by more than one package",
-                member.dir.join("package.json").display(),
-                member.name
-            );
-            false
-        } else {
-            true
+    let mut iter = std::mem::take(members).into_iter().peekable();
+    while let Some(first) = iter.next() {
+        let mut group = vec![first];
+        while iter.peek().is_some_and(|next| next.name == group[0].name) {
+            let member = iter.next().unwrap();
+            if !group
+                .iter()
+                .any(|kept| is_same_file(&kept.dir, &member.dir).unwrap_or(false))
+            {
+                group.push(member);
+            }
         }
-    });
+        if group.len() > 1 {
+            for member in group {
+                warn!(
+                    "{}: not a workspace member: the name `{}` is used by more than one package",
+                    member.dir.join("package.json").display(),
+                    member.name
+                );
+            }
+        } else {
+            members.extend(group);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -567,6 +580,52 @@ mod tests {
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("link/a").as_path())]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn collapses_candidates_aliasing_the_same_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"real/*\"\n  - \"link/*\"\n",
+        );
+        write(
+            dir.path(),
+            "real/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        std::os::unix::fs::symlink("real", dir.path().join("link")).unwrap();
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("link/a").as_path())]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_true_duplicate_is_excluded_even_beside_an_aliased_pair() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"real/*\"\n  - \"link/*\"\n  - \"other/*\"\n",
+        );
+        write(
+            dir.path(),
+            "real/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "other/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        std::os::unix::fs::symlink("real", dir.path().join("link")).unwrap();
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(names_and_dirs(&workspace), []);
     }
 
     #[test]
