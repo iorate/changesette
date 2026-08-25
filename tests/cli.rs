@@ -711,7 +711,11 @@ fn version_fails_for_a_changeset_naming_an_excluded_package() {
     assert!(
         err.contains(&format!(
             "debug: {}: not a workspace member: \"version\" is missing",
-            dir.path().join("package.json").display()
+            dir.path()
+                .canonicalize()
+                .unwrap()
+                .join("package.json")
+                .display()
         )),
         "{err}"
     );
@@ -784,6 +788,8 @@ fn get_packages_warns_about_excluded_candidates_and_omits_them() {
     let err = stderr(&output);
     let manifest = |name: &str| {
         dir.path()
+            .canonicalize()
+            .unwrap()
             .join("packages")
             .join(name)
             .join("package.json")
