@@ -395,6 +395,22 @@ mod tests {
     }
 
     #[test]
+    fn expands_nested_braces() {
+        for name in ["a", "b", "c"] {
+            assert!(seg_matches(&wild("{a,{b,c}}"), name, false), "{name}");
+        }
+        assert!(!seg_matches(&wild("{a,{b,c}}"), "d", false));
+        assert!(!seg_matches(&wild("{a,{b,c}}"), "{b,c}", false));
+    }
+
+    #[test]
+    fn a_negated_character_class_excludes_its_members() {
+        assert!(seg_matches(&wild("[!b]"), "a", false));
+        assert!(!seg_matches(&wild("[!b]"), "b", false));
+        assert!(seg_matches(&wild("x[!b]"), "xc", false));
+    }
+
+    #[test]
     fn a_double_star_negation_matches_the_base_directory() {
         let pattern = negation("!x/**");
         assert!(pattern.matches("x/package.json", true));

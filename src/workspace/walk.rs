@@ -264,6 +264,28 @@ mod tests {
     }
 
     #[test]
+    fn a_mid_pattern_double_star_matches_zero_or_more_segments() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "a/z/package.json");
+        touch(dir.path(), "a/b/z/package.json");
+        touch(dir.path(), "a/b/c/z/package.json");
+        touch(dir.path(), "a/y/package.json");
+        assert_eq!(
+            rel_dirs(dir.path(), &["a/**/z"]),
+            ["a/b/c/z", "a/b/z", "a/z"]
+        );
+    }
+
+    #[test]
+    fn a_doubled_double_star_matches_like_a_single_one() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "package.json");
+        touch(dir.path(), "x/package.json");
+        touch(dir.path(), "x/y/package.json");
+        assert_eq!(rel_dirs(dir.path(), &["**/**"]), [".", "x", "x/y"]);
+    }
+
+    #[test]
     fn a_double_star_matches_a_nested_package() {
         let dir = tempfile::tempdir().unwrap();
         touch(dir.path(), "packages/a/package.json");
@@ -343,6 +365,27 @@ mod tests {
         std::os::unix::fs::symlink("../target", dir.path().join("packages/link")).unwrap();
         std::os::unix::fs::symlink(".", dir.path().join("packages/loop")).unwrap();
         assert_eq!(rel_dirs(dir.path(), &["packages/**"]), ["packages/a"]);
+    }
+
+    #[test]
+    fn a_permissive_negation_excludes_a_dot_directory_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), ".tools/a/package.json");
+        assert_eq!(rel_dirs(dir.path(), &[".tools/a"]), [".tools/a"]);
+        assert_eq!(
+            rel_dirs(dir.path(), &[".tools/a", "!*/a"]),
+            [] as [String; 0]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_double_star_descends_into_a_literally_entered_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "real/package.json");
+        touch(dir.path(), "real/sub/package.json");
+        std::os::unix::fs::symlink("real", dir.path().join("link")).unwrap();
+        assert_eq!(rel_dirs(dir.path(), &["link/**"]), ["link", "link/sub"]);
     }
 
     #[cfg(unix)]
