@@ -27,6 +27,14 @@ fn stderr(output: &Output) -> String {
     String::from_utf8(output.stderr.clone()).unwrap()
 }
 
+fn expected_path(path: &Path) -> String {
+    if cfg!(windows) {
+        path.display().to_string().replace('\\', "/")
+    } else {
+        path.canonicalize().unwrap().display().to_string()
+    }
+}
+
 fn package_dir() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
@@ -711,11 +719,7 @@ fn version_fails_for_a_changeset_naming_an_excluded_package() {
     assert!(
         err.contains(&format!(
             "debug: {}: not a workspace member: \"version\" is missing",
-            dir.path()
-                .canonicalize()
-                .unwrap()
-                .join("package.json")
-                .display()
+            expected_path(&dir.path().join("package.json"))
         )),
         "{err}"
     );
@@ -841,16 +845,8 @@ fn get_packages_warns_about_excluded_candidates_and_omits_them() {
         "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"}]\n"
     );
     let err = stderr(&output);
-    let manifest = |name: &str| {
-        dir.path()
-            .canonicalize()
-            .unwrap()
-            .join("packages")
-            .join(name)
-            .join("package.json")
-            .display()
-            .to_string()
-    };
+    let manifest =
+        |name: &str| expected_path(&dir.path().join("packages").join(name).join("package.json"));
     assert!(!err.contains(&manifest("b")), "{err}");
     assert!(!err.contains(&manifest("c")), "{err}");
     assert!(
@@ -916,7 +912,7 @@ fn get_packages_debug_reports_the_member_list() {
     assert!(
         err.contains(&format!(
             "debug: workspace {}: members: pkg-a (packages/a)",
-            dir.path().canonicalize().unwrap().display()
+            expected_path(dir.path())
         )),
         "{err}"
     );
@@ -936,7 +932,7 @@ fn get_packages_debug_reports_an_empty_member_list() {
     assert!(
         err.contains(&format!(
             "debug: workspace {}: no members",
-            dir.path().canonicalize().unwrap().display()
+            expected_path(dir.path())
         )),
         "{err}"
     );
@@ -2311,12 +2307,7 @@ fn version_excludes_a_member_with_an_invalid_version_and_bumps_the_rest() {
     assert!(output.status.success(), "{}", stderr(&output));
     let err = stderr(&output);
     assert!(
-        err.contains(
-            &dir.path()
-                .join("packages/b/package.json")
-                .display()
-                .to_string()
-        ),
+        err.contains(&expected_path(&dir.path().join("packages/b/package.json"))),
         "{err}"
     );
     assert!(err.ends_with("Bumped pkg-a 3.1.4 -> 3.2.0\n"), "{err}");
