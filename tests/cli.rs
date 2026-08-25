@@ -762,6 +762,58 @@ fn get_packages_all_lists_every_member() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn get_packages_warns_about_filesystem_errors_but_not_plain_absence() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"packages/*\", \"docs/pkg\"]\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("packages/a")).unwrap();
+    fs::write(
+        dir.path().join("packages/a/package.json"),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.1.4\"\n}\n",
+    )
+    .unwrap();
+    fs::write(dir.path().join("docs"), "not a directory\n").unwrap();
+    std::os::unix::fs::symlink("missing", dir.path().join("packages/broken")).unwrap();
+    fs::create_dir_all(dir.path().join("packages/denied")).unwrap();
+    fs::set_permissions(
+        dir.path().join("packages/denied"),
+        fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages", "--all"]);
+    fs::set_permissions(
+        dir.path().join("packages/denied"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"}]\n"
+    );
+    let err = stderr(&output);
+    let denied = dir.path().canonicalize().unwrap().join("packages/denied");
+    assert!(
+        err.contains(&format!(
+            "warning: {}: Permission denied",
+            denied.join("package.json").display()
+        )),
+        "{err}"
+    );
+    assert!(
+        err.contains(&format!("warning: {}: Permission denied", denied.display())),
+        "{err}"
+    );
+    assert_eq!(err.matches("warning:").count(), 2, "{err}");
+}
+
 #[test]
 fn get_packages_warns_about_excluded_candidates_and_omits_them() {
     let dir = workspace_dir();
