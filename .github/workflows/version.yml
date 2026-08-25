@@ -46,6 +46,7 @@ jobs:
             } >> "$GITHUB_OUTPUT"
             cargo set-version "$version"
             cargo update -w
+            sed -i -E "s|(iorate/changesette/setup@v)[0-9]+|\1${version%%.*}|g" README.md
           else
             echo "title=Consume changesets" >> "$GITHUB_OUTPUT"
           fi
