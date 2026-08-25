@@ -4,9 +4,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use tracing::debug;
+use tracing::{debug, warn};
 
 use super::pattern::{Pattern, Seg, seg_matches};
+use super::{probe_is_file, report_fs_error};
 
 /// Collects the member candidate directories under `root` matching
 /// `positives` minus `negations`, keyed by the root-relative `/`-separated
@@ -59,7 +60,7 @@ fn literal_fast_path(
         dir.push(name);
         rel_parts.push(name.as_str());
     }
-    if !dir.join("package.json").is_file() {
+    if !probe_is_file(&dir.join("package.json")) {
         return;
     }
     let rel_dir = if rel_parts.is_empty() {
@@ -127,34 +128,58 @@ fn walk(
         .any(|&(pattern, seg)| seg == patterns[pattern].segs().len() - 1)
     {
         let rel_dir = if rel.is_empty() { "." } else { rel };
-        if dir.join("package.json").is_file() && !excluded(rel_dir, negations) {
+        if probe_is_file(&dir.join("package.json")) && !excluded(rel_dir, negations) {
             candidates
                 .entry(rel_dir.to_owned())
                 .or_insert_with(|| dir.to_path_buf());
         }
     }
-    let Ok(entries) = fs::read_dir(dir) else {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
         // An unreadable directory (permissions, a concurrent removal) skips
         // its whole subtree, like the upstream globbers do.
-        return;
+        Err(err) => {
+            report_fs_error(dir, &err);
+            return;
+        }
     };
     for entry in entries {
-        let Ok(entry) = entry else {
-            continue;
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                report_fs_error(dir, &err);
+                continue;
+            }
         };
         let file_name = entry.file_name();
         let Some(name) = file_name.to_str() else {
+            // Not a filesystem error, but the entry is invisible to every
+            // pattern, which can drop a package just as silently.
+            warn!(
+                "{}: the file name is not valid UTF-8",
+                entry.path().display()
+            );
             continue;
         };
         if name == "node_modules" {
             continue;
         }
-        let Ok(file_type) = entry.file_type() else {
-            continue;
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(err) => {
+                report_fs_error(&entry.path(), &err);
+                continue;
+            }
         };
         let is_symlink = file_type.is_symlink();
         let is_dir = if is_symlink {
-            fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_dir())
+            match fs::metadata(entry.path()) {
+                Ok(metadata) => metadata.is_dir(),
+                Err(err) => {
+                    report_fs_error(&entry.path(), &err);
+                    false
+                }
+            }
         } else {
             file_type.is_dir()
         };

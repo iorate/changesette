@@ -40,8 +40,8 @@ impl Workspace {
             // directory the yaml wins, matching every tool's behavior on the
             // repositories that migrated to pnpm and kept the old
             // `workspaces` field.
-            if dir.join("pnpm-workspace.yaml").is_file() {
-                let manifest = dir.join("pnpm-workspace.yaml");
+            let manifest = dir.join("pnpm-workspace.yaml");
+            if probe_is_file(&manifest) {
                 let patterns = pnpm_patterns(&manifest)?;
                 return Ok(Workspace::new(
                     dir.to_path_buf(),
@@ -49,7 +49,7 @@ impl Workspace {
                 ));
             }
             let path = dir.join("package.json");
-            if !path.is_file() {
+            if !probe_is_file(&path) {
                 continue;
             }
             // A parse failure is always an error: walking past a broken npm
@@ -193,6 +193,32 @@ impl Member {
     }
 }
 
+/// Whether `path` is an existing file, following symlinks; a probe failure
+/// is never fatal, but [`report_fs_error`] decides whether it warns.
+pub(crate) fn probe_is_file(path: &Path) -> bool {
+    match fs::metadata(path) {
+        Ok(metadata) => metadata.is_file(),
+        Err(err) => {
+            report_fs_error(path, &err);
+            false
+        }
+    }
+}
+
+/// Reports a filesystem error swallowed by discovery as a warning.
+pub(crate) fn report_fs_error(path: &Path, err: &io::Error) {
+    // Plain absence — NotFound from a missing or dangling path, NotADirectory
+    // from a path crossing a regular file — is an ordinary no-match for every
+    // caller; any other error (permissions, a symlink loop) can silently drop
+    // a package and is worth a warning, though never worth aborting over.
+    if !matches!(
+        err.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+    ) {
+        warn!("{}: {err}", path.display());
+    }
+}
+
 // Reads a package.json, treating a missing file as `None` and a parse
 // failure as an error. A UTF-8 BOM is stripped before parsing: BOM'd
 // manifests exist in the wild and pnpm accepts them.
@@ -319,7 +345,7 @@ fn collect_members(
     // The pnpm root is always a member candidate, pattern or no pattern, and
     // not even a negation excludes it (pnpm #1986); the npm family includes
     // the root only when a pattern matches it.
-    if pnpm && root.join("package.json").is_file() {
+    if pnpm && probe_is_file(&root.join("package.json")) {
         candidates.insert(".".to_owned(), root.to_path_buf());
     }
 
