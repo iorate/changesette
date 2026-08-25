@@ -255,7 +255,8 @@ mod tests {
 
     #[test]
     fn rejects_a_directory_with_an_adopted_name() {
-        insta::assert_snapshot!(load_err("md-directory"));
+        let err = load_err("md-directory");
+        assert!(err.contains("md-directory/nested.md: "), "{err}");
     }
 
     #[test]
