@@ -37,6 +37,11 @@ tempfile = "3.27.0"
 [lints.rust]
 unreachable_pub = "warn"
 
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+similar_names = "allow"
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"

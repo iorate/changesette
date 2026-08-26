@@ -110,7 +110,7 @@ impl PreJson {
     /// Sets the tag; `tag` must have passed `validate_tag`.
     pub(crate) fn set_tag(&mut self, tag: &str) {
         set_string_value(&self.tag_lit, tag);
-        self.tag = tag.to_owned();
+        tag.clone_into(&mut self.tag);
     }
 
     pub(crate) fn text(&self) -> String {

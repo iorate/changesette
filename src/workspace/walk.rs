@@ -120,6 +120,7 @@ fn closure(patterns: &[&Pattern], mut states: Vec<State>) -> Vec<State> {
     states
 }
 
+#[expect(clippy::too_many_lines)]
 fn walk(
     dir: &Path,
     rel: &str,

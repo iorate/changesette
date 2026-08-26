@@ -419,16 +419,16 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
             );
             return None;
         }
-        Some(Value::String(version)) => match version.parse::<Version>() {
-            Ok(version) => version,
-            Err(_) => {
+        Some(Value::String(version)) => {
+            let Ok(version) = version.parse::<Version>() else {
                 warn!(
                     "{}: not a workspace member: \"version\" {version:?} is not a valid semver",
                     display_path(path)
                 );
                 return None;
-            }
-        },
+            };
+            version
+        }
         Some(_) => {
             warn!(
                 "{}: not a workspace member: \"version\" is not a string",

@@ -23,16 +23,13 @@ pub(crate) fn enter(tag: &str) -> Result<()> {
     }
     pre::validate_tag(tag)?;
 
-    match pre {
-        Some(mut pre) => {
-            pre.set_mode(PreMode::Pre);
-            pre.set_tag(tag);
-            fs::write(pre.path(), pre.text()).with_context(|| display_path(pre.path()))?;
-        }
-        None => {
-            fs::create_dir_all(&changeset_dir).with_context(|| display_path(&changeset_dir))?;
-            pre::write_new(&changeset_dir, tag)?;
-        }
+    if let Some(mut pre) = pre {
+        pre.set_mode(PreMode::Pre);
+        pre.set_tag(tag);
+        fs::write(pre.path(), pre.text()).with_context(|| display_path(pre.path()))?;
+    } else {
+        fs::create_dir_all(&changeset_dir).with_context(|| display_path(&changeset_dir))?;
+        pre::write_new(&changeset_dir, tag)?;
     }
 
     info!(
