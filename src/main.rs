@@ -89,6 +89,7 @@ enum Command {
             num_args = 0..=1,
             value_parser = clap::builder::NonEmptyStringValueParser::new()
         )]
+        #[expect(clippy::option_option)]
         snapshot: Option<Option<String>>,
         /// The snapshot suffix template; the placeholders are {tag}, {timestamp}, and {datetime}
         #[arg(
@@ -174,7 +175,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             message,
             empty,
             open,
-        }) => commands::add::run(major, minor, patch, message, empty, open),
+        }) => commands::add::run(&major, &minor, &patch, message, empty, open),
         Command::Version {
             ignore,
             snapshot,

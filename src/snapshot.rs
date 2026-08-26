@@ -57,7 +57,9 @@ impl SnapshotVersions {
 }
 
 fn render_suffix(tag: Option<&str>, template: Option<&str>, millis: u128) -> Result<Prerelease> {
-    let datetime = utc_datetime((millis / 1_000) as u64);
+    let datetime = utc_datetime(
+        u64::try_from(millis / 1_000).expect("the current time in seconds fits in u64"),
+    );
     let suffix = match template {
         None => match tag {
             Some(tag) => format!("{tag}-{datetime}"),
@@ -93,7 +95,7 @@ fn render_suffix(tag: Option<&str>, template: Option<&str>, millis: u128) -> Res
 }
 
 fn utc_datetime(secs: u64) -> String {
-    let datetime = OffsetDateTime::from_unix_timestamp(secs as i64)
+    let datetime = OffsetDateTime::from_unix_timestamp(secs.cast_signed())
         .expect("the current time is within time's supported range");
     format!(
         "{:04}{:02}{:02}{:02}{:02}{:02}",

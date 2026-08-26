@@ -540,7 +540,9 @@ fn add_from_a_subdirectory_targets_the_workspace_root() {
     let rest = line
         .strip_prefix("../../.changeset/")
         .unwrap_or_else(|| panic!("unexpected path: {line}"));
-    assert!(rest.ends_with(".md"), "{line}");
+    #[expect(clippy::case_sensitive_file_extension_comparisons)]
+    let is_md = rest.ends_with(".md");
+    assert!(is_md, "{line}");
     let content = fs::read_to_string(dir.path().join("packages/a").join(line)).unwrap();
     assert_eq!(content, "---\npkg-a: minor\n---\n\nAdd feature\n");
 }

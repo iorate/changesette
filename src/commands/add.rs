@@ -1,6 +1,8 @@
 use std::{
     collections::BTreeMap,
-    env, fs,
+    env,
+    fmt::Write as _,
+    fs,
     io::{self, IsTerminal, Write},
     path::Path,
     process,
@@ -21,9 +23,9 @@ use crate::{
 /// the releases and summary from the flags and prompting interactively for
 /// missing inputs.
 pub(crate) fn run(
-    major: Vec<String>,
-    minor: Vec<String>,
-    patch: Vec<String>,
+    major: &[String],
+    minor: &[String],
+    patch: &[String],
     message: Option<String>,
     empty: bool,
     open: bool,
@@ -74,7 +76,7 @@ pub(crate) fn run(
             }
         }
         let releases = if flags_given {
-            releases_from_flags(&workspace, &packages, &major, &minor, &patch)?
+            releases_from_flags(&workspace, &packages, major, minor, patch)?
         } else {
             prompt_releases(&packages)?
         };
@@ -111,7 +113,7 @@ pub(crate) fn run(
                 .map(|(name, _)| name.as_str())
                 .collect();
             if !names.is_empty() {
-                confirmation.push_str(&format!("\n{}:  {}", bump.as_str(), names.join(", ")));
+                let _ = write!(confirmation, "\n{}:  {}", bump.as_str(), names.join(", "));
             }
         }
         info!("{confirmation}");
@@ -129,6 +131,7 @@ fn open_editor(path: &Path) -> Result<()> {
     let editor = env::var_os("VISUAL")
         .or_else(|| env::var_os("EDITOR"))
         .unwrap_or_else(|| if cfg!(windows) { "notepad.exe" } else { "vi" }.into());
+    #[expect(clippy::unnecessary_debug_formatting)]
     let editor = editor
         .into_string()
         .map_err(|editor| anyhow!("the editor command is not valid UTF-8: {editor:?}"))?;

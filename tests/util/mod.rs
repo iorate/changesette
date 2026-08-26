@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, fmt::Write as _, fs, path::Path};
 
 /// Writes a changeset naming the given packages under `dir/.changeset/`,
 /// creating the directory if needed. An empty `releases` produces an empty
@@ -28,10 +28,10 @@ fn write_changeset_in(
     summary: &str,
 ) {
     fs::create_dir_all(changeset_dir).unwrap();
-    let frontmatter: String = releases
-        .iter()
-        .map(|(name, bump)| format!("\"{name}\": {bump}\n"))
-        .collect();
+    let frontmatter = releases.iter().fold(String::new(), |mut s, (name, bump)| {
+        let _ = writeln!(s, "\"{name}\": {bump}");
+        s
+    });
     fs::write(
         changeset_dir.join(file_name),
         format!("---\n{frontmatter}---\n\n{summary}\n"),

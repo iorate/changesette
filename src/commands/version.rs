@@ -75,30 +75,29 @@ pub(crate) fn run(
         }
     }
 
-    match output_path {
-        Some(path) => release_plan::write_file(
+    if let Some(path) = output_path {
+        return release_plan::write_file(
             path,
             &release_plan::build(&planned.changes, &planned.releases, planned.pre.as_ref()),
-        ),
-        None => {
-            if planned.changes.is_empty() && !exiting {
-                info!("No unreleased changesets found.");
-                return Ok(());
-            }
-            let mut bumped = false;
-            for release in &planned.releases {
-                if release.bump.is_some() {
-                    info!(
-                        "Bumped {} {} -> {}",
-                        release.name, release.old_version, release.new_version
-                    );
-                    bumped = true;
-                }
-            }
-            if !bumped && !planned.changes.is_empty() {
-                info!("No packages to bump.");
-            }
-            Ok(())
+        );
+    }
+
+    if planned.changes.is_empty() && !exiting {
+        info!("No unreleased changesets found.");
+        return Ok(());
+    }
+    let mut bumped = false;
+    for release in &planned.releases {
+        if release.bump.is_some() {
+            info!(
+                "Bumped {} {} -> {}",
+                release.name, release.old_version, release.new_version
+            );
+            bumped = true;
         }
     }
+    if !bumped && !planned.changes.is_empty() {
+        info!("No packages to bump.");
+    }
+    Ok(())
 }

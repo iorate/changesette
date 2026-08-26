@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fmt::Write as _, path::Path};
 
 use anyhow::Result;
 
@@ -27,13 +27,13 @@ pub(crate) fn run(verbose: bool, output_path: Option<&Path>) -> Result<()> {
         if group_releases.is_empty() {
             continue;
         }
-        text.push_str(&format!("\n- {}", group.as_str()));
+        let _ = write!(text, "\n- {}", group.as_str());
         for release in group_releases {
-            text.push_str(&format!("\n  - {}", release.name));
+            let _ = write!(text, "\n  - {}", release.name);
             if verbose {
-                text.push_str(&format!(" -> {}", release.new_version));
+                let _ = write!(text, " -> {}", release.new_version);
                 for id in &release.changeset_ids {
-                    text.push_str(&format!("\n    - .changeset/{id}.md"));
+                    let _ = write!(text, "\n    - .changeset/{id}.md");
                 }
             }
         }

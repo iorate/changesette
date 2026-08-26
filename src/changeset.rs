@@ -89,6 +89,7 @@ fn scan(dir: &Path) -> Result<Option<Vec<String>>> {
         };
         // Selecting entries by name alone means a symlink is followed and a
         // directory with an adopted name is a read error.
+        #[expect(clippy::case_sensitive_file_extension_comparisons)]
         if file_name.starts_with('.')
             || !file_name.ends_with(".md")
             || file_name.eq_ignore_ascii_case("README.md")
