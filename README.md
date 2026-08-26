@@ -208,8 +208,8 @@ Prefixes each changelog entry with a link to the commit that added its changeset
           changesette status --output - | jq -c '.changesets[]' | while read -r changeset; do
             id="$(jq -re .id <<< "$changeset")"
             summary="$(jq -re .summary <<< "$changeset")"
-            commit="$(gh api \
-              "repos/$GITHUB_REPOSITORY/commits?path=.changeset/$id.md&per_page=100" \
+            commit="$(gh api -X GET "repos/$GITHUB_REPOSITORY/commits" \
+              -f "path=.changeset/$id.md" -F per_page=100 \
               --jq '.[-1].sha // empty')"
             if [[ -n "$commit" ]]; then
               url="https://github.com/$GITHUB_REPOSITORY/commit/$commit"
