@@ -132,6 +132,13 @@ enum Command {
         /// The version whose section to print
         version: semver::Version,
     },
+    /// Rewrite a changeset's summary text
+    SetSummary {
+        /// The id of the changeset: its file path relative to `.changeset/`, without `.md`
+        id: String,
+        /// The new summary text
+        summary: String,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -195,5 +202,6 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::GetChangelogEntry { package, version } => {
             commands::get_changelog_entry::run(&package, &version)
         }
+        Command::SetSummary { id, summary } => commands::set_summary::run(&id, &summary),
     }
 }

@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fs, io, path::Path, sync::LazyLock};
 
 use anyhow::{Context, Result, bail};
 use regex::Regex;
-use saphyr::{LoadableYamlNode, Yaml};
+use saphyr::{LoadableYamlNode, Mapping, Scalar, Yaml, YamlEmitter};
 
 use crate::{bump::Bump, output::display_path};
 
@@ -114,6 +114,33 @@ pub(crate) fn max_bumps(changes: &[LoadedChange]) -> BTreeMap<&str, Option<Bump>
         }
     }
     bumps
+}
+
+/// Renders the canonical changeset file content for `releases` and
+/// `summary`, emitting a `None` bump as the `none` type and trimming the
+/// summary.
+pub(crate) fn render(releases: &[(String, Option<Bump>)], summary: &str) -> Result<String> {
+    let summary = summary.trim();
+    let mut content = if releases.is_empty() {
+        String::from("---\n---\n")
+    } else {
+        let mut mapping = Mapping::new();
+        for (name, bump) in releases {
+            mapping.insert(
+                Yaml::Value(Scalar::String(name.as_str().into())),
+                Yaml::Value(Scalar::String(bump.map_or("none", Bump::as_str).into())),
+            );
+        }
+        let mut frontmatter = String::new();
+        YamlEmitter::new(&mut frontmatter).dump(&Yaml::Mapping(mapping))?;
+        format!("{frontmatter}\n---\n")
+    };
+    if !summary.is_empty() {
+        content.push('\n');
+        content.push_str(summary);
+        content.push('\n');
+    }
+    Ok(content)
 }
 
 fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {

@@ -641,6 +641,131 @@ fn get_changelog_entry_fails_without_a_changelog_file() {
 }
 
 #[test]
+fn set_summary_rewrites_the_summary() {
+    let dir = package_dir();
+    fs::create_dir(dir.path().join(".changeset")).unwrap();
+    fs::write(
+        dir.path().join(".changeset/brave-owls-run.md"),
+        "---\nublacklist: minor\n---\n\nOld summary\n",
+    )
+    .unwrap();
+    let output = changesette(
+        dir.path(),
+        &["set-summary", "brave-owls-run", "  New summary  "],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "Updated .changeset/brave-owls-run.md\n");
+    let content = fs::read_to_string(dir.path().join(".changeset/brave-owls-run.md")).unwrap();
+    assert_eq!(content, "---\nublacklist: minor\n---\n\nNew summary\n");
+}
+
+#[test]
+fn set_summary_normalizes_upstream_quoting() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        "quoted.md",
+        &[("ublacklist", "minor"), ("@iorate/ublacklist", "patch")],
+        "Old summary",
+    );
+    let output = changesette(dir.path(), &["set-summary", "quoted", "New summary"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let content = fs::read_to_string(dir.path().join(".changeset/quoted.md")).unwrap();
+    assert_eq!(
+        content,
+        "---\nublacklist: minor\n\"@iorate/ublacklist\": patch\n---\n\nNew summary\n"
+    );
+}
+
+#[test]
+fn set_summary_keeps_a_none_release() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        "none.md",
+        &[("ublacklist", "none")],
+        "Old summary",
+    );
+    let output = changesette(dir.path(), &["set-summary", "none", "New summary"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let content = fs::read_to_string(dir.path().join(".changeset/none.md")).unwrap();
+    assert_eq!(content, "---\nublacklist: none\n---\n\nNew summary\n");
+}
+
+#[test]
+fn set_summary_with_an_empty_summary_writes_a_frontmatter_only_file() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        "empty.md",
+        &[("ublacklist", "minor")],
+        "Old summary",
+    );
+    let output = changesette(dir.path(), &["set-summary", "empty", ""]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let content = fs::read_to_string(dir.path().join(".changeset/empty.md")).unwrap();
+    assert_eq!(content, "---\nublacklist: minor\n---\n");
+}
+
+#[test]
+fn set_summary_keeps_a_multi_line_summary() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        "multi.md",
+        &[("ublacklist", "minor")],
+        "Old summary",
+    );
+    let output = changesette(
+        dir.path(),
+        &["set-summary", "multi", "First line.\n\nSecond line."],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let content = fs::read_to_string(dir.path().join(".changeset/multi.md")).unwrap();
+    assert_eq!(
+        content,
+        "---\nublacklist: minor\n---\n\nFirst line.\n\nSecond line.\n"
+    );
+}
+
+#[test]
+fn set_summary_fails_for_an_unknown_id() {
+    let dir = package_dir();
+    write_changeset(
+        dir.path(),
+        "known.md",
+        &[("ublacklist", "minor")],
+        "Summary",
+    );
+    let output = changesette(dir.path(), &["set-summary", "unknown", "New summary"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("no changeset with id `unknown`"),
+        "{}",
+        stderr(&output)
+    );
+    let content = fs::read_to_string(dir.path().join(".changeset/known.md")).unwrap();
+    assert_eq!(content, "---\n\"ublacklist\": minor\n---\n\nSummary\n");
+}
+
+#[test]
+fn set_summary_rewrites_a_pre_changeset() {
+    let dir = package_dir();
+    write_pre_changeset(
+        dir.path(),
+        "early.md",
+        &[("ublacklist", "minor")],
+        "Old summary",
+    );
+    let output = changesette(dir.path(), &["set-summary", "pre/early", "New summary"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "Updated .changeset/pre/early.md\n");
+    let content = fs::read_to_string(dir.path().join(".changeset/pre/early.md")).unwrap();
+    assert_eq!(content, "---\nublacklist: minor\n---\n\nNew summary\n");
+}
+
+#[test]
 fn get_packages_prints_the_single_package_with_a_dot_dir() {
     let dir = package_dir();
     let output = changesette(dir.path(), &["get-packages"]);

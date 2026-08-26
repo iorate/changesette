@@ -7,12 +7,11 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
-use saphyr::{Mapping, Scalar, Yaml, YamlEmitter};
 use tracing::info;
 
 use crate::{
     bump::Bump,
-    config,
+    changeset, config,
     output::display_path,
     skip::SkipSet,
     workspace::{Member, Workspace},
@@ -95,7 +94,7 @@ pub(crate) fn run(
             .context("failed to generate a changeset name")?
     );
     let path = changeset_dir.join(&file_name);
-    let content = render(&releases, &summary)?;
+    let content = changeset::render(&releases, &summary)?;
     fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -108,7 +107,7 @@ pub(crate) fn run(
         for bump in [Bump::Major, Bump::Minor, Bump::Patch] {
             let names: Vec<&str> = releases
                 .iter()
-                .filter(|(_, b)| *b == bump)
+                .filter(|(_, b)| *b == Some(bump))
                 .map(|(name, _)| name.as_str())
                 .collect();
             if !names.is_empty() {
@@ -152,7 +151,7 @@ fn releases_from_flags(
     major: &[String],
     minor: &[String],
     patch: &[String],
-) -> Result<Vec<(String, Bump)>> {
+) -> Result<Vec<(String, Option<Bump>)>> {
     let flags = [
         ("--major", Bump::Major, major),
         ("--minor", Bump::Minor, minor),
@@ -188,18 +187,18 @@ fn releases_from_flags(
     }
     ensure!(errors.is_empty(), "{}", errors.join("\n"));
 
-    let mut releases: Vec<(String, Bump)> = Vec::new();
+    let mut releases: Vec<(String, Option<Bump>)> = Vec::new();
     for (_, bump, names) in flags {
         for name in names {
             if !releases.iter().any(|(n, _)| n == name) {
-                releases.push((name.clone(), bump));
+                releases.push((name.clone(), Some(bump)));
             }
         }
     }
     Ok(releases)
 }
 
-fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Bump)>> {
+fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Option<Bump>)>> {
     if let [member] = packages {
         const ITEMS: [Bump; 3] = [Bump::Patch, Bump::Minor, Bump::Major];
         let prompt = format!(
@@ -212,7 +211,7 @@ fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Bump)>> {
             .items(ITEMS.map(Bump::as_str))
             .default(0)
             .interact()?;
-        return Ok(vec![(member.name().to_owned(), ITEMS[index])]);
+        return Ok(vec![(member.name().to_owned(), Some(ITEMS[index]))]);
     }
 
     let names: Vec<&str> = packages.iter().map(|member| member.name()).collect();
@@ -252,7 +251,7 @@ fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Bump)>> {
         releases.extend(
             bumped
                 .into_iter()
-                .map(|i| (affected[i].name().to_owned(), bump)),
+                .map(|i| (affected[i].name().to_owned(), Some(bump))),
         );
     }
     if !remaining.is_empty() {
@@ -267,7 +266,7 @@ fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Bump)>> {
         releases.extend(
             remaining
                 .into_iter()
-                .map(|i| (affected[i].name().to_owned(), Bump::Patch)),
+                .map(|i| (affected[i].name().to_owned(), Some(Bump::Patch))),
         );
     }
     Ok(releases)
@@ -306,28 +305,4 @@ fn prompt_summary() -> Result<String> {
             return Ok(input);
         }
     }
-}
-
-fn render(releases: &[(String, Bump)], summary: &str) -> Result<String> {
-    let summary = summary.trim();
-    let mut content = if releases.is_empty() {
-        String::from("---\n---\n")
-    } else {
-        let mut mapping = Mapping::new();
-        for (name, bump) in releases {
-            mapping.insert(
-                Yaml::Value(Scalar::String(name.as_str().into())),
-                Yaml::Value(Scalar::String(bump.as_str().into())),
-            );
-        }
-        let mut frontmatter = String::new();
-        YamlEmitter::new(&mut frontmatter).dump(&Yaml::Mapping(mapping))?;
-        format!("{frontmatter}\n---\n")
-    };
-    if !summary.is_empty() {
-        content.push('\n');
-        content.push_str(summary);
-        content.push('\n');
-    }
-    Ok(content)
 }
