@@ -8,7 +8,7 @@ A version and changelog manager using the same changeset file format as [changes
 
 `changesette` reads changeset files, bumps the version in each released package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / yarn / pnpm workspaces. It does no dependency management ([Workspaces](#workspaces) covers what happens instead) and never touches lockfiles; regenerating lockfiles such as `package-lock.json` belongs to the package-manager layer.
 
-`changesette` performs **no git operations and no network access**; commits, pull requests, tags, and releases belong to your workflows. The CLI feeds those workflows structured data: a machine-readable release plan (`version --output`), the workspace package list (`get-packages`), and per-version changelog sections (`get-changelog-entry`). The [example workflows](#example-workflows) build the whole release loop from these outputs — no changesets-specific action or bot required.
+`changesette` performs **no git operations and no network access**; commits, pull requests, tags, and releases belong to your workflows. The CLI feeds those workflows structured data — a machine-readable release plan (`version --output`), the workspace package list (`get-packages`), and per-version changelog sections (`get-changelog-entry`) — and accepts summary rewrites (`set-summary`). The [example workflows](#example-workflows) build the whole release loop from these outputs — no changesets-specific action or bot required.
 
 ## Install
 
@@ -199,6 +199,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 ```
 
+### Linking changelog entries to commits
+
+Prefixes each changelog entry with a link to the commit that added its changeset. Insert this step before the `version` step in either workflow above:
+
+```yaml
+      - run: |
+          changesette status --output - | jq -c '.changesets[]' | while read -r changeset; do
+            id="$(jq -re .id <<< "$changeset")"
+            summary="$(jq -re .summary <<< "$changeset")"
+            commit="$(gh api \
+              "repos/$GITHUB_REPOSITORY/commits?path=.changeset/$id.md&per_page=100" \
+              --jq '.[-1].sha // empty')"
+            if [[ -n "$commit" ]]; then
+              url="https://github.com/$GITHUB_REPOSITORY/commit/$commit"
+              changesette set-summary "$id" "[\`${commit:0:7}\`]($url) $summary"
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ github.token }}
+```
+
+For pull request or author links, extend the loop with further `gh api` queries.
+
 ## CLI
 
 Every command accepts `--log-level <error|warn|info|debug>` (default `info`) after the subcommand, setting the lowest level of the messages printed to stderr.
@@ -291,6 +314,10 @@ With `--all`, skipped packages are included too.
 
 Prints the body of the `## <version>` section of the named package's `CHANGELOG.md`.
 
+### `changesette set-summary <id> <summary>`
+
+Rewrites the summary of the changeset `.changeset/<id>.md`, leaving its releases unchanged.
+
 ## Configuration
 
 `.changeset/config.json` is read when present and is format-compatible with the changesets config; a missing file means the defaults, and unknown keys are ignored. Wherever a setting lists package names, glob patterns like `"@scope/*"` also work, and a `!`-prefixed pattern un-matches, in order, so `["pkg-*", "!pkg-b"]` selects every `pkg-*` package except `pkg-b`.
@@ -369,7 +396,7 @@ By default the suffix is `<tag>-<datetime>`, or just `<datetime>` when no tag is
 `changesette` shares the changeset file format with changesets, but is deliberately much smaller. Coming from changesets, expect the following:
 
 - No dependency management: dependents of a bumped package are never bumped, and dependency ranges are never rewritten (see [Workspaces](#workspaces)).
-- No git operations: nothing is committed or tagged, and changelog entries are the plain changeset summaries, without auto-generated PR / commit / author links.
+- No git operations: nothing is committed or tagged, and changelog entries are the plain changeset summaries, without auto-generated commit / pull request / author links (see [Linking changelog entries to commits](#linking-changelog-entries-to-commits)).
 - No npm publishing: publishing belongs to your workflows (see [Example workflows](#example-workflows)).
 
 ## License
