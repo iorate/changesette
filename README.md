@@ -199,9 +199,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 ```
 
-### Linking changelog entries to commits
+### Prefixing changelog entries with their commits
 
-Prefixes each changelog entry with a link to the commit that added its changeset. Insert this step before the `version` step in either workflow above:
+Prefixes each changelog entry with the short hash of the commit that added its changeset — the same format as `@changesets/changelog-git`, the changesets default. Insert this step before the `version` step in either workflow above:
 
 ```yaml
       - run: |
@@ -212,15 +212,14 @@ Prefixes each changelog entry with a link to the commit that added its changeset
               -f "path=.changeset/$id.md" -F per_page=100 \
               --jq '.[-1].sha // empty')"
             if [[ -n "$commit" ]]; then
-              url="https://github.com/$GITHUB_REPOSITORY/commit/$commit"
-              changesette set-summary "$id" "[\`${commit:0:7}\`]($url) $summary"
+              changesette set-summary "$id" "${commit:0:7}: $summary"
             fi
           done
         env:
           GH_TOKEN: ${{ github.token }}
 ```
 
-For pull request or author links, extend the loop with further `gh api` queries.
+To turn the hash into a link and add the pull request and author, as `@changesets/changelog-github` does, extend the loop with further `gh api` queries.
 
 ## CLI
 
@@ -396,7 +395,7 @@ By default the suffix is `<tag>-<datetime>`, or just `<datetime>` when no tag is
 `changesette` shares the changeset file format with changesets, but is deliberately much smaller. Coming from changesets, expect the following:
 
 - No dependency management: dependents of a bumped package are never bumped, and dependency ranges are never rewritten (see [Workspaces](#workspaces)).
-- No git operations: nothing is committed or tagged, and changelog entries are the plain changeset summaries, without auto-generated commit / pull request / author links (see [Linking changelog entries to commits](#linking-changelog-entries-to-commits)).
+- No git operations: nothing is committed or tagged, and changelog entries are the plain changeset summaries, without auto-generated commit / pull request / author attributions (see [Prefixing changelog entries with their commits](#prefixing-changelog-entries-with-their-commits)).
 - No npm publishing: publishing belongs to your workflows (see [Example workflows](#example-workflows)).
 
 ## License
