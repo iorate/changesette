@@ -9,6 +9,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
+use inquire::{InquireError, MultiSelect, Select, Text, validator::MinLengthValidator};
 use tracing::info;
 
 use crate::{
@@ -78,11 +79,20 @@ pub(crate) fn run(
         let releases = if flags_given {
             releases_from_flags(&workspace, &packages, major, minor, patch)?
         } else {
-            prompt_releases(&packages)?
+            let Some(releases) = prompt_releases(&packages)? else {
+                info!("Cancelled");
+                return Ok(());
+            };
+            releases
         };
-        let summary = match message {
-            Some(message) => message,
-            None => prompt_summary()?,
+        let summary = if let Some(message) = message {
+            message
+        } else {
+            let Some(summary) = prompt_summary()? else {
+                info!("Cancelled");
+                return Ok(());
+            };
+            summary
         };
         (releases, summary)
     };
@@ -148,13 +158,15 @@ fn open_editor(path: &Path) -> Result<()> {
     Ok(())
 }
 
+type Releases = Vec<(String, Option<Bump>)>;
+
 fn releases_from_flags(
     workspace: &Workspace,
     packages: &[&Member],
     major: &[String],
     minor: &[String],
     patch: &[String],
-) -> Result<Vec<(String, Option<Bump>)>> {
+) -> Result<Releases> {
     let flags = [
         ("--major", Bump::Major, major),
         ("--minor", Bump::Minor, minor),
@@ -190,7 +202,7 @@ fn releases_from_flags(
     }
     ensure!(errors.is_empty(), "{}", errors.join("\n"));
 
-    let mut releases: Vec<(String, Option<Bump>)> = Vec::new();
+    let mut releases = Releases::new();
     for (_, bump, names) in flags {
         for name in names {
             if !releases.iter().any(|(n, _)| n == name) {
@@ -201,7 +213,22 @@ fn releases_from_flags(
     Ok(releases)
 }
 
-fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Option<Bump>)>> {
+fn cancel_to_none<T>(result: Result<T, InquireError>) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(InquireError::OperationCanceled) => Ok(None),
+        Err(InquireError::OperationInterrupted) => {
+            // Unlike on Esc, inquire does not clean up the prompt frame on
+            // Ctrl-C: it stays on screen with the cursor on or right below its
+            // last line, so move to a fresh line to avoid overwriting it.
+            eprintln!();
+            Ok(None)
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn prompt_releases(packages: &[&Member]) -> Result<Option<Releases>> {
     if let [member] = packages {
         const ITEMS: [Bump; 3] = [Bump::Patch, Bump::Minor, Bump::Major];
         let prompt = format!(
@@ -209,26 +236,35 @@ fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Option<Bump>)>> 
             member.name(),
             member.version()
         );
-        let index = dialoguer::Select::new()
-            .with_prompt(prompt)
-            .items(ITEMS.map(Bump::as_str))
-            .default(0)
-            .interact()?;
-        return Ok(vec![(member.name().to_owned(), Some(ITEMS[index]))]);
+        let Some(option) =
+            cancel_to_none(Select::new(&prompt, ITEMS.map(Bump::as_str).to_vec()).raw_prompt())?
+        else {
+            return Ok(None);
+        };
+        return Ok(Some(vec![(
+            member.name().to_owned(),
+            Some(ITEMS[option.index]),
+        )]));
     }
 
     let names: Vec<&str> = packages.iter().map(|member| member.name()).collect();
-    let affected: Vec<&Member> = loop {
-        let indexes = dialoguer::MultiSelect::new()
-            .with_prompt("Which packages were affected by the changes you made?")
-            .items(&names)
-            .interact()?;
-        if indexes.is_empty() {
-            eprintln!("You must select at least one package");
-            continue;
-        }
-        break indexes.into_iter().map(|index| packages[index]).collect();
+    let Some(selected) = cancel_to_none(
+        MultiSelect::new(
+            "Which packages were affected by the changes you made?",
+            names,
+        )
+        .with_validator(
+            MinLengthValidator::new(1).with_message("You must select at least one package"),
+        )
+        .raw_prompt(),
+    )?
+    else {
+        return Ok(None);
     };
+    let affected: Vec<&Member> = selected
+        .into_iter()
+        .map(|option| packages[option.index])
+        .collect();
 
     let labels: Vec<String> = affected
         .iter()
@@ -245,11 +281,13 @@ fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Option<Bump>)>> 
             break;
         }
         let items: Vec<&str> = remaining.iter().map(|&i| labels[i].as_str()).collect();
-        let selected = dialoguer::MultiSelect::new()
-            .with_prompt(prompt)
-            .items(&items)
-            .interact()?;
-        let bumped: Vec<usize> = selected.iter().map(|&s| remaining[s]).collect();
+        let Some(selected) = cancel_to_none(MultiSelect::new(prompt, items).raw_prompt())? else {
+            return Ok(None);
+        };
+        let bumped: Vec<usize> = selected
+            .iter()
+            .map(|option| remaining[option.index])
+            .collect();
         remaining.retain(|i| !bumped.contains(i));
         releases.extend(
             bumped
@@ -272,40 +310,53 @@ fn prompt_releases(packages: &[&Member]) -> Result<Vec<(String, Option<Bump>)>> 
                 .map(|i| (affected[i].name().to_owned(), Some(Bump::Patch))),
         );
     }
-    Ok(releases)
+    Ok(Some(releases))
 }
 
-fn prompt_summary() -> Result<String> {
-    let input: String = dialoguer::Input::new()
-        .with_prompt("Please enter a summary for this change (leave empty to open your editor)")
-        .allow_empty(true)
-        .interact_text()?;
+fn prompt_summary() -> Result<Option<String>> {
+    let Some(input) = cancel_to_none(
+        Text::new("Please enter a summary for this change (leave empty to open your editor)")
+            .prompt(),
+    )?
+    else {
+        return Ok(None);
+    };
     if !input.trim().is_empty() {
-        return Ok(input);
+        return Ok(Some(input));
     }
-    let edited = dialoguer::Editor::new()
-        .edit(
-            "\n\n# Please enter a summary for your changes.\n# An empty message aborts the editor.",
-        )
-        .context("failed to edit the summary")?;
-    if let Some(text) = edited {
-        let text = text
-            .lines()
-            .filter(|line| !line.starts_with('#'))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let text = text.trim();
-        if !text.is_empty() {
-            return Ok(text.to_owned());
-        }
+    let edited = edit_summary()?;
+    if !edited.is_empty() {
+        return Ok(Some(edited));
     }
     loop {
-        let input: String = dialoguer::Input::new()
-            .with_prompt("Did not find a summary in the edited file. Please enter one")
-            .allow_empty(true)
-            .interact_text()?;
+        let Some(input) = cancel_to_none(
+            Text::new("Did not find a summary in the edited file. Please enter one").prompt(),
+        )?
+        else {
+            return Ok(None);
+        };
         if !input.trim().is_empty() {
-            return Ok(input);
+            return Ok(Some(input));
         }
     }
+}
+
+fn edit_summary() -> Result<String> {
+    let mut file = tempfile::Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .context("failed to create a temporary file for the summary")?;
+    file.write_all(
+        b"\n\n# Please enter a summary for your changes.\n# An empty message aborts the editor.",
+    )
+    .context("failed to write the summary template")?;
+    let path = file.into_temp_path();
+    open_editor(&path)?;
+    let text = fs::read_to_string(&path).context("failed to read the edited summary")?;
+    let text = text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(text.trim().to_owned())
 }
