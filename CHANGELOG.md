@@ -1,5 +1,11 @@
 # changesette
 
+## 6.2.1
+
+### Patch Changes
+
+- Document a workflow recipe adding commit, pull request, and author attributions in the style of `@changesets/changelog-github`.
+
 ## 6.2.0
 
 ### Minor Changes
