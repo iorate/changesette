@@ -255,8 +255,6 @@ To turn the hash into a link and add the pull request and author, as `@changeset
           GH_TOKEN: ${{ github.token }}
 ```
 
-The author is taken from the pull request when the commit has one, falling back to the commit author; the pull request part is omitted for commits pushed directly, and the author for commits not linked to a GitHub account.
-
 ## CLI
 
 Every command accepts `--log-level <error|warn|info|debug>` (default `info`) after the subcommand, setting the lowest level of the messages printed to stderr.
