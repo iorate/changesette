@@ -199,7 +199,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 ```
 
-### Prefixing changelog entries with their commits
+### Adding commit, pull request, and author attributions
 
 Prefixes each changelog entry with the short hash of the commit that added its changeset — the same format as `@changesets/changelog-git`, the changesets default. Insert this step before the `version` step in either workflow above:
 
@@ -219,7 +219,43 @@ Prefixes each changelog entry with the short hash of the commit that added its c
           GH_TOKEN: ${{ github.token }}
 ```
 
-To turn the hash into a link and add the pull request and author, as `@changesets/changelog-github` does, extend the loop with further `gh api` queries.
+To turn the hash into a link and add the pull request and author, as `@changesets/changelog-github` does, use this step instead:
+
+```yaml
+      - run: |
+          changesette status --output - | jq -c '.changesets[]' | while read -r changeset; do
+            id="$(jq -re .id <<< "$changeset")"
+            summary="$(jq -re .summary <<< "$changeset")"
+            commit="$(gh api -X GET "repos/$GITHUB_REPOSITORY/commits" \
+              -f "path=.changeset/$id.md" -F per_page=100 \
+              --jq '.[-1] // empty')"
+            if [[ -n "$commit" ]]; then
+              commit_sha="$(jq -re .sha <<< "$commit")"
+              commit_url="$(jq -re .html_url <<< "$commit")"
+              prefix="[\`${commit_sha:0:7}\`]($commit_url)"
+              pr="$(gh api "repos/$GITHUB_REPOSITORY/commits/$commit_sha/pulls" \
+                --jq '.[0] // empty')"
+              if [[ -n "$pr" ]]; then
+                pr_number="$(jq -re .number <<< "$pr")"
+                pr_url="$(jq -re .html_url <<< "$pr")"
+                prefix="[#$pr_number]($pr_url) $prefix"
+                user="$(jq -c '.user // empty' <<< "$pr")"
+              else
+                user="$(jq -c '.author // empty' <<< "$commit")"
+              fi
+              if [[ -n "$user" ]]; then
+                user_login="$(jq -re .login <<< "$user")"
+                user_url="$(jq -re .html_url <<< "$user")"
+                prefix="$prefix Thanks [@$user_login]($user_url)!"
+              fi
+              changesette set-summary "$id" "$prefix - $summary"
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ github.token }}
+```
+
+The author is taken from the pull request when the commit has one, falling back to the commit author; the pull request part is omitted for commits pushed directly, and the author for commits not linked to a GitHub account.
 
 ## CLI
 
@@ -395,7 +431,7 @@ By default the suffix is `<tag>-<datetime>`, or just `<datetime>` when no tag is
 `changesette` shares the changeset file format with changesets, but is deliberately much smaller. Coming from changesets, expect the following:
 
 - No dependency management: dependents of a bumped package are never bumped, and dependency ranges are never rewritten (see [Workspaces](#workspaces)).
-- No git operations: nothing is committed or tagged, and changelog entries are the plain changeset summaries, without auto-generated commit / pull request / author attributions (see [Prefixing changelog entries with their commits](#prefixing-changelog-entries-with-their-commits)).
+- No git operations: nothing is committed or tagged, and changelog entries are the plain changeset summaries, without auto-generated commit / pull request / author attributions (see [Adding commit, pull request, and author attributions](#adding-commit-pull-request-and-author-attributions)).
 - No npm publishing: publishing belongs to your workflows (see [Example workflows](#example-workflows)).
 
 ## License
