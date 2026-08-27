@@ -201,7 +201,7 @@ jobs:
 
 ### Adding commit, pull request, and author attributions
 
-Prefixes each changelog entry with the short hash of the commit that added its changeset — the same format as `@changesets/changelog-git`, the changesets default. Insert this step before the `version` step in either workflow above:
+Prefixes each changeset summary with the short hash of the commit that added it — the same format as `@changesets/changelog-git`, the changesets default. Insert this step before the `version` step in either workflow above:
 
 ```yaml
       - run: |
@@ -389,7 +389,7 @@ Options for [snapshot releases](#snapshot-releases). `useCalculatedVersion` base
 
 ## Workspaces
 
-`changesette` works on npm / yarn / pnpm workspaces, and its changeset files are format-compatible with changesets — but `version` deliberately does not behave like `changeset version` in a workspace. The dependency management changesets performs is two separate jobs, and `changesette` does neither: **internal dependency ranges are never rewritten, and dependents of a bumped package are never bumped** (so no "Updated dependencies" changelog entries either).
+`changesette` works on npm / yarn / pnpm workspaces, and its changeset files are format-compatible with changesets — but `version` deliberately does not behave like `changeset version` in a workspace. The dependency management changesets performs is two separate jobs, and `changesette` does neither: **internal dependency ranges are never rewritten, and dependents of a bumped package are never bumped** (so no "Updated dependencies" changelog lines either).
 
 Ranges are a mechanical job, and the `workspace:` protocol of yarn and pnpm makes it the package manager's: in development a `workspace:` dependency always resolves to the local copy, and at publish the range is derived from the dependency's current version (`workspace:^` becomes a caret range, `workspace:*` an exact pin, and so on), so published ranges always reflect the versions the dependent was actually built against. Plain npm workspaces work too, but literal ranges like `^1.2.0` are then yours to maintain: rewrite them when the dependency moves to a new major (otherwise npm stops linking the local copy), and raise them when the dependent starts relying on newer behavior.
 
@@ -431,7 +431,7 @@ By default the suffix is `<tag>-<datetime>`, or just `<datetime>` when no tag is
 `changesette` shares the changeset file format with changesets, but is deliberately much smaller. Coming from changesets, expect the following:
 
 - No dependency management: dependents of a bumped package are never bumped, and dependency ranges are never rewritten (see [Workspaces](#workspaces)).
-- No git operations: nothing is committed or tagged, and changelog entries are the plain changeset summaries, without auto-generated commit / pull request / author attributions (see [Adding commit, pull request, and author attributions](#adding-commit-pull-request-and-author-attributions)).
+- No git operations: nothing is committed or tagged, and changelog sections are built from the plain changeset summaries, without auto-generated commit / pull request / author attributions (see [Adding commit, pull request, and author attributions](#adding-commit-pull-request-and-author-attributions)).
 - No npm publishing: publishing belongs to your workflows (see [Example workflows](#example-workflows)).
 
 ## License
