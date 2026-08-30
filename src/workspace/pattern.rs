@@ -21,10 +21,11 @@ pub(crate) struct Pattern {
 }
 
 /// Compiles one workspace pattern into its polarity (`true` for a `!`
-/// negation) and matcher; the errors name only the offense, and the caller
-/// attaches the manifest path and the original pattern. The body is read as
-/// one fast-glob glob and split at its top-level separators.
-pub(crate) fn compile(original: &str) -> Result<(bool, Pattern)> {
+/// negation) and matcher, or `None` for an empty pattern; the errors name
+/// only the offense, and the caller attaches the manifest path and the
+/// original pattern. The body is read as one fast-glob glob and split at its
+/// top-level separators.
+pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
     // Every leading `!` flips the polarity, as npm counts them; leaving one
     // in the body would hand it to the glob matcher.
     let mut negated = false;
@@ -33,6 +34,12 @@ pub(crate) fn compile(original: &str) -> Result<(bool, Pattern)> {
         negated = !negated;
         body = rest;
     }
+    // An empty pattern matches nothing, as in npm (Yarn and pnpm error on
+    // it); reading it as `.` would silently opt the root into versioning,
+    // and an intentional root reference has a `.` segment.
+    if body.is_empty() {
+        return Ok(None);
+    }
     // An absolute path and a `..` segment are the patterns the upstream
     // tools silently break on or resolve outside the root, so they are loud
     // errors rather than a silent no-match.
@@ -40,12 +47,6 @@ pub(crate) fn compile(original: &str) -> Result<(bool, Pattern)> {
         bail!("absolute patterns are not supported")
     }
     let parts = split(body)?;
-    // An empty pattern is a plain mistake — npm matches nothing and pnpm
-    // errors — and reading it as `.` would silently opt the root into
-    // versioning. An intentional root reference has a `.` segment.
-    if parts.iter().all(|part| part.is_empty()) {
-        bail!("empty patterns are not supported")
-    }
     let mut segs = Vec::new();
     for (index, part) in parts.into_iter().enumerate() {
         if part.is_empty() || part == "." {
@@ -70,7 +71,7 @@ pub(crate) fn compile(original: &str) -> Result<(bool, Pattern)> {
     // Appending the manifest name gives the pnpm-style idioms for free: the
     // zero-width `**` makes `x/**` cover `x` itself and `!x/**` exclude it.
     segs.push(Seg::Literal("package.json".to_owned()));
-    Ok((negated, Pattern { segs }))
+    Ok(Some((negated, Pattern { segs })))
 }
 
 fn split(body: &str) -> Result<Vec<&str>> {
@@ -111,7 +112,7 @@ fn split(body: &str) -> Result<Vec<&str>> {
             '{' => brace_depth += 1,
             // A `}` without a matching `{` is an ordinary character.
             '}' => brace_depth = brace_depth.saturating_sub(1),
-            '[' => skip_class(&mut chars)?,
+            '[' => skip_class(&mut chars),
             _ => {}
         }
     }
@@ -119,31 +120,27 @@ fn split(body: &str) -> Result<Vec<&str>> {
     Ok(parts)
 }
 
-fn skip_class(chars: &mut Peekable<CharIndices<'_>>) -> Result<()> {
+fn skip_class(chars: &mut Peekable<CharIndices<'_>>) {
     // Mirrors fast-glob's class parsing: an optional `^`/`!` prefix, then
     // the first character is a literal member (so a leading `]` does not
     // close the class), and `\` escapes the next character. An unclosed
     // class swallows the rest of the body and is left for the per-segment
-    // validation to reject.
+    // validation to reject. A `/` inside the class stays a member, as Yarn
+    // reads it; no segment name contains one, so it simply never matches.
     if matches!(chars.peek(), Some((_, '^' | '!'))) {
         chars.next();
     }
     let mut first = true;
     while let Some((_, c)) = chars.next() {
         match c {
-            ']' if !first => return Ok(()),
-            '/' => bail!("`/` inside character classes is not supported"),
+            ']' if !first => return,
             '\\' => {
-                if matches!(chars.peek(), Some((_, '/'))) {
-                    bail!("`/` inside character classes is not supported")
-                }
                 chars.next();
             }
             _ => {}
         }
         first = false;
     }
-    Ok(())
 }
 
 /// Whether `name` parses as exactly one normal path component. Meant for
@@ -174,12 +171,6 @@ fn classify(part: &str) -> Result<Seg> {
 impl Pattern {
     pub(crate) fn segs(&self) -> &[Seg] {
         &self.segs
-    }
-
-    /// Whether every segment is a `Literal`, making the pattern a plain path
-    /// the walker can skip in favor of an existence check.
-    pub(crate) fn is_literal(&self) -> bool {
-        self.segs.iter().all(|seg| matches!(seg, Seg::Literal(_)))
     }
 
     /// Matches a root-relative `/`-separated manifest path in full; a
@@ -248,13 +239,13 @@ mod tests {
     }
 
     fn positive(pattern: &str) -> Pattern {
-        let (negated, compiled) = compile(pattern).unwrap();
+        let (negated, compiled) = compile(pattern).unwrap().unwrap();
         assert!(!negated, "{pattern}");
         compiled
     }
 
     fn negation(pattern: &str) -> Pattern {
-        let (negated, compiled) = compile(pattern).unwrap();
+        let (negated, compiled) = compile(pattern).unwrap().unwrap();
         assert!(negated, "{pattern}");
         compiled
     }
@@ -282,9 +273,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_an_empty_pattern() {
+    fn skips_an_empty_pattern() {
         for pattern in ["", "!", "!!"] {
-            assert!(error(pattern).contains("empty"), "{pattern}");
+            assert!(compile(pattern).unwrap().is_none(), "{pattern}");
         }
     }
 
@@ -418,10 +409,23 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_slash_inside_a_character_class() {
-        for pattern in ["[a/b]", "[a\\/b]", "x[/]y", "[!/]", "x/[a/b]"] {
-            assert!(error(pattern).contains("character class"), "{pattern}");
-        }
+    fn a_slash_inside_a_character_class_is_a_member() {
+        let pattern = positive("[a/b]");
+        assert_eq!(pattern.segs(), [wild("[a/b]"), lit("package.json")]);
+        assert!(pattern.matches("a/package.json", false));
+        assert!(pattern.matches("b/package.json", false));
+        assert!(!pattern.matches("c/package.json", false));
+        assert!(!pattern.matches("[a/b]/package.json", false));
+        assert_eq!(
+            positive("x/[a/b]").segs(),
+            [lit("x"), wild("[a/b]"), lit("package.json")]
+        );
+        assert_eq!(
+            positive("[a\\/b]").segs(),
+            [wild("[a\\/b]"), lit("package.json")]
+        );
+        assert!(!positive("x[/]y").matches("xy/package.json", false));
+        assert_eq!(positive("[!/]").segs(), [wild("[!/]"), lit("package.json")]);
         assert_eq!(
             positive("[]]x/y").segs(),
             [wild("[]]x"), lit("y"), lit("package.json")]

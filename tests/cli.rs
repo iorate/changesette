@@ -901,7 +901,7 @@ fn get_packages_warns_about_filesystem_errors_but_not_plain_absence() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("package.json"),
-        "{\n  \"workspaces\": [\"packages/*\", \"docs/pkg\"]\n}\n",
+        "{\n  \"workspaces\": [\"packages/**\", \"docs/pkg\"]\n}\n",
     )
     .unwrap();
     fs::create_dir_all(dir.path().join("packages/a")).unwrap();
@@ -1038,7 +1038,7 @@ fn get_packages_debug_reports_the_member_list() {
     let err = stderr(&output);
     assert!(
         err.contains(&format!(
-            "debug: workspace {}: members: pkg-a (packages/a)",
+            "debug: workspace {} (npm): members: pkg-a (packages/a)",
             expected_path(dir.path())
         )),
         "{err}"
@@ -1058,7 +1058,7 @@ fn get_packages_debug_reports_an_empty_member_list() {
     let err = stderr(&output);
     assert!(
         err.contains(&format!(
-            "debug: workspace {}: no members",
+            "debug: workspace {} (single package): no members",
             expected_path(dir.path())
         )),
         "{err}"
@@ -1103,8 +1103,13 @@ fn get_packages_debug_reports_a_negation_exclusion() {
 
 #[cfg(unix)]
 #[test]
-fn get_packages_debug_reports_a_symlink_not_entered_by_a_wildcard() {
+fn get_packages_debug_reports_a_symlink_not_entered_by_a_double_star() {
     let dir = workspace_dir();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"packages/**\"]\n}\n",
+    )
+    .unwrap();
     fs::create_dir_all(dir.path().join("target")).unwrap();
     fs::write(
         dir.path().join("target/package.json"),
@@ -1117,7 +1122,7 @@ fn get_packages_debug_reports_a_symlink_not_entered_by_a_wildcard() {
     assert!(!stdout(&output).contains("pkg-t"), "{}", stdout(&output));
     let err = stderr(&output);
     assert!(
-        err.contains("debug: packages/link: a symlinked directory is not entered by a wildcard"),
+        err.contains("debug: packages/link: a symlinked directory is not entered by `**`"),
         "{err}"
     );
 }
