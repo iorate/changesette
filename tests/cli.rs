@@ -3738,3 +3738,27 @@ fn get_packages_lists_a_package_the_npm_root_above_does_not_list_alone() {
         "[{\"name\":\"example-x\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\".\"}]\n"
     );
 }
+
+#[test]
+fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("yarn.lock"), "").unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": \"packages/*\" }\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"root\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\".\"}]\n"
+    );
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "warning: {}: \"workspaces\" must be an array or an object: ignored, as Yarn ignores it\n",
+            dir.path().join("package.json").display()
+        )
+    );
+}

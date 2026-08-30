@@ -95,14 +95,14 @@ impl Workspace {
             // not a package.json sits beside it.
             if probe_is_file(&dir.join("yarn.lock")) {
                 let path = dir.join("package.json");
+                let pm = PackageManager::Yarn;
                 let mut patterns = Vec::new();
                 if probe_is_file(&path)
                     && let Some(value) = read_manifest(&path)?
-                    && let Some(declared) = workspaces_patterns(&value, &path)?
+                    && let Some(declared) = workspaces_patterns(&value, &path, pm)?
                 {
                     patterns = declared;
                 }
-                let pm = PackageManager::Yarn;
                 return Ok(Workspace::new(
                     dir.to_path_buf(),
                     Some(pm),
@@ -134,10 +134,10 @@ impl Workspace {
                     continue;
                 }
             };
-            let Some(patterns) = workspaces_patterns(&value, &path)? else {
+            let pm = PackageManager::Npm;
+            let Some(patterns) = workspaces_patterns(&value, &path, pm)? else {
                 continue;
             };
-            let pm = PackageManager::Npm;
             let members = collect_members(dir, &path, &patterns, pm)?;
             if members
                 .iter()
@@ -153,8 +153,8 @@ impl Workspace {
                 display_path(cwd)
             )
         };
-        if let Some(patterns) = workspaces_patterns(&value, &path)? {
-            let pm = PackageManager::Npm;
+        let pm = PackageManager::Npm;
+        if let Some(patterns) = workspaces_patterns(&value, &path, pm)? {
             return Ok(Workspace::new(
                 dir.clone(),
                 Some(pm),
@@ -364,37 +364,57 @@ fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
     Ok(patterns)
 }
 
-// A falsy `workspaces` (`null`, `false`, `0`, `""`) reads as absent because
-// npm passes those over; any other invalid type is an error even mid-walk,
-// as npm fails the same way wherever it reads one, and ignoring the field
-// would silently pick another root.
-fn workspaces_patterns(value: &Value, path: &Path) -> Result<Option<Vec<String>>> {
+// A falsy `workspaces` (`null`, `false`, `0`, `""`) reads as absent, as npm
+// passes those over and Yarn ignores them. Any other invalid shape is an
+// error under npm, which fails the same way wherever it reads one; Yarn
+// ignores the field, and skips a non-string pattern, without a word, so a
+// warning keeps the mistake visible without changing the answer.
+fn workspaces_patterns(
+    value: &Value,
+    path: &Path,
+    pm: PackageManager,
+) -> Result<Option<Vec<String>>> {
     let Some(workspaces) = value.get("workspaces") else {
         return Ok(None);
     };
     let items = match workspaces {
-        Value::Array(items) => items,
+        Value::Array(items) => Some(items),
         // The Yarn 1 object form `{packages: [...], nohoist: [...]}`; every
-        // key but `packages` is ignored, and npm errors on any object
-        // without a list, a missing or null key included.
+        // key but `packages` is ignored.
         Value::Object(object) => match object.get("packages") {
-            Some(Value::Array(items)) => items,
-            _ => bail!(
-                "{}: \"packages\" in \"workspaces\" must be a list of strings",
-                display_path(path)
-            ),
+            Some(Value::Array(items)) => Some(items),
+            _ => None,
         },
         Value::Null | Value::Bool(false) => return Ok(None),
         Value::Number(number) if number.as_f64() == Some(0.0) => return Ok(None),
         Value::String(text) if text.is_empty() => return Ok(None),
-        _ => bail!(
-            "{}: \"workspaces\" must be an array or an object",
-            display_path(path)
-        ),
+        _ => None,
+    };
+    let Some(items) = items else {
+        let what = if workspaces.is_object() {
+            "\"packages\" in \"workspaces\" must be a list of strings"
+        } else {
+            "\"workspaces\" must be an array or an object"
+        };
+        if pm == PackageManager::Yarn {
+            warn!(
+                "{}: {what}: ignored, as Yarn ignores it",
+                display_path(path)
+            );
+            return Ok(None);
+        }
+        bail!("{}: {what}", display_path(path))
     };
     let mut patterns = Vec::new();
     for item in items {
         let Some(pattern) = item.as_str() else {
+            if pm == PackageManager::Yarn {
+                warn!(
+                    "{}: a non-string \"workspaces\" pattern is skipped, as Yarn skips it",
+                    display_path(path)
+                );
+                continue;
+            }
             bail!(
                 "{}: \"workspaces\" patterns must be strings",
                 display_path(path)
@@ -448,7 +468,8 @@ fn collect_members(
                 continue;
             };
             if pm == PackageManager::Yarn
-                && let Some(declared) = workspaces_patterns(&value, &path)?
+                && rel_dir != "."
+                && let Some(declared) = workspaces_patterns(&value, &path, pm)?
             {
                 queue.push_back((child_dir.clone(), rel_dir.clone(), path.clone(), declared));
             }
@@ -2425,18 +2446,83 @@ mod tests {
     }
 
     #[test]
-    fn a_yarn_root_rejects_an_invalid_workspaces_type() {
+    fn a_yarn_root_ignores_an_invalid_workspaces_type() {
+        for workspaces in [
+            "\"packages/*\"",
+            "42",
+            "true",
+            "{}",
+            "{ \"packages\": \"packages/*\" }",
+            "{ \"nohoist\": [\"**/foo\"] }",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            write(dir.path(), "yarn.lock", "");
+            write(
+                dir.path(),
+                "package.json",
+                &format!(
+                    "{{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": {workspaces} }}\n"
+                ),
+            );
+            write(
+                dir.path(),
+                "packages/a/package.json",
+                "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+            );
+            let workspace = Workspace::discover(dir.path()).unwrap();
+            assert_eq!(workspace.root(), dir.path(), "{workspaces}");
+            assert_eq!(
+                names_and_dirs(&workspace),
+                [("root", dir.path())],
+                "{workspaces}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_yarn_root_skips_a_non_string_workspaces_pattern() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "yarn.lock", "");
         write(
             dir.path(),
             "package.json",
-            "{ \"workspaces\": \"packages/*\" }\n",
+            "{ \"workspaces\": [\"packages/*\", 42, null] }\n",
         );
-        let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
-        assert!(
-            err.contains("\"workspaces\" must be an array or an object"),
-            "{err}"
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn a_yarn_member_with_an_invalid_workspaces_type_declares_no_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "yarn.lock", "");
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"workspaces\": [\"packages/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": \"nested/*\" }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/nested/x/package.json",
+            "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
         );
     }
 
@@ -2644,38 +2730,30 @@ mod tests {
     }
 
     #[test]
-    fn a_yarn_member_declaration_takes_the_pattern_errors() {
-        for (workspaces, offense) in [
-            ("[\"../b\"]", "invalid workspace pattern \"../b\""),
-            ("42", "\"workspaces\" must be an array or an object"),
-            ("{ \"packages\": \"x\" }", "\"packages\" in \"workspaces\""),
-        ] {
-            let dir = tempfile::tempdir().unwrap();
-            write(dir.path(), "yarn.lock", "");
-            write(
-                dir.path(),
-                "package.json",
-                "{ \"workspaces\": [\"packages/*\"] }\n",
-            );
-            write(
-                dir.path(),
-                "packages/a/package.json",
-                &format!(
-                    "{{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": {workspaces} }}\n"
-                ),
-            );
-            write(
-                dir.path(),
-                "packages/b/package.json",
-                "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
-            );
-            let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
-            assert!(err.contains(offense), "{workspaces}: {err}");
-            assert!(
-                err.contains(&display_path(&dir.path().join("packages/a/package.json"))),
-                "{workspaces}: {err}"
-            );
-        }
+    fn a_yarn_member_declaration_takes_the_pattern_error() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "yarn.lock", "");
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"workspaces\": [\"packages/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": [\"../b\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/b/package.json",
+            "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
+        );
+        let err = format!("{:#}", Workspace::discover(dir.path()).unwrap_err());
+        assert!(err.contains("invalid workspace pattern \"../b\""), "{err}");
+        assert!(
+            err.contains(&display_path(&dir.path().join("packages/a/package.json"))),
+            "{err}"
+        );
     }
 
     #[test]
