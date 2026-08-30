@@ -1,0 +1,5 @@
+---
+changesette: minor
+---
+
+Add `--root <DIR>` (also read from `CHANGESETTE_ROOT`; the option wins over the variable, and an empty value counts as unset) and the `changesette.packages` setting of `.changeset/config.json` as ways around the workspace detection. `--root` names the workspace root directly, so no ancestor of the working directory is looked at: only the `pnpm-workspace.yaml`, `yarn.lock`, or `workspaces` field in that directory decides how its members are enumerated, and a directory with none of them is a single package. `{"changesette": {"packages": ["packages/a", "."]}}` replaces the member enumeration entirely with the listed root-relative directories, each of which must hold a `package.json`; wildcards are not supported, and neither the markers nor the workspace patterns are read, so a pattern the built-in dialect rejects can be worked around by listing the directories. The listed packages still take the usual member qualification and the `ignore` / `privatePackages` settings.

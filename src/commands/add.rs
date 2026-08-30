@@ -13,8 +13,10 @@ use inquire::{InquireError, MultiSelect, Select, Text, validator::MinLengthValid
 use tracing::info;
 
 use crate::{
+    AddArgs,
     bump::Bump,
-    changeset, config,
+    changeset,
+    config::Config,
     output::display_path,
     skip::SkipSet,
     workspace::{Member, Workspace},
@@ -23,29 +25,19 @@ use crate::{
 /// Creates a changeset file under the workspace root's `.changeset/`, taking
 /// the releases and summary from the flags and prompting interactively for
 /// missing inputs.
-pub(crate) fn run(
-    major: &[String],
-    minor: &[String],
-    patch: &[String],
-    message: Option<String>,
-    empty: bool,
-    open: bool,
-) -> Result<()> {
+pub(crate) fn run(cwd: &Path, workspace: &Workspace, config: &Config, args: AddArgs) -> Result<()> {
     ensure!(
-        !open || (io::stdin().is_terminal() && io::stderr().is_terminal()),
+        !args.open || (io::stdin().is_terminal() && io::stderr().is_terminal()),
         "cannot use --open in non-interactive mode"
     );
 
-    let cwd = env::current_dir()?;
-    let workspace = Workspace::discover(&cwd)?;
     ensure!(
         !workspace.members().is_empty(),
         "no packages found in the workspace"
     );
 
     let changeset_dir = workspace.root().join(".changeset");
-    let config = config::load(&changeset_dir)?;
-    let skip = SkipSet::load(&workspace, &config, &[])?;
+    let skip = SkipSet::load(workspace, config, &[])?;
     let packages: Vec<&Member> = workspace
         .members()
         .iter()
@@ -57,16 +49,17 @@ pub(crate) fn run(
     );
     fs::create_dir_all(&changeset_dir).with_context(|| display_path(&changeset_dir))?;
 
-    let (releases, summary) = if empty {
-        (Vec::new(), message.unwrap_or_default())
+    let (releases, summary) = if args.empty {
+        (Vec::new(), args.message.unwrap_or_default())
     } else {
-        let flags_given = !(major.is_empty() && minor.is_empty() && patch.is_empty());
+        let flags_given =
+            !(args.major.is_empty() && args.minor.is_empty() && args.patch.is_empty());
         if !(io::stdin().is_terminal() && io::stderr().is_terminal()) {
             let mut missing = Vec::new();
             if !flags_given {
                 missing.push("--major/--minor/--patch");
             }
-            if message.is_none() {
+            if args.message.is_none() {
                 missing.push("--message");
             }
             if !missing.is_empty() {
@@ -77,7 +70,7 @@ pub(crate) fn run(
             }
         }
         let releases = if flags_given {
-            releases_from_flags(&workspace, &packages, major, minor, patch)?
+            releases_from_flags(workspace, &packages, &args.major, &args.minor, &args.patch)?
         } else {
             let Some(releases) = prompt_releases(&packages)? else {
                 info!("Cancelled");
@@ -85,7 +78,7 @@ pub(crate) fn run(
             };
             releases
         };
-        let summary = if let Some(message) = message {
+        let summary = if let Some(message) = args.message {
             message
         } else {
             let Some(summary) = prompt_summary()? else {
@@ -114,7 +107,7 @@ pub(crate) fn run(
         .and_then(|mut file| file.write_all(content.as_bytes()))
         .with_context(|| display_path(&path))?;
 
-    if !empty {
+    if !args.empty {
         let mut confirmation = String::from("Summary of changesets:");
         for bump in [Bump::Major, Bump::Minor, Bump::Patch] {
             let names: Vec<&str> = releases
@@ -129,9 +122,9 @@ pub(crate) fn run(
         info!("{confirmation}");
     }
 
-    info!("Added {}", workspace.display_path(&cwd, &path));
+    info!("Added {}", workspace.display_path(cwd, &path));
 
-    if open {
+    if args.open {
         open_editor(&path)?;
     }
     Ok(())

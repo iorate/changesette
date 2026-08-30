@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::{config, output, skip::SkipSet, workspace::Workspace};
+use crate::{config::Config, output, skip::SkipSet, workspace::Workspace};
 
 #[derive(Serialize)]
 struct Package<'a> {
@@ -14,10 +14,8 @@ struct Package<'a> {
 /// Prints the packages managed by `version` — every workspace member with
 /// `all` — to stdout as a JSON array of `{name, version, private, dir}`
 /// objects, `dir` being relative to the workspace root.
-pub(crate) fn run(all: bool) -> Result<()> {
-    let workspace = Workspace::discover(&std::env::current_dir()?)?;
-    let config = config::load(&workspace.root().join(".changeset"))?;
-    let skip = SkipSet::load(&workspace, &config, &[])?;
+pub(crate) fn run(workspace: &Workspace, config: &Config, all: bool) -> Result<()> {
+    let skip = SkipSet::load(workspace, config, &[])?;
     let mut packages = Vec::new();
     for member in workspace.members() {
         if !all && skip.contains(member.name()) {

@@ -70,6 +70,38 @@ pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
     Ok(Some((negated, Pattern { segs })))
 }
 
+pub(crate) fn parse_rel_dir(text: &str) -> Result<String> {
+    if text.is_empty() {
+        bail!("an empty path is not supported")
+    }
+    if text.starts_with('/') {
+        bail!("absolute paths are not supported")
+    }
+    if text.contains('\\') {
+        bail!("`\\` is not supported; use `/` as the separator")
+    }
+    if text.starts_with('!') || text.contains(['*', '?', '[', ']', '{', '}']) {
+        bail!("wildcards are not supported; list each directory")
+    }
+    let mut segs = Vec::new();
+    for (index, part) in text.split('/').enumerate() {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            bail!("`..` segments are not supported")
+        }
+        if index == 0 && has_drive_prefix(part) {
+            bail!("drive-prefixed paths are not supported")
+        }
+        segs.push(part);
+    }
+    if segs.is_empty() {
+        return Ok(".".to_owned());
+    }
+    Ok(segs.join("/"))
+}
+
 fn split(body: &str) -> Result<Vec<&str>> {
     let mut parts = Vec::new();
     let mut start = 0;
@@ -491,5 +523,72 @@ mod tests {
         assert!(pattern.matches("packages/a/package.json", true));
         assert!(!pattern.matches("packages/c/package.json", true));
         assert!(!pattern.matches("packages/{a,b}/package.json", true));
+    }
+
+    fn rel_dir_error(text: &str) -> String {
+        format!("{:#}", parse_rel_dir(text).unwrap_err())
+    }
+
+    #[test]
+    fn normalizes_a_relative_directory_entry() {
+        for text in ["a", "./a", "a/", "a//", "./a/"] {
+            assert_eq!(parse_rel_dir(text).unwrap(), "a", "{text}");
+        }
+        for text in ["a/b", "a//b", "a/./b", "./a/b/"] {
+            assert_eq!(parse_rel_dir(text).unwrap(), "a/b", "{text}");
+        }
+        for text in [".", "./", "./.", "././"] {
+            assert_eq!(parse_rel_dir(text).unwrap(), ".", "{text}");
+        }
+        assert_eq!(parse_rel_dir("a/!b").unwrap(), "a/!b");
+    }
+
+    #[test]
+    fn rejects_an_empty_directory_entry() {
+        assert!(rel_dir_error("").contains("empty"));
+    }
+
+    #[test]
+    fn rejects_an_absolute_directory_entry() {
+        for text in ["/a", "/"] {
+            assert!(rel_dir_error(text).contains("absolute"), "{text}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_parent_segment_in_a_directory_entry() {
+        for text in ["..", "../a", "a/../b", "a/.."] {
+            assert!(rel_dir_error(text).contains("`..`"), "{text}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_backslash_in_a_directory_entry() {
+        for text in ["a\\b", "\\a", "a\\", "\\"] {
+            assert!(rel_dir_error(text).contains("`\\`"), "{text}");
+        }
+    }
+
+    #[test]
+    fn rejects_wildcards_in_a_directory_entry() {
+        for text in ["packages/*", "a?", "[a]", "a]", "{a,b}", "a}", "!a", "**"] {
+            assert!(rel_dir_error(text).contains("wildcards"), "{text}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_a_leading_drive_prefix_in_a_directory_entry() {
+        for text in ["C:/x", "C:x", "C:"] {
+            assert!(rel_dir_error(text).contains("drive"), "{text}");
+        }
+        assert_eq!(parse_rel_dir("./C:/x").unwrap(), "C:/x");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_drive_like_directory_entry_is_an_ordinary_name_on_unix() {
+        assert_eq!(parse_rel_dir("C:/x").unwrap(), "C:/x");
+        assert_eq!(parse_rel_dir("C:x").unwrap(), "C:x");
     }
 }

@@ -1,4 +1,4 @@
-use std::{env, fs, io, io::Write};
+use std::{fs, io, io::Write, path::Path};
 
 use anyhow::{Context, Result};
 use tracing::info;
@@ -30,9 +30,7 @@ const CONFIG: &str = "{
 
 /// Creates the `.changeset/` directory at the workspace root with a default
 /// README.md and config.json, creating whichever of them are missing.
-pub(crate) fn run() -> Result<()> {
-    let cwd = env::current_dir()?;
-    let workspace = Workspace::discover(&cwd)?;
+pub(crate) fn run(cwd: &Path, workspace: &Workspace) -> Result<()> {
     let changeset_dir = workspace.root().join(".changeset");
     fs::create_dir_all(&changeset_dir).with_context(|| display_path(&changeset_dir))?;
 
@@ -47,7 +45,7 @@ pub(crate) fn run() -> Result<()> {
             Ok(mut file) => {
                 file.write_all(content.as_bytes())
                     .with_context(|| display_path(&path))?;
-                info!("Created {}", workspace.display_path(&cwd, &path));
+                info!("Created {}", workspace.display_path(cwd, &path));
                 created = true;
             }
             Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
@@ -58,7 +56,7 @@ pub(crate) fn run() -> Result<()> {
     if !created {
         info!(
             "{} is already initialized",
-            workspace.display_path(&cwd, &changeset_dir)
+            workspace.display_path(cwd, &changeset_dir)
         );
     }
     Ok(())

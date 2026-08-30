@@ -3,19 +3,24 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result, bail};
 use tracing::info;
 
-use crate::{output::display_path, plan, release_plan, snapshot::Snapshot};
+use crate::{
+    config::Config, output::display_path, plan, release_plan, snapshot::Snapshot,
+    workspace::Workspace,
+};
 
 /// Consumes every changeset: bumps each named package's package.json,
 /// upserts its CHANGELOG.md section, and deletes the consumed files — in pre
 /// mode planning prerelease versions and moving the consumed files to
 /// `.changeset/pre/` instead.
 pub(crate) fn run(
+    workspace: Workspace,
+    config: &Config,
     ignore: &[String],
     allow_no_changesets: bool,
     output_path: Option<&Path>,
     snapshot: Option<&Snapshot>,
 ) -> Result<()> {
-    let planned = plan::plan_version(ignore, snapshot)?;
+    let planned = plan::plan_version(workspace, config, ignore, snapshot)?;
     let pre = planned.in_pre();
     if let Some(pre) = pre {
         info!(

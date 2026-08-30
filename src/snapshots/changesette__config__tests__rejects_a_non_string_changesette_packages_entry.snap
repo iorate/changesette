@@ -1,0 +1,5 @@
+---
+source: src/config.rs
+expression: "validate_err(\"{ \\\"changesette\\\": { \\\"packages\\\": [\\\"packages/a\\\", 1] } }\\n\")"
+---
+.changeset/config.json: "packages" in "changesette" must be an array of strings

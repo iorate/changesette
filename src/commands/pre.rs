@@ -1,4 +1,4 @@
-use std::{env, fs};
+use std::fs;
 
 use anyhow::{Context, Result, bail};
 use tracing::info;
@@ -11,8 +11,7 @@ use crate::{
 
 /// Enters pre-release mode by writing `.changeset/pre.json` with `tag`; it
 /// is an error to already be in pre mode.
-pub(crate) fn enter(tag: &str) -> Result<()> {
-    let workspace = Workspace::discover(&env::current_dir()?)?;
+pub(crate) fn enter(workspace: &Workspace, tag: &str) -> Result<()> {
     let changeset_dir = workspace.root().join(".changeset");
     let pre = PreJson::load(&changeset_dir)?;
 
@@ -41,8 +40,7 @@ pub(crate) fn enter(tag: &str) -> Result<()> {
 /// Exits pre-release mode by flipping `.changeset/pre.json` to the exited
 /// state; it is an error not to have a pre.json, while exiting twice
 /// succeeds.
-pub(crate) fn exit() -> Result<()> {
-    let workspace = Workspace::discover(&env::current_dir()?)?;
+pub(crate) fn exit(workspace: &Workspace) -> Result<()> {
     let changeset_dir = workspace.root().join(".changeset");
     let Some(mut pre) = PreJson::load(&changeset_dir)? else {
         bail!("not in pre mode; run `changesette pre enter <tag>` to enter");

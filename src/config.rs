@@ -2,10 +2,13 @@ use std::{collections::BTreeSet, path::Path};
 
 use anyhow::{Context, Result, bail};
 use fast_glob::{glob_match, validate};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tracing::warn;
 
-use crate::{output::display_path, workspace::read_json};
+use crate::{
+    output::display_path,
+    workspace::{parse_rel_dir, read_json},
+};
 
 /// The effective settings from `.changeset/config.json`.
 #[derive(Debug, Default)]
@@ -26,6 +29,7 @@ pub(crate) struct Config {
     /// The suffix template from the `snapshot.prereleaseTemplate` setting;
     /// never empty.
     pub(crate) snapshot_prerelease_template: Option<String>,
+    pub(crate) packages: Option<Vec<String>>,
 }
 
 impl Config {
@@ -241,6 +245,8 @@ fn load_value(value: &Value) -> Result<Config> {
         Some(_) => bail!("\"snapshot\" must be an object"),
     }
 
+    let packages = load_packages(object)?;
+
     Ok(Config {
         ignore,
         fixed,
@@ -248,7 +254,36 @@ fn load_value(value: &Value) -> Result<Config> {
         private_packages_version,
         snapshot_use_calculated_version,
         snapshot_prerelease_template,
+        packages,
     })
+}
+
+fn load_packages(object: &Map<String, Value>) -> Result<Option<Vec<String>>> {
+    let changesette = match object.get("changesette") {
+        None => return Ok(None),
+        Some(Value::Object(changesette)) => changesette,
+        Some(_) => bail!("\"changesette\" must be an object"),
+    };
+    let Some(value) = changesette.get("packages") else {
+        return Ok(None);
+    };
+    let dirs = value.as_array().and_then(|items| {
+        items
+            .iter()
+            .map(Value::as_str)
+            .collect::<Option<Vec<&str>>>()
+    });
+    let Some(dirs) = dirs else {
+        bail!("\"packages\" in \"changesette\" must be an array of strings")
+    };
+    let mut packages = Vec::new();
+    for dir in dirs {
+        packages.push(
+            parse_rel_dir(dir)
+                .with_context(|| format!("invalid \"changesette.packages\" entry {dir:?}"))?,
+        );
+    }
+    Ok(Some(packages))
 }
 
 #[cfg(test)]
@@ -286,6 +321,7 @@ mod tests {
         assert!(!config.private_packages_version);
         assert!(!config.snapshot_use_calculated_version);
         assert!(config.snapshot_prerelease_template.is_none());
+        assert!(config.packages.is_none());
     }
 
     #[test]
@@ -607,6 +643,57 @@ mod tests {
     fn rejects_a_non_boolean_private_packages_version() {
         insta::assert_snapshot!(validate_err(
             "{ \"privatePackages\": { \"version\": \"yes\" } }\n"
+        ));
+    }
+
+    #[test]
+    fn resolves_changesette_packages() {
+        let config = load_ok(
+            "{ \"changesette\": { \"packages\": [\"packages/a\", \"./packages/b/\", \".\"] } }\n",
+        );
+        assert_eq!(
+            config.packages.as_deref(),
+            Some(
+                &[
+                    "packages/a".to_owned(),
+                    "packages/b".to_owned(),
+                    ".".to_owned()
+                ][..]
+            )
+        );
+        let config = load_ok("{ \"changesette\": { \"packages\": [] } }\n");
+        assert_eq!(config.packages.as_deref(), Some(&[][..]));
+        assert!(load_ok("{ \"changesette\": {} }\n").packages.is_none());
+        assert!(
+            load_ok("{ \"changesette\": { \"other\": true } }\n")
+                .packages
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn rejects_a_non_object_changesette() {
+        insta::assert_snapshot!(validate_err("{ \"changesette\": [] }\n"));
+    }
+
+    #[test]
+    fn rejects_a_null_changesette_packages() {
+        insta::assert_snapshot!(validate_err(
+            "{ \"changesette\": { \"packages\": null } }\n"
+        ));
+    }
+
+    #[test]
+    fn rejects_a_non_string_changesette_packages_entry() {
+        insta::assert_snapshot!(validate_err(
+            "{ \"changesette\": { \"packages\": [\"packages/a\", 1] } }\n"
+        ));
+    }
+
+    #[test]
+    fn rejects_an_invalid_changesette_packages_entry() {
+        insta::assert_snapshot!(validate_err(
+            "{ \"changesette\": { \"packages\": [\"../x\"] } }\n"
         ));
     }
 }

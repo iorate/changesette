@@ -1,6 +1,13 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::{
+    env,
+    ffi::OsString,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use clap::Parser;
+
+use crate::workspace::Workspace;
 
 mod bump;
 mod changelog;
@@ -27,6 +34,9 @@ struct Cli {
     /// The lowest level of messages to print to stderr
     #[arg(long, value_name = "LEVEL", global = true, default_value = "info")]
     log_level: LogLevel,
+    /// Use DIR as the workspace root instead of finding it from the working directory; only the markers in DIR decide the members
+    #[arg(long, value_name = "DIR", global = true, env = "CHANGESETTE_ROOT")]
+    root: Option<OsString>,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -166,16 +176,16 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
+    let cwd = env::current_dir()?;
+    let (root, reroot_packages) = match cli.root.filter(|dir| !dir.is_empty()) {
+        Some(dir) => (workspace::normalize_root(&cwd, Path::new(&dir))?, None),
+        None => workspace::find_root(&cwd)?,
+    };
+    let config = config::load(&root.join(".changeset"))?;
+    let workspace = Workspace::load(&root, config.packages.as_deref(), reroot_packages)?;
     match cli.command.unwrap_or(Command::Add(cli.add)) {
-        Command::Init => commands::init::run(),
-        Command::Add(AddArgs {
-            major,
-            minor,
-            patch,
-            message,
-            empty,
-            open,
-        }) => commands::add::run(&major, &minor, &patch, message, empty, open),
+        Command::Init => commands::init::run(&cwd, &workspace),
+        Command::Add(args) => commands::add::run(&cwd, &workspace, &config, args),
         Command::Version {
             ignore,
             snapshot,
@@ -188,6 +198,8 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 template: snapshot_prerelease_template,
             });
             commands::version::run(
+                workspace,
+                &config,
                 &ignore,
                 allow_no_changesets,
                 output.as_deref(),
@@ -195,14 +207,18 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             )
         }
         Command::Pre { command } => match command {
-            PreCommand::Enter { tag } => commands::pre::enter(&tag),
-            PreCommand::Exit => commands::pre::exit(),
+            PreCommand::Enter { tag } => commands::pre::enter(&workspace, &tag),
+            PreCommand::Exit => commands::pre::exit(&workspace),
         },
-        Command::Status { verbose, output } => commands::status::run(verbose, output.as_deref()),
-        Command::GetPackages { all } => commands::get_packages::run(all),
-        Command::GetChangelogEntry { package, version } => {
-            commands::get_changelog_entry::run(&package, &version)
+        Command::Status { verbose, output } => {
+            commands::status::run(workspace, &config, verbose, output.as_deref())
         }
-        Command::SetSummary { id, summary } => commands::set_summary::run(&id, &summary),
+        Command::GetPackages { all } => commands::get_packages::run(&workspace, &config, all),
+        Command::GetChangelogEntry { package, version } => {
+            commands::get_changelog_entry::run(&workspace, &package, &version)
+        }
+        Command::SetSummary { id, summary } => {
+            commands::set_summary::run(&cwd, &workspace, &id, &summary)
+        }
     }
 }
