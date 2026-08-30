@@ -3705,7 +3705,7 @@ fn get_packages_warns_about_a_broken_ancestor_manifest_in_npm_mode() {
     assert!(
         err.contains(&format!(
             "warning: {}: ",
-            dir.path().join("package.json").display()
+            expected_path(&dir.path().join("package.json"))
         )) && err.contains("passed over while looking for an npm workspace root"),
         "{err}"
     );
@@ -3758,7 +3758,7 @@ fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
         stderr(&output),
         format!(
             "warning: {}: \"workspaces\" must be an array or an object: ignored, as Yarn ignores it\n",
-            dir.path().join("package.json").display()
+            expected_path(&dir.path().join("package.json"))
         )
     );
 }
