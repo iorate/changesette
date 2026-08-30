@@ -11,4 +11,4 @@ Workspace discovery now follows each package manager more closely.
 - On a case-insensitive filesystem, a literal segment now matches loosely wherever it appears, so `A/*` matches `a/lib`.
 - An empty pattern matches nothing instead of being an error, and a `/` inside a character class is accepted as a class member. A `\` remains an escape in every dialect; npm's rewriting of `\` to `/` is not reproduced.
 - In a pnpm workspace, a matched directory holding a `package.yaml` or `package.json5` but no `package.json` is an error.
-- A falsy `workspaces` field (`false`, `0`, `""`) is now passed over like `null`.
+- A falsy `workspaces` field (`false`, `0`, `""`) is now passed over like `null`, and while looking for an npm workspace root, a `package.json` above the nearest one that fails to parse is passed over with a warning, as npm reads it as `{}`; the nearest one still has to parse.

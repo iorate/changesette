@@ -3683,3 +3683,30 @@ fn rejects_an_unknown_subcommand() {
     let output = changesette(dir.path(), &["publish"]);
     assert!(!output.status.success());
 }
+
+#[test]
+fn get_packages_warns_about_a_broken_ancestor_manifest_in_npm_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"app\"],\n<<<<<<< HEAD\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("app")).unwrap();
+    fs::write(
+        dir.path().join("app/package.json"),
+        "{ \"name\": \"app\", \"version\": \"1.0.0\" }\n",
+    )
+    .unwrap();
+    let output = changesette(&dir.path().join("app"), &["get-packages", "--all"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("\"app\""), "{}", stdout(&output));
+    let err = stderr(&output);
+    assert!(
+        err.contains(&format!(
+            "warning: {}: ",
+            dir.path().join("package.json").display()
+        )) && err.contains("passed over while looking for an npm workspace root"),
+        "{err}"
+    );
+}

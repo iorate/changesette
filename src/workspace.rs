@@ -111,17 +111,28 @@ impl Workspace {
         }
 
         let mut fallback = None;
+        let mut candidate_seen = false;
         for dir in cwd.ancestors() {
             let path = dir.join("package.json");
             if !probe_is_file(&path) {
                 continue;
             }
-            // A parse failure is always an error: walking past a broken npm
-            // root would silently pick another root (an outer `workspaces`
-            // declaration or the single-package fallback), and merge conflict
-            // markers left in a root package.json are a realistic way to get
-            // here.
-            let Some(value) = read_manifest(&path)? else {
+            // npm reads an ancestor above its candidate prefix as `{}` when
+            // the file fails to parse, whereas the candidate itself is opened
+            // by every later step and fails there.
+            let value = if candidate_seen {
+                match read_manifest(&path) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        warn!("{err:#}: passed over while looking for an npm workspace root");
+                        None
+                    }
+                }
+            } else {
+                read_manifest(&path)?
+            };
+            candidate_seen = true;
+            let Some(value) = value else {
                 continue;
             };
             if let Some(patterns) = workspaces_patterns(&value, &path)? {
@@ -2028,6 +2039,71 @@ mod tests {
         assert!(
             err.contains(&display_path(&dir.path().join("app/package.json"))),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn passes_over_a_broken_ancestor_manifest_in_npm_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\",\n<<<<<<< HEAD\n  \"workspaces\": [\"app\"]\n}\n",
+        );
+        write(
+            dir.path(),
+            "app/package.json",
+            "{ \"name\": \"app\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(&dir.path().join("app")).unwrap();
+        assert_eq!(workspace.root(), dir.path().join("app"));
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("app", dir.path().join("app").as_path())]
+        );
+    }
+
+    #[test]
+    fn a_broken_manifest_between_a_member_and_the_npm_root_is_passed_over() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"a/b\"] }\n",
+        );
+        write(dir.path(), "a/package.json", "{ broken");
+        write(
+            dir.path(),
+            "a/b/package.json",
+            "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(&dir.path().join("a/b")).unwrap();
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-b", dir.path().join("a/b").as_path())]
+        );
+    }
+
+    #[test]
+    fn a_broken_manifest_below_a_pnpm_root_is_never_read() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"a/b\"\n",
+        );
+        write(dir.path(), "a/package.json", "{ broken");
+        write(
+            dir.path(),
+            "a/b/package.json",
+            "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(&dir.path().join("a/b")).unwrap();
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-b", dir.path().join("a/b").as_path())]
         );
     }
 
