@@ -8,7 +8,7 @@ Workspace discovery now follows each package manager more closely.
 - The Yarn root package is always a member candidate, and the `workspaces` field of every Yarn member is expanded in turn, as Yarn does for its worktrees.
 - The directory names never entered follow the package manager: `node_modules` everywhere, plus `.git` and `.yarn` under Yarn and `bower_components` under pnpm.
 - A symlinked directory matched by a wildcard segment is now entered one level and listed, as one matched by a literal segment already was; `**` still never enters a symlinked directory.
-- On a case-insensitive filesystem, a literal segment now matches loosely wherever it appears, so `A/*` matches `a/lib`.
+- A literal segment is now compared with the directory entries like a wildcard, so on a case-insensitive filesystem `A/*` no longer matches `a/lib` and a matched path is always spelled as on disk; only the `package.json` name itself is still found however it is spelled, as it is under npm and Yarn.
 - An empty pattern matches nothing instead of being an error, and a `/` inside a character class is accepted as a class member. A `\` remains an escape in every dialect; npm's rewriting of `\` to `/` is not reproduced.
 - In a pnpm workspace, a matched directory holding a `package.yaml` or `package.json5` but no `package.json` is an error.
 - Under Yarn, a `workspaces` field that is neither an array nor `{"packages": [...]}` is ignored with a warning, and a non-string pattern in it is skipped with a warning, as Yarn ignores both; under npm they remain errors, as npm rejects them.

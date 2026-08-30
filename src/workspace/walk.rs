@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Result, anyhow};
 use tracing::{debug, warn};
 
-use super::pattern::{Pattern, Seg, is_plain_component, seg_matches};
+use super::pattern::{Pattern, Seg, seg_matches};
 use super::{probe_is_file, report_fs_error};
 use crate::output::display_path;
 
@@ -93,7 +93,7 @@ type State = (usize, usize);
 
 // Adds the epsilon transitions: a globstar can consume zero segments, so a
 // state resting on one also rests past it. The last segment is always
-// `Literal("package.json")`, so `seg + 1` stays in bounds.
+// `Glob("package.json")`, so `seg + 1` stays in bounds.
 fn closure(patterns: &[Pattern], mut states: Vec<State>) -> Vec<State> {
     let mut i = 0;
     while i < states.len() {
@@ -125,7 +125,7 @@ struct Walker<'a> {
     candidates: BTreeMap<String, PathBuf>,
 }
 
-impl<'a> Walker<'a> {
+impl Walker<'_> {
     fn walk(&mut self, dir: &Path, rel: &str, states: &[State]) -> Result<()> {
         let patterns = self.patterns;
         // The candidate check runs after the epsilon closure so that `x/**`
@@ -148,66 +148,24 @@ impl<'a> Walker<'a> {
                 return Err(unsupported_manifest(&path));
             }
         }
-        // Probing a literal by name rather than comparing it with the
-        // directory entries gives it its symlink transparency, its dot
-        // matching, and on a case-insensitive filesystem the loose matching
-        // every package manager has, and spares reading a directory no
-        // wildcard needs.
-        let mut literals: BTreeMap<&'a str, Vec<State>> = BTreeMap::new();
-        let mut dynamic = Vec::new();
-        for &(pattern, seg_index) in states {
-            let segs = patterns[pattern].segs();
-            // The final `package.json` segment names a file, so consuming it
-            // with a directory can never lead to a candidate.
-            if seg_index == segs.len() - 1 {
-                continue;
-            }
-            match &segs[seg_index] {
-                Seg::Literal(name) => literals
-                    .entry(name)
-                    .or_default()
-                    .push((pattern, seg_index + 1)),
-                _ => dynamic.push((pattern, seg_index)),
-            }
+        // The final `package.json` segment names a file, so consuming it
+        // with a directory can never lead to a candidate. Every other
+        // segment, a literal name included, is matched against the
+        // directory entries: comparing the names rather than probing a
+        // literal by `stat` keeps it exact on a case-insensitive filesystem,
+        // as it is under Yarn and pnpm.
+        let pending: Vec<State> = states
+            .iter()
+            .copied()
+            .filter(|&(pattern, seg_index)| seg_index != patterns[pattern].segs().len() - 1)
+            .collect();
+        if pending.is_empty() {
+            return Ok(());
         }
-        if !dynamic.is_empty() {
-            self.read_entries(dir, rel, &dynamic, &mut literals)?;
-        }
-        for (name, next) in literals {
-            if self.excluded_names.contains(&name) {
-                continue;
-            }
-            // Such a name (a `C:` drive prefix) can never be a real entry,
-            // so the pattern cannot match and skipping it changes nothing;
-            // pushing it would replace the accumulated path and probe
-            // outside the root.
-            if !is_plain_component(name) {
-                continue;
-            }
-            let path = dir.join(name);
-            let is_dir = match fs::metadata(&path) {
-                Ok(metadata) => metadata.is_dir(),
-                Err(err) => {
-                    report_fs_error(&path, &err);
-                    false
-                }
-            };
-            if !is_dir {
-                continue;
-            }
-            let next = closure(patterns, next);
-            self.walk(&path, &child_rel(rel, name), &next)?;
-        }
-        Ok(())
+        self.read_entries(dir, rel, &pending)
     }
 
-    fn read_entries(
-        &mut self,
-        dir: &Path,
-        rel: &str,
-        dynamic: &[State],
-        literals: &mut BTreeMap<&'a str, Vec<State>>,
-    ) -> Result<()> {
+    fn read_entries(&mut self, dir: &Path, rel: &str, pending: &[State]) -> Result<()> {
         let patterns = self.patterns;
         let entries = match fs::read_dir(dir) {
             Ok(entries) => entries,
@@ -261,35 +219,34 @@ impl<'a> Walker<'a> {
             if !is_dir {
                 continue;
             }
-            // Consumed here rather than probed again, so that the subtree is
-            // walked once with every state reaching it.
-            let mut next = literals.remove(name).unwrap_or_default();
+            // The subtree is walked once with every state reaching it.
+            let mut next = Vec::new();
             let mut globstar_skipped = false;
-            for &(pattern, seg_index) in dynamic {
+            for &(pattern, seg_index) in pending {
                 let seg = &patterns[pattern].segs()[seg_index];
                 if !seg_matches(seg, name, false) {
                     continue;
                 }
-                // A literal or wildcard segment enters a symlinked directory
-                // one level, as every package manager does; a globstar does
-                // not, which keeps a symlink cycle finite: every other
-                // consumption advances the index, bounding the descent by
-                // the pattern length.
+                // A single-segment glob enters a symlinked directory one
+                // level, as every package manager does; a globstar does not,
+                // which keeps a symlink cycle finite: every other consumption
+                // advances the index, bounding the descent by the pattern
+                // length.
                 if is_symlink && matches!(seg, Seg::Globstar) {
                     globstar_skipped = true;
                     continue;
                 }
                 let advanced = match seg {
                     Seg::Globstar => (pattern, seg_index),
-                    _ => (pattern, seg_index + 1),
+                    Seg::Glob(_) => (pattern, seg_index + 1),
                 };
                 if !next.contains(&advanced) {
                     next.push(advanced);
                 }
             }
             if next.is_empty() {
-                // Reported only when nothing else descends: a literal or
-                // wildcard segment elsewhere may still enter the symlink.
+                // Reported only when nothing else descends: a single-segment
+                // glob elsewhere may still enter the symlink.
                 // The path is built inside the macro so that this hot path
                 // allocates nothing at the default level.
                 if globstar_skipped {
@@ -517,7 +474,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn a_drive_prefixed_literal_is_never_pushed() {
+    fn a_drive_prefixed_segment_matches_nothing() {
         let dir = tempfile::tempdir().unwrap();
         touch(dir.path(), "packages/a/package.json");
         assert_eq!(
@@ -532,12 +489,13 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn a_literal_matches_loosely_on_a_case_insensitive_filesystem() {
+    fn a_literal_matches_exactly_on_a_case_insensitive_filesystem() {
         let dir = tempfile::tempdir().unwrap();
         touch(dir.path(), "a/lib/package.json");
-        assert_eq!(rel_dirs(dir.path(), &["A/*"]), ["A/lib"]);
-        assert_eq!(rel_dirs(dir.path(), &["*/Lib"]), ["a/Lib"]);
-        assert_eq!(rel_dirs(dir.path(), &["A/Lib"]), ["A/Lib"]);
+        assert_eq!(rel_dirs(dir.path(), &["A/*"]), [] as [String; 0]);
+        assert_eq!(rel_dirs(dir.path(), &["*/Lib"]), [] as [String; 0]);
+        assert_eq!(rel_dirs(dir.path(), &["A/Lib"]), [] as [String; 0]);
+        assert_eq!(rel_dirs(dir.path(), &["a/lib"]), ["a/lib"]);
     }
 
     #[cfg(unix)]

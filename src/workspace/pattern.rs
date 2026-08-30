@@ -6,14 +6,14 @@ use anyhow::{Result, bail};
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Seg {
-    Literal(String),
-    /// A single-segment glob, matched with `fast_glob`.
-    Wildcard(String),
+    /// A single-segment glob, matched with `fast_glob`; a literal name is
+    /// one without wildcards.
+    Glob(String),
     Globstar,
 }
 
 /// A workspace pattern compiled to `/`-separated segments; the last segment
-/// is always `Literal("package.json")`, so the pattern matches manifest file
+/// is always `Glob("package.json")`, so the pattern matches manifest file
 /// paths.
 #[derive(Debug)]
 pub(crate) struct Pattern {
@@ -55,22 +55,18 @@ pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
         if part == ".." {
             bail!("`..` segments are not supported")
         }
-        let seg = classify(part)?;
         // A leading Windows drive prefix (`C:/x`, or the drive-relative
         // `C:x`) addresses a location outside the root like an absolute
         // path, so it is the same loud error; on Unix nothing parses as a
         // prefix and `C:` stays an ordinary name.
-        if index == 0
-            && let Seg::Literal(name) = &seg
-            && !is_plain_component(name)
-        {
+        if index == 0 && has_drive_prefix(part) {
             bail!("drive-prefixed patterns are not supported")
         }
-        segs.push(seg);
+        segs.push(classify(part)?);
     }
     // Appending the manifest name gives the pnpm-style idioms for free: the
     // zero-width `**` makes `x/**` cover `x` itself and `!x/**` exclude it.
-    segs.push(Seg::Literal("package.json".to_owned()));
+    segs.push(Seg::Glob("package.json".to_owned()));
     Ok(Some((negated, Pattern { segs })))
 }
 
@@ -143,29 +139,27 @@ fn skip_class(chars: &mut Peekable<CharIndices<'_>>) {
     }
 }
 
-/// Whether `name` parses as exactly one normal path component. Meant for
-/// `Literal` segments, which are free of `\` and glob syntax, so the std
-/// parser reads them unambiguously; only a Windows prefix like `C:` fails.
-pub(crate) fn is_plain_component(name: &str) -> bool {
-    let mut components = Path::new(name).components();
-    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
+// Only the first component is looked at: a `\` in the part is a separator
+// to the std parser on Windows but a glob escape here.
+fn has_drive_prefix(part: &str) -> bool {
+    matches!(
+        Path::new(part).components().next(),
+        Some(Component::Prefix(_))
+    )
 }
 
 fn classify(part: &str) -> Result<Seg> {
     if part == "**" {
         return Ok(Seg::Globstar);
     }
-    if part.contains(['*', '?', '[', ']', '{', '}', '\\']) {
-        fast_glob::validate(part)?;
-        // fast_glob reads every leading `!` of the string it is handed as a
-        // negation, while in the whole pattern this `!` sits mid-glob and is
-        // literal — escape it so the matcher reads it that way too.
-        if part.starts_with('!') {
-            return Ok(Seg::Wildcard(format!("\\{part}")));
-        }
-        return Ok(Seg::Wildcard(part.to_owned()));
+    fast_glob::validate(part)?;
+    // fast_glob reads every leading `!` of the string it is handed as a
+    // negation, while in the whole pattern this `!` sits mid-glob and is
+    // literal — escape it so the matcher reads it that way too.
+    if part.starts_with('!') {
+        return Ok(Seg::Glob(format!("\\{part}")));
     }
-    Ok(Seg::Literal(part.to_owned()))
+    Ok(Seg::Glob(part.to_owned()))
 }
 
 impl Pattern {
@@ -212,7 +206,7 @@ fn matches_from(segs: &[Seg], names: &[&str], dot_permissive: bool) -> bool {
 pub(crate) fn seg_matches(seg: &Seg, name: &str, dot_permissive: bool) -> bool {
     if !dot_permissive && name.starts_with('.') {
         let dot_ok = match seg {
-            Seg::Literal(text) | Seg::Wildcard(text) => text.starts_with('.'),
+            Seg::Glob(text) => text.starts_with('.'),
             Seg::Globstar => false,
         };
         if !dot_ok {
@@ -220,8 +214,7 @@ pub(crate) fn seg_matches(seg: &Seg, name: &str, dot_permissive: bool) -> bool {
         }
     }
     match seg {
-        Seg::Literal(text) => text == name,
-        Seg::Wildcard(glob) => fast_glob::glob_match(glob, name),
+        Seg::Glob(glob) => fast_glob::glob_match(glob, name),
         Seg::Globstar => true,
     }
 }
@@ -230,12 +223,8 @@ pub(crate) fn seg_matches(seg: &Seg, name: &str, dot_permissive: bool) -> bool {
 mod tests {
     use super::*;
 
-    fn lit(text: &str) -> Seg {
-        Seg::Literal(text.to_owned())
-    }
-
-    fn wild(text: &str) -> Seg {
-        Seg::Wildcard(text.to_owned())
+    fn seg(text: &str) -> Seg {
+        Seg::Glob(text.to_owned())
     }
 
     fn positive(pattern: &str) -> Pattern {
@@ -259,16 +248,16 @@ mod tests {
         for pattern in ["./x", "x/", "x", "./x/"] {
             assert_eq!(
                 positive(pattern).segs(),
-                [lit("x"), lit("package.json")],
+                [seg("x"), seg("package.json")],
                 "{pattern}"
             );
         }
         assert_eq!(
             positive("x//y").segs(),
-            [lit("x"), lit("y"), lit("package.json")]
+            [seg("x"), seg("y"), seg("package.json")]
         );
         for pattern in [".", "./"] {
-            assert_eq!(positive(pattern).segs(), [lit("package.json")], "{pattern}");
+            assert_eq!(positive(pattern).segs(), [seg("package.json")], "{pattern}");
         }
     }
 
@@ -281,8 +270,8 @@ mod tests {
 
     #[test]
     fn leading_bangs_toggle_the_polarity_by_parity() {
-        assert_eq!(positive("!!x").segs(), [lit("x"), lit("package.json")]);
-        assert_eq!(negation("!!!x").segs(), [lit("x"), lit("package.json")]);
+        assert_eq!(positive("!!x").segs(), [seg("x"), seg("package.json")]);
+        assert_eq!(negation("!!!x").segs(), [seg("x"), seg("package.json")]);
     }
 
     #[test]
@@ -298,9 +287,11 @@ mod tests {
         for pattern in ["C:/packages/*", "C:x", "c:/x", "C:", "!C:/x"] {
             assert!(error(pattern).contains("drive"), "{pattern}");
         }
-        assert!(!is_plain_component("C:"));
-        assert!(!is_plain_component("C:x"));
-        assert!(is_plain_component("x"));
+        assert!(has_drive_prefix("C:"));
+        assert!(has_drive_prefix("C:x"));
+        assert!(has_drive_prefix("C:*"));
+        assert!(!has_drive_prefix("x"));
+        assert!(!has_drive_prefix("a\\b"));
     }
 
     #[cfg(windows)]
@@ -308,11 +299,11 @@ mod tests {
     fn a_drive_prefix_after_the_first_raw_segment_compiles() {
         assert_eq!(
             positive("packages/C:/x").segs(),
-            [lit("packages"), lit("C:"), lit("x"), lit("package.json")]
+            [seg("packages"), seg("C:"), seg("x"), seg("package.json")]
         );
         assert_eq!(
             positive("./C:/x").segs(),
-            [lit("C:"), lit("x"), lit("package.json")]
+            [seg("C:"), seg("x"), seg("package.json")]
         );
     }
 
@@ -321,10 +312,10 @@ mod tests {
     fn a_drive_like_segment_is_an_ordinary_name_on_unix() {
         assert_eq!(
             positive("C:/x").segs(),
-            [lit("C:"), lit("x"), lit("package.json")]
+            [seg("C:"), seg("x"), seg("package.json")]
         );
-        assert_eq!(positive("C:x").segs(), [lit("C:x"), lit("package.json")]);
-        assert!(is_plain_component("C:"));
+        assert_eq!(positive("C:x").segs(), [seg("C:x"), seg("package.json")]);
+        assert!(!has_drive_prefix("C:"));
     }
 
     #[test]
@@ -338,16 +329,16 @@ mod tests {
     fn classifies_segments() {
         assert_eq!(
             positive("packages/**").segs(),
-            [lit("packages"), Seg::Globstar, lit("package.json")]
+            [seg("packages"), Seg::Globstar, seg("package.json")]
         );
-        assert_eq!(positive("f**").segs(), [wild("f**"), lit("package.json")]);
+        assert_eq!(positive("f**").segs(), [seg("f**"), seg("package.json")]);
         assert_eq!(
             positive("+(a|b)").segs(),
-            [lit("+(a|b)"), lit("package.json")]
+            [seg("+(a|b)"), seg("package.json")]
         );
         assert_eq!(
             positive("a?c/[xy]").segs(),
-            [wild("a?c"), wild("[xy]"), lit("package.json")]
+            [seg("a?c"), seg("[xy]"), seg("package.json")]
         );
     }
 
@@ -363,18 +354,19 @@ mod tests {
         let pattern = positive("packages/!foo*");
         assert_eq!(
             pattern.segs(),
-            [lit("packages"), wild("\\!foo*"), lit("package.json")]
+            [seg("packages"), seg("\\!foo*"), seg("package.json")]
         );
         assert!(pattern.matches("packages/!foox/package.json", false));
         assert!(!pattern.matches("packages/foox/package.json", false));
         assert!(!pattern.matches("packages/bar/package.json", false));
         assert_eq!(
             positive("packages/!foo").segs(),
-            [lit("packages"), lit("!foo"), lit("package.json")]
+            [seg("packages"), seg("\\!foo"), seg("package.json")]
         );
+        assert!(positive("packages/!foo").matches("packages/!foo/package.json", false));
         assert_eq!(
             positive("a/\\!b*").segs(),
-            [lit("a"), wild("\\!b*"), lit("package.json")]
+            [seg("a"), seg("\\!b*"), seg("package.json")]
         );
     }
 
@@ -382,9 +374,9 @@ mod tests {
     fn an_escaped_slash_is_a_separator() {
         assert_eq!(
             positive("a\\/b").segs(),
-            [lit("a"), lit("b"), lit("package.json")]
+            [seg("a"), seg("b"), seg("package.json")]
         );
-        assert_eq!(positive("a\\/").segs(), [lit("a"), lit("package.json")]);
+        assert_eq!(positive("a\\/").segs(), [seg("a"), seg("package.json")]);
         assert!(error("\\/").contains("absolute"));
         assert!(error("\\/x").contains("absolute"));
     }
@@ -396,77 +388,77 @@ mod tests {
         }
         assert_eq!(
             positive("x/{a,b}/y").segs(),
-            [lit("x"), wild("{a,b}"), lit("y"), lit("package.json")]
+            [seg("x"), seg("{a,b}"), seg("y"), seg("package.json")]
         );
         assert_eq!(
             positive("\\{a,b\\}/c").segs(),
-            [wild("\\{a,b\\}"), lit("c"), lit("package.json")]
+            [seg("\\{a,b\\}"), seg("c"), seg("package.json")]
         );
         assert_eq!(
             positive("a}b/c").segs(),
-            [wild("a}b"), lit("c"), lit("package.json")]
+            [seg("a}b"), seg("c"), seg("package.json")]
         );
     }
 
     #[test]
     fn a_slash_inside_a_character_class_is_a_member() {
         let pattern = positive("[a/b]");
-        assert_eq!(pattern.segs(), [wild("[a/b]"), lit("package.json")]);
+        assert_eq!(pattern.segs(), [seg("[a/b]"), seg("package.json")]);
         assert!(pattern.matches("a/package.json", false));
         assert!(pattern.matches("b/package.json", false));
         assert!(!pattern.matches("c/package.json", false));
         assert!(!pattern.matches("[a/b]/package.json", false));
         assert_eq!(
             positive("x/[a/b]").segs(),
-            [lit("x"), wild("[a/b]"), lit("package.json")]
+            [seg("x"), seg("[a/b]"), seg("package.json")]
         );
         assert_eq!(
             positive("[a\\/b]").segs(),
-            [wild("[a\\/b]"), lit("package.json")]
+            [seg("[a\\/b]"), seg("package.json")]
         );
         assert!(!positive("x[/]y").matches("xy/package.json", false));
-        assert_eq!(positive("[!/]").segs(), [wild("[!/]"), lit("package.json")]);
+        assert_eq!(positive("[!/]").segs(), [seg("[!/]"), seg("package.json")]);
         assert_eq!(
             positive("[]]x/y").segs(),
-            [wild("[]]x"), lit("y"), lit("package.json")]
+            [seg("[]]x"), seg("y"), seg("package.json")]
         );
         assert_eq!(
             positive("[{]/a").segs(),
-            [wild("[{]"), lit("a"), lit("package.json")]
+            [seg("[{]"), seg("a"), seg("package.json")]
         );
     }
 
     #[test]
     fn applies_the_dot_rule_per_segment() {
-        assert!(!seg_matches(&wild("*"), ".x", false));
-        assert!(seg_matches(&wild(".*"), ".x", false));
-        assert!(seg_matches(&lit(".github"), ".github", false));
+        assert!(!seg_matches(&seg("*"), ".x", false));
+        assert!(seg_matches(&seg(".*"), ".x", false));
+        assert!(seg_matches(&seg(".github"), ".github", false));
         assert!(!seg_matches(&Seg::Globstar, ".x", false));
-        assert!(seg_matches(&wild("*"), ".x", true));
+        assert!(seg_matches(&seg("*"), ".x", true));
         assert!(seg_matches(&Seg::Globstar, ".x", true));
     }
 
     #[test]
     fn expands_braces_within_a_segment() {
-        assert!(seg_matches(&wild("{a,b}"), "a", false));
-        assert!(seg_matches(&wild("{a,b}"), "b", false));
-        assert!(!seg_matches(&wild("{a,b}"), "{a,b}", false));
+        assert!(seg_matches(&seg("{a,b}"), "a", false));
+        assert!(seg_matches(&seg("{a,b}"), "b", false));
+        assert!(!seg_matches(&seg("{a,b}"), "{a,b}", false));
     }
 
     #[test]
     fn expands_nested_braces() {
         for name in ["a", "b", "c"] {
-            assert!(seg_matches(&wild("{a,{b,c}}"), name, false), "{name}");
+            assert!(seg_matches(&seg("{a,{b,c}}"), name, false), "{name}");
         }
-        assert!(!seg_matches(&wild("{a,{b,c}}"), "d", false));
-        assert!(!seg_matches(&wild("{a,{b,c}}"), "{b,c}", false));
+        assert!(!seg_matches(&seg("{a,{b,c}}"), "d", false));
+        assert!(!seg_matches(&seg("{a,{b,c}}"), "{b,c}", false));
     }
 
     #[test]
     fn a_negated_character_class_excludes_its_members() {
-        assert!(seg_matches(&wild("[!b]"), "a", false));
-        assert!(!seg_matches(&wild("[!b]"), "b", false));
-        assert!(seg_matches(&wild("x[!b]"), "xc", false));
+        assert!(seg_matches(&seg("[!b]"), "a", false));
+        assert!(!seg_matches(&seg("[!b]"), "b", false));
+        assert!(seg_matches(&seg("x[!b]"), "xc", false));
     }
 
     #[test]
