@@ -138,12 +138,19 @@ impl Workspace {
             let Some(patterns) = workspaces_patterns(&value, &path, pm)? else {
                 continue;
             };
-            let members = collect_members(dir, &path, &patterns, pm)?;
-            if members
+            // npm looks for its candidate prefix among every matched
+            // directory holding a package.json, so the member qualification
+            // (and the duplicate-name exclusion) must not run first.
+            let listed = collect_candidates(dir, &path, &patterns, pm)?;
+            if listed
                 .iter()
-                .any(|member| is_same_file(&member.dir, candidate_dir).unwrap_or(false))
+                .any(|listed| is_same_file(&listed.dir, candidate_dir).unwrap_or(false))
             {
-                return Ok(Workspace::new(dir.to_path_buf(), Some(pm), members));
+                return Ok(Workspace::new(
+                    dir.to_path_buf(),
+                    Some(pm),
+                    qualify_candidates(listed),
+                ));
             }
         }
 
@@ -431,7 +438,25 @@ fn collect_members(
     patterns: &[String],
     pm: PackageManager,
 ) -> Result<Vec<Member>> {
-    let mut members = Vec::new();
+    Ok(qualify_candidates(collect_candidates(
+        root, manifest, patterns, pm,
+    )?))
+}
+
+struct Candidate {
+    dir: PathBuf,
+    rel_dir: String,
+    manifest: PathBuf,
+    value: Value,
+}
+
+fn collect_candidates(
+    root: &Path,
+    manifest: &Path,
+    patterns: &[String],
+    pm: PackageManager,
+) -> Result<Vec<Candidate>> {
+    let mut candidates = Vec::new();
     // Yarn expands every member's own `workspaces` field in turn (its
     // worktrees), a declaration's negations reaching only its own directory.
     let mut queue = VecDeque::from([(
@@ -473,14 +498,32 @@ fn collect_members(
             {
                 queue.push_back((child_dir.clone(), rel_dir.clone(), path.clone(), declared));
             }
-            if let Some(member) = qualify(&value, child_dir, rel_dir, &path) {
-                members.push(member);
-            }
+            candidates.push(Candidate {
+                dir: child_dir,
+                rel_dir,
+                manifest: path,
+                value,
+            });
         }
     }
+    Ok(candidates)
+}
+
+fn qualify_candidates(candidates: Vec<Candidate>) -> Vec<Member> {
+    let mut members: Vec<Member> = candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            qualify(
+                &candidate.value,
+                candidate.dir,
+                candidate.rel_dir,
+                &candidate.manifest,
+            )
+        })
+        .collect();
     members.sort_by(|a, b| (&a.name, &a.dir).cmp(&(&b.name, &b.dir)));
     exclude_duplicate_names(&mut members);
-    Ok(members)
+    members
 }
 
 fn enumerate(
@@ -1430,6 +1473,63 @@ mod tests {
                 ("pkg-a", dir.path().join("packages/a").as_path()),
                 ("pkg-b", dir.path().join("packages/b").as_path()),
             ]
+        );
+    }
+
+    #[test]
+    fn re_roots_from_a_versionless_member_listed_by_the_npm_root() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"apps/*\", \"packages/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "apps/web/package.json",
+            "{ \"name\": \"web\", \"private\": true }\n",
+        );
+        write(
+            dir.path(),
+            "packages/lib/package.json",
+            "{ \"name\": \"lib\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(&dir.path().join("apps/web")).unwrap();
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("lib", dir.path().join("packages/lib").as_path())]
+        );
+    }
+
+    #[test]
+    fn re_roots_from_a_member_whose_name_is_duplicated() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\", \"fixtures/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"dup\", \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "fixtures/a/package.json",
+            "{ \"name\": \"dup\", \"version\": \"0.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "packages/b/package.json",
+            "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(&dir.path().join("packages/a")).unwrap();
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-b", dir.path().join("packages/b").as_path())]
         );
     }
 

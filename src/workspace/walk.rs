@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow};
 use tracing::{debug, warn};
 
 use super::pattern::{Pattern, Seg, is_plain_component, seg_matches};
@@ -15,8 +15,8 @@ use crate::output::display_path;
 /// `positives` minus `negations`, keyed by the root-relative `/`-separated
 /// directory (`.` for the root itself); reading the manifests is left to the
 /// caller. Directories named in `excluded_names` are never entered nor
-/// matched, and `reject_pnpm_manifests` makes a matched directory carrying
-/// only a pnpm-specific manifest an error.
+/// matched, and `reject_pnpm_manifests` makes a matched directory that is
+/// not negated away and carries only a pnpm-specific manifest an error.
 pub(crate) fn collect(
     root: &Path,
     positives: &[Pattern],
@@ -47,24 +47,30 @@ pub(crate) fn has_manifest(dir: &Path, reject_pnpm_manifests: bool) -> Result<bo
     if probe_is_file(&dir.join("package.json")) {
         return Ok(true);
     }
-    // pnpm reads these as first-class manifests, and honoring them would
-    // mean writing versions back into them too; stopping loudly beats
-    // silently dropping the package.
-    if reject_pnpm_manifests {
-        for name in ["package.yaml", "package.json5"] {
-            let path = dir.join(name);
-            if probe_is_file(&path) {
-                bail!(
-                    "{}: only package.json manifests are supported",
-                    display_path(&path)
-                )
-            }
-        }
+    if reject_pnpm_manifests && let Some(path) = pnpm_only_manifest(dir) {
+        return Err(unsupported_manifest(&path));
     }
     Ok(false)
 }
 
-// The candidate check runs before this, so the debug line only names real
+fn pnpm_only_manifest(dir: &Path) -> Option<PathBuf> {
+    ["package.yaml", "package.json5"]
+        .into_iter()
+        .map(|name| dir.join(name))
+        .find(|path| probe_is_file(path))
+}
+
+// pnpm reads these as first-class manifests, and honoring them would mean
+// writing versions back into them too; stopping loudly beats silently
+// dropping the package.
+fn unsupported_manifest(path: &Path) -> anyhow::Error {
+    anyhow!(
+        "{}: only package.json manifests are supported",
+        display_path(path)
+    )
+}
+
+// The manifest probe runs before this, so the debug line only names real
 // candidates.
 fn excluded(rel_dir: &str, negations: &[Pattern]) -> bool {
     let rel_manifest = if rel_dir == "." {
@@ -129,11 +135,17 @@ impl<'a> Walker<'a> {
             .any(|&(pattern, seg)| seg == patterns[pattern].segs().len() - 1)
         {
             let rel_dir = if rel.is_empty() { "." } else { rel };
-            if has_manifest(dir, self.reject_pnpm_manifests)? && !excluded(rel_dir, self.negations)
+            if probe_is_file(&dir.join("package.json")) {
+                if !excluded(rel_dir, self.negations) {
+                    self.candidates
+                        .entry(rel_dir.to_owned())
+                        .or_insert_with(|| dir.to_path_buf());
+                }
+            } else if self.reject_pnpm_manifests
+                && let Some(path) = pnpm_only_manifest(dir)
+                && !excluded(rel_dir, self.negations)
             {
-                self.candidates
-                    .entry(rel_dir.to_owned())
-                    .or_insert_with(|| dir.to_path_buf());
+                return Err(unsupported_manifest(&path));
             }
         }
         // Probing a literal by name rather than comparing it with the
@@ -586,5 +598,17 @@ mod tests {
             candidates.into_keys().collect::<Vec<_>>(),
             ["packages/a", "packages/b"]
         );
+    }
+
+    #[test]
+    fn a_pnpm_only_manifest_in_a_negated_directory_is_passed_over() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "packages/a/package.json");
+        touch(dir.path(), "packages/legacy/package.yaml");
+        touch(dir.path(), "packages/legacy/sub/package.json5");
+        let (positives, negations) = compile(&["packages/**", "!packages/legacy/**"]);
+        let candidates =
+            collect(dir.path(), &positives, &negations, &["node_modules"], true).unwrap();
+        assert_eq!(candidates.into_keys().collect::<Vec<_>>(), ["packages/a"]);
     }
 }
