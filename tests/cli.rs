@@ -901,7 +901,7 @@ fn get_packages_warns_about_filesystem_errors_but_not_plain_absence() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("package.json"),
-        "{\n  \"workspaces\": [\"packages/*\", \"docs/pkg\"]\n}\n",
+        "{\n  \"workspaces\": [\"packages/**\", \"docs/pkg\"]\n}\n",
     )
     .unwrap();
     fs::create_dir_all(dir.path().join("packages/a")).unwrap();
@@ -1038,7 +1038,7 @@ fn get_packages_debug_reports_the_member_list() {
     let err = stderr(&output);
     assert!(
         err.contains(&format!(
-            "debug: workspace {}: members: pkg-a (packages/a)",
+            "debug: workspace {} (npm): members: pkg-a (packages/a)",
             expected_path(dir.path())
         )),
         "{err}"
@@ -1058,7 +1058,7 @@ fn get_packages_debug_reports_an_empty_member_list() {
     let err = stderr(&output);
     assert!(
         err.contains(&format!(
-            "debug: workspace {}: no members",
+            "debug: workspace {} (single package): no members",
             expected_path(dir.path())
         )),
         "{err}"
@@ -1103,8 +1103,13 @@ fn get_packages_debug_reports_a_negation_exclusion() {
 
 #[cfg(unix)]
 #[test]
-fn get_packages_debug_reports_a_symlink_not_entered_by_a_wildcard() {
+fn get_packages_debug_reports_a_symlink_not_entered_by_a_double_star() {
     let dir = workspace_dir();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"packages/**\"]\n}\n",
+    )
+    .unwrap();
     fs::create_dir_all(dir.path().join("target")).unwrap();
     fs::write(
         dir.path().join("target/package.json"),
@@ -1117,7 +1122,7 @@ fn get_packages_debug_reports_a_symlink_not_entered_by_a_wildcard() {
     assert!(!stdout(&output).contains("pkg-t"), "{}", stdout(&output));
     let err = stderr(&output);
     assert!(
-        err.contains("debug: packages/link: a symlinked directory is not entered by a wildcard"),
+        err.contains("debug: packages/link: a symlinked directory is not entered by `**`"),
         "{err}"
     );
 }
@@ -3677,4 +3682,83 @@ fn rejects_an_unknown_subcommand() {
     let dir = tempfile::tempdir().unwrap();
     let output = changesette(dir.path(), &["publish"]);
     assert!(!output.status.success());
+}
+
+#[test]
+fn get_packages_warns_about_a_broken_ancestor_manifest_in_npm_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"app\"],\n<<<<<<< HEAD\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("app")).unwrap();
+    fs::write(
+        dir.path().join("app/package.json"),
+        "{ \"name\": \"app\", \"version\": \"1.0.0\" }\n",
+    )
+    .unwrap();
+    let output = changesette(&dir.path().join("app"), &["get-packages", "--all"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("\"app\""), "{}", stdout(&output));
+    let err = stderr(&output);
+    assert!(
+        err.contains(&format!(
+            "warning: {}: ",
+            expected_path(&dir.path().join("package.json"))
+        )) && err.contains("passed over while looking for an npm workspace root"),
+        "{err}"
+    );
+}
+
+#[test]
+fn get_packages_lists_a_package_the_npm_root_above_does_not_list_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"packages/*\"]\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("packages/a")).unwrap();
+    fs::write(
+        dir.path().join("packages/a/package.json"),
+        "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("examples/x")).unwrap();
+    fs::write(
+        dir.path().join("examples/x/package.json"),
+        "{ \"name\": \"example-x\", \"version\": \"1.0.0\" }\n",
+    )
+    .unwrap();
+    let output = changesette(&dir.path().join("examples/x"), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"example-x\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\".\"}]\n"
+    );
+}
+
+#[test]
+fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("yarn.lock"), "").unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": \"packages/*\" }\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"root\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\".\"}]\n"
+    );
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "warning: {}: \"workspaces\" must be an array or an object: ignored, as Yarn ignores it\n",
+            expected_path(&dir.path().join("package.json"))
+        )
+    );
 }
