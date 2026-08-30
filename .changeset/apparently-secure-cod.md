@@ -4,7 +4,7 @@ changesette: minor
 
 Workspace discovery now follows each package manager more closely.
 
-- A `yarn.lock` marks a Yarn workspace root. The nearest marker wins, and within one directory a `pnpm-workspace.yaml` beats a `yarn.lock`, which beats a `workspaces` field.
+- A `yarn.lock` marks a Yarn workspace root. The nearest `pnpm-workspace.yaml` or `yarn.lock` above the working directory is the root (within one directory the former wins), and a `workspaces` field is looked at only when there is neither: a `workspaces` field below one of those markers, such as in a Yarn worktree child or a leftover `{"nohoist": [...]}` in a pnpm member, no longer becomes a root of its own.
 - The Yarn root package is always a member candidate, and the `workspaces` field of every Yarn member is expanded in turn, as Yarn does for its worktrees.
 - The directory names never entered follow the package manager: `node_modules` everywhere, plus `.git` and `.yarn` under Yarn and `bower_components` under pnpm.
 - A symlinked directory matched by a wildcard segment is now entered one level and listed, as one matched by a literal segment already was; `**` still never enters a symlinked directory.

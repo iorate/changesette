@@ -66,19 +66,20 @@ impl PackageManager {
 }
 
 impl Workspace {
-    /// Discovers the workspace containing `cwd`: the nearest ancestor that
-    /// is a pnpm, Yarn, or npm workspace root wins, and without one the
-    /// nearest ancestor with a `package.json` becomes a single-package
-    /// workspace.
+    /// Discovers the workspace containing `cwd`: the nearest ancestor with a
+    /// `pnpm-workspace.yaml` or `yarn.lock` is the root; without one, the
+    /// nearest ancestor whose `package.json` declares `workspaces` is an npm
+    /// root; without that, the nearest ancestor with a `package.json`
+    /// becomes a single-package workspace.
     pub(crate) fn discover(cwd: &Path) -> Result<Workspace> {
-        let mut fallback = None;
+        // Every `workspaces` field the corpus has below a pnpm-workspace.yaml
+        // or a yarn.lock is a Yarn worktree child, a Yarn 1 leftover such as
+        // `{"nohoist": [...]}` in a pnpm member, or a test fixture, never a
+        // root of its own, and opening a member's manifest to find the root
+        // turns such a leftover into an error. Neither pnpm nor Yarn looks at
+        // the other's marker, and the lockfile a migration leaves behind sits
+        // beside the new pnpm-workspace.yaml (a settings-only one included).
         for dir in cwd.ancestors() {
-            // The nearest marker wins, and within one directory a
-            // pnpm-workspace.yaml (a settings-only file included) beats a
-            // yarn.lock, which beats a `workspaces` field: every tool
-            // ignores the others' markers, and the markers a migration
-            // leaves behind (an old lockfile, an old `workspaces` field)
-            // sit beside the new one in the same directory.
             let manifest = dir.join("pnpm-workspace.yaml");
             if probe_is_file(&manifest) {
                 let patterns = pnpm_patterns(&manifest)?;
@@ -89,10 +90,10 @@ impl Workspace {
                     collect_members(dir, &manifest, &patterns, pm)?,
                 ));
             }
-            let path = dir.join("package.json");
             // Yarn takes the nearest yarn.lock as its project root whether or
             // not a package.json sits beside it.
             if probe_is_file(&dir.join("yarn.lock")) {
+                let path = dir.join("package.json");
                 let mut patterns = Vec::new();
                 if probe_is_file(&path)
                     && let Some(value) = read_manifest(&path)?
@@ -107,13 +108,19 @@ impl Workspace {
                     collect_members(dir, &path, &patterns, pm)?,
                 ));
             }
+        }
+
+        let mut fallback = None;
+        for dir in cwd.ancestors() {
+            let path = dir.join("package.json");
             if !probe_is_file(&path) {
                 continue;
             }
             // A parse failure is always an error: walking past a broken npm
-            // root would silently pick another root (an outer marker or the
-            // single-package fallback), and merge conflict markers left in a
-            // root package.json are a realistic way to get here.
+            // root would silently pick another root (an outer `workspaces`
+            // declaration or the single-package fallback), and merge conflict
+            // markers left in a root package.json are a realistic way to get
+            // here.
             let Some(value) = read_manifest(&path)? else {
                 continue;
             };
@@ -1253,7 +1260,7 @@ mod tests {
     }
 
     #[test]
-    fn an_inner_workspaces_field_shadows_an_outer_workspace() {
+    fn an_outer_pnpm_manifest_wins_over_an_inner_workspaces_field() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -1270,8 +1277,86 @@ mod tests {
             "packages/a/nested/x/package.json",
             "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
         );
+        let workspace = Workspace::discover(&dir.path().join("packages/a/nested/x")).unwrap();
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn an_outer_yarn_lock_wins_over_an_inner_workspaces_field() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "yarn.lock", "");
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": [\"nested/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/nested/x/package.json",
+            "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::discover(&dir.path().join("packages/a/nested/x")).unwrap();
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(
+            names_and_rel_dirs(&workspace),
+            [
+                ("pkg-a", "packages/a"),
+                ("pkg-x", "packages/a/nested/x"),
+                ("root", ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_yarn_1_nohoist_leftover_in_a_pnpm_member_is_never_read_as_a_root() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - \"packages/*\"\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": { \"nohoist\": [\"**/foo\"] } }\n",
+        );
+        let workspace = Workspace::discover(&dir.path().join("packages/a")).unwrap();
+        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
+    fn a_workspaces_field_is_a_root_only_without_a_marker_above() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"outer\", \"version\": \"1.0.0\", \"workspaces\": [\"packages/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": [\"nested/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/nested/x/package.json",
+            "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
+        );
         let inner = dir.path().join("packages/a");
-        let workspace = Workspace::discover(&inner).unwrap();
+        let workspace = Workspace::discover(&inner.join("nested/x")).unwrap();
         assert_eq!(workspace.root(), inner);
         assert_eq!(
             names_and_dirs(&workspace),
