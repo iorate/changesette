@@ -3710,3 +3710,31 @@ fn get_packages_warns_about_a_broken_ancestor_manifest_in_npm_mode() {
         "{err}"
     );
 }
+
+#[test]
+fn get_packages_lists_a_package_the_npm_root_above_does_not_list_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"packages/*\"]\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("packages/a")).unwrap();
+    fs::write(
+        dir.path().join("packages/a/package.json"),
+        "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("examples/x")).unwrap();
+    fs::write(
+        dir.path().join("examples/x/package.json"),
+        "{ \"name\": \"example-x\", \"version\": \"1.0.0\" }\n",
+    )
+    .unwrap();
+    let output = changesette(&dir.path().join("examples/x"), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"example-x\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\".\"}]\n"
+    );
+}

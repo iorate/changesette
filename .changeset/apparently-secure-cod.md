@@ -4,7 +4,7 @@ changesette: minor
 
 Workspace discovery now follows each package manager more closely.
 
-- A `yarn.lock` marks a Yarn workspace root. The nearest `pnpm-workspace.yaml` or `yarn.lock` above the working directory is the root (within one directory the former wins), and a `workspaces` field is looked at only when there is neither: a `workspaces` field below one of those markers, such as in a Yarn worktree child or a leftover `{"nohoist": [...]}` in a pnpm member, no longer becomes a root of its own.
+- A `yarn.lock` marks a Yarn workspace root. The nearest `pnpm-workspace.yaml` or `yarn.lock` above the working directory is the root (within one directory the former wins). Without either, npm's own rule applies: the nearest `package.json` is the root unless the `workspaces` of an ancestor lists it as a member, in which case that ancestor is. So a `workspaces` field below one of those markers, such as in a Yarn worktree child or a leftover `{"nohoist": [...]}` in a pnpm member, no longer becomes a root of its own; a leftover `workspaces` in an npm member no longer does either, as npm re-roots to the workspace root; and a package the npm root above does not list, such as an example, is a single package, as it is for npm.
 - The Yarn root package is always a member candidate, and the `workspaces` field of every Yarn member is expanded in turn, as Yarn does for its worktrees.
 - The directory names never entered follow the package manager: `node_modules` everywhere, plus `.git` and `.yarn` under Yarn and `bower_components` under pnpm.
 - A symlinked directory matched by a wildcard segment is now entered one level and listed, as one matched by a literal segment already was; `**` still never enters a symlinked directory.
