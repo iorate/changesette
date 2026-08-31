@@ -12,9 +12,8 @@ pub(crate) enum Seg {
     Globstar,
 }
 
-/// A workspace pattern compiled to `/`-separated segments; the last segment
-/// is always `Glob("package.json")`, so the pattern matches manifest file
-/// paths.
+/// A workspace pattern compiled to `/`-separated segments, matching
+/// root-relative directory paths.
 #[derive(Debug)]
 pub(crate) struct Pattern {
     segs: Vec<Seg>,
@@ -64,9 +63,6 @@ pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
         }
         segs.push(classify(part)?);
     }
-    // Appending the manifest name gives the pnpm-style idioms for free: the
-    // zero-width `**` makes `x/**` cover `x` itself and `!x/**` exclude it.
-    segs.push(Seg::Glob("package.json".to_owned()));
     Ok(Some((negated, Pattern { segs })))
 }
 
@@ -167,10 +163,14 @@ impl Pattern {
         &self.segs
     }
 
-    /// Matches a root-relative `/`-separated manifest path in full; a
+    /// Matches a root-relative `/`-separated directory path in full; a
     /// negation passes `dot_permissive` so its wildcards cover dot segments.
-    pub(crate) fn matches(&self, rel_manifest: &str, dot_permissive: bool) -> bool {
-        let names: Vec<&str> = rel_manifest.split('/').collect();
+    pub(crate) fn matches(&self, rel_dir: &str, dot_permissive: bool) -> bool {
+        let names: Vec<&str> = if rel_dir == "." {
+            Vec::new()
+        } else {
+            rel_dir.split('/').collect()
+        };
         matches_from(&self.segs, &names, dot_permissive)
     }
 }
@@ -246,18 +246,11 @@ mod tests {
     #[test]
     fn normalizes_dot_and_slash_noise() {
         for pattern in ["./x", "x/", "x", "./x/"] {
-            assert_eq!(
-                positive(pattern).segs(),
-                [seg("x"), seg("package.json")],
-                "{pattern}"
-            );
+            assert_eq!(positive(pattern).segs(), [seg("x")], "{pattern}");
         }
-        assert_eq!(
-            positive("x//y").segs(),
-            [seg("x"), seg("y"), seg("package.json")]
-        );
+        assert_eq!(positive("x//y").segs(), [seg("x"), seg("y")]);
         for pattern in [".", "./"] {
-            assert_eq!(positive(pattern).segs(), [seg("package.json")], "{pattern}");
+            assert_eq!(positive(pattern).segs(), [] as [Seg; 0], "{pattern}");
         }
     }
 
@@ -270,8 +263,8 @@ mod tests {
 
     #[test]
     fn leading_bangs_toggle_the_polarity_by_parity() {
-        assert_eq!(positive("!!x").segs(), [seg("x"), seg("package.json")]);
-        assert_eq!(negation("!!!x").segs(), [seg("x"), seg("package.json")]);
+        assert_eq!(positive("!!x").segs(), [seg("x")]);
+        assert_eq!(negation("!!!x").segs(), [seg("x")]);
     }
 
     #[test]
@@ -299,22 +292,16 @@ mod tests {
     fn a_drive_prefix_after_the_first_raw_segment_compiles() {
         assert_eq!(
             positive("packages/C:/x").segs(),
-            [seg("packages"), seg("C:"), seg("x"), seg("package.json")]
+            [seg("packages"), seg("C:"), seg("x")]
         );
-        assert_eq!(
-            positive("./C:/x").segs(),
-            [seg("C:"), seg("x"), seg("package.json")]
-        );
+        assert_eq!(positive("./C:/x").segs(), [seg("C:"), seg("x")]);
     }
 
     #[cfg(unix)]
     #[test]
     fn a_drive_like_segment_is_an_ordinary_name_on_unix() {
-        assert_eq!(
-            positive("C:/x").segs(),
-            [seg("C:"), seg("x"), seg("package.json")]
-        );
-        assert_eq!(positive("C:x").segs(), [seg("C:x"), seg("package.json")]);
+        assert_eq!(positive("C:/x").segs(), [seg("C:"), seg("x")]);
+        assert_eq!(positive("C:x").segs(), [seg("C:x")]);
         assert!(!has_drive_prefix("C:"));
     }
 
@@ -329,17 +316,11 @@ mod tests {
     fn classifies_segments() {
         assert_eq!(
             positive("packages/**").segs(),
-            [seg("packages"), Seg::Globstar, seg("package.json")]
+            [seg("packages"), Seg::Globstar]
         );
-        assert_eq!(positive("f**").segs(), [seg("f**"), seg("package.json")]);
-        assert_eq!(
-            positive("+(a|b)").segs(),
-            [seg("+(a|b)"), seg("package.json")]
-        );
-        assert_eq!(
-            positive("a?c/[xy]").segs(),
-            [seg("a?c"), seg("[xy]"), seg("package.json")]
-        );
+        assert_eq!(positive("f**").segs(), [seg("f**")]);
+        assert_eq!(positive("+(a|b)").segs(), [seg("+(a|b)")]);
+        assert_eq!(positive("a?c/[xy]").segs(), [seg("a?c"), seg("[xy]")]);
     }
 
     #[test]
@@ -352,31 +333,22 @@ mod tests {
     #[test]
     fn a_bang_after_the_leading_run_is_literal() {
         let pattern = positive("packages/!foo*");
-        assert_eq!(
-            pattern.segs(),
-            [seg("packages"), seg("\\!foo*"), seg("package.json")]
-        );
-        assert!(pattern.matches("packages/!foox/package.json", false));
-        assert!(!pattern.matches("packages/foox/package.json", false));
-        assert!(!pattern.matches("packages/bar/package.json", false));
+        assert_eq!(pattern.segs(), [seg("packages"), seg("\\!foo*")]);
+        assert!(pattern.matches("packages/!foox", false));
+        assert!(!pattern.matches("packages/foox", false));
+        assert!(!pattern.matches("packages/bar", false));
         assert_eq!(
             positive("packages/!foo").segs(),
-            [seg("packages"), seg("\\!foo"), seg("package.json")]
+            [seg("packages"), seg("\\!foo")]
         );
-        assert!(positive("packages/!foo").matches("packages/!foo/package.json", false));
-        assert_eq!(
-            positive("a/\\!b*").segs(),
-            [seg("a"), seg("\\!b*"), seg("package.json")]
-        );
+        assert!(positive("packages/!foo").matches("packages/!foo", false));
+        assert_eq!(positive("a/\\!b*").segs(), [seg("a"), seg("\\!b*")]);
     }
 
     #[test]
     fn an_escaped_slash_is_a_separator() {
-        assert_eq!(
-            positive("a\\/b").segs(),
-            [seg("a"), seg("b"), seg("package.json")]
-        );
-        assert_eq!(positive("a\\/").segs(), [seg("a"), seg("package.json")]);
+        assert_eq!(positive("a\\/b").segs(), [seg("a"), seg("b")]);
+        assert_eq!(positive("a\\/").segs(), [seg("a")]);
         assert!(error("\\/").contains("absolute"));
         assert!(error("\\/x").contains("absolute"));
     }
@@ -388,44 +360,26 @@ mod tests {
         }
         assert_eq!(
             positive("x/{a,b}/y").segs(),
-            [seg("x"), seg("{a,b}"), seg("y"), seg("package.json")]
+            [seg("x"), seg("{a,b}"), seg("y")]
         );
-        assert_eq!(
-            positive("\\{a,b\\}/c").segs(),
-            [seg("\\{a,b\\}"), seg("c"), seg("package.json")]
-        );
-        assert_eq!(
-            positive("a}b/c").segs(),
-            [seg("a}b"), seg("c"), seg("package.json")]
-        );
+        assert_eq!(positive("\\{a,b\\}/c").segs(), [seg("\\{a,b\\}"), seg("c")]);
+        assert_eq!(positive("a}b/c").segs(), [seg("a}b"), seg("c")]);
     }
 
     #[test]
     fn a_slash_inside_a_character_class_is_a_member() {
         let pattern = positive("[a/b]");
-        assert_eq!(pattern.segs(), [seg("[a/b]"), seg("package.json")]);
-        assert!(pattern.matches("a/package.json", false));
-        assert!(pattern.matches("b/package.json", false));
-        assert!(!pattern.matches("c/package.json", false));
-        assert!(!pattern.matches("[a/b]/package.json", false));
-        assert_eq!(
-            positive("x/[a/b]").segs(),
-            [seg("x"), seg("[a/b]"), seg("package.json")]
-        );
-        assert_eq!(
-            positive("[a\\/b]").segs(),
-            [seg("[a\\/b]"), seg("package.json")]
-        );
-        assert!(!positive("x[/]y").matches("xy/package.json", false));
-        assert_eq!(positive("[!/]").segs(), [seg("[!/]"), seg("package.json")]);
-        assert_eq!(
-            positive("[]]x/y").segs(),
-            [seg("[]]x"), seg("y"), seg("package.json")]
-        );
-        assert_eq!(
-            positive("[{]/a").segs(),
-            [seg("[{]"), seg("a"), seg("package.json")]
-        );
+        assert_eq!(pattern.segs(), [seg("[a/b]")]);
+        assert!(pattern.matches("a", false));
+        assert!(pattern.matches("b", false));
+        assert!(!pattern.matches("c", false));
+        assert!(!pattern.matches("[a/b]", false));
+        assert_eq!(positive("x/[a/b]").segs(), [seg("x"), seg("[a/b]")]);
+        assert_eq!(positive("[a\\/b]").segs(), [seg("[a\\/b]")]);
+        assert!(!positive("x[/]y").matches("xy", false));
+        assert_eq!(positive("[!/]").segs(), [seg("[!/]")]);
+        assert_eq!(positive("[]]x/y").segs(), [seg("[]]x"), seg("y")]);
+        assert_eq!(positive("[{]/a").segs(), [seg("[{]"), seg("a")]);
     }
 
     #[test]
@@ -464,32 +418,32 @@ mod tests {
     #[test]
     fn a_double_star_negation_matches_the_base_directory() {
         let pattern = negation("!x/**");
-        assert!(pattern.matches("x/package.json", true));
-        assert!(pattern.matches("x/y/package.json", true));
-        assert!(!pattern.matches("y/package.json", true));
+        assert!(pattern.matches("x", true));
+        assert!(pattern.matches("x/y", true));
+        assert!(!pattern.matches("y", true));
     }
 
     #[test]
     fn a_negation_matches_dot_segments() {
         let pattern = negation("!**/.vercel/**");
-        assert!(pattern.matches(".vercel/package.json", true));
-        assert!(pattern.matches("a/.vercel/b/package.json", true));
-        assert!(!pattern.matches("a/b/package.json", true));
+        assert!(pattern.matches(".vercel", true));
+        assert!(pattern.matches("a/.vercel/b", true));
+        assert!(!pattern.matches("a/b", true));
     }
 
     #[test]
     fn a_full_match_applies_the_dot_rule_when_not_permissive() {
         let pattern = positive("*");
-        assert!(!pattern.matches(".x/package.json", false));
-        assert!(pattern.matches(".x/package.json", true));
-        assert!(pattern.matches("x/package.json", false));
+        assert!(!pattern.matches(".x", false));
+        assert!(pattern.matches(".x", true));
+        assert!(pattern.matches("x", false));
     }
 
     #[test]
     fn a_full_match_expands_braces() {
         let pattern = positive("packages/{a,b}");
-        assert!(pattern.matches("packages/a/package.json", true));
-        assert!(!pattern.matches("packages/c/package.json", true));
-        assert!(!pattern.matches("packages/{a,b}/package.json", true));
+        assert!(pattern.matches("packages/a", true));
+        assert!(!pattern.matches("packages/c", true));
+        assert!(!pattern.matches("packages/{a,b}", true));
     }
 }
