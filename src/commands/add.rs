@@ -36,7 +36,7 @@ pub(crate) fn run(cwd: &Path, workspace: &Workspace, config: &Config, args: AddA
         "no packages found in the workspace"
     );
 
-    let changeset_dir = workspace.root().join(".changeset");
+    let changeset_dir = workspace.changeset_dir();
     let skip = SkipSet::load(workspace, config, &[])?;
     let packages: Vec<&Member> = workspace
         .members()

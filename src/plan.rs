@@ -59,7 +59,7 @@ pub(crate) fn plan_version(
     cli_ignore: &[String],
     snapshot: Option<&Snapshot>,
 ) -> Result<PlannedVersion> {
-    let changeset_dir = workspace.root().join(".changeset");
+    let changeset_dir = workspace.changeset_dir();
     let skip = SkipSet::load(&workspace, config, cli_ignore)?;
     let names: Vec<&str> = workspace.members().iter().map(Member::name).collect();
     let groups = config

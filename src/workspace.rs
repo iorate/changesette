@@ -301,8 +301,8 @@ impl Workspace {
         Workspace { root, members }
     }
 
-    pub(crate) fn root(&self) -> &Path {
-        &self.root
+    pub(crate) fn changeset_dir(&self) -> PathBuf {
+        self.root.join(".changeset")
     }
 
     /// In package-name order; empty when the globs match nothing or every
@@ -1010,7 +1010,7 @@ mod tests {
             "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(dir.path()).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
     }
 
@@ -1024,7 +1024,7 @@ mod tests {
             "{ \"name\": \"root\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(dir.path()).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
     }
 
@@ -1038,7 +1038,7 @@ mod tests {
             "{ \"name\": \"root\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(dir.path()).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
     }
 
@@ -1103,7 +1103,7 @@ mod tests {
         );
         let inner = dir.path().join("packages/inner");
         let workspace = discover(&inner).unwrap();
-        assert_eq!(workspace.root(), inner);
+        assert_eq!(workspace.root, inner);
         assert_eq!(names_and_dirs(&workspace), [("inner", inner.as_path())]);
     }
 
@@ -1126,7 +1126,7 @@ mod tests {
             "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("packages/a")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [
@@ -1146,7 +1146,7 @@ mod tests {
         );
         fs::create_dir_all(dir.path().join("app/src")).unwrap();
         let workspace = discover(&dir.path().join("app/src")).unwrap();
-        assert_eq!(workspace.root(), dir.path().join("app"));
+        assert_eq!(workspace.root, dir.path().join("app"));
         assert_eq!(
             names_and_dirs(&workspace),
             [("app", dir.path().join("app").as_path())]
@@ -1165,7 +1165,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "package.json", "{ \"version\": \"1.0.0\" }\n");
         let workspace = discover(dir.path()).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(names_and_dirs(&workspace), []);
     }
 
@@ -1440,7 +1440,7 @@ mod tests {
             "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(dir.path()).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("packages/a").as_path())]
@@ -1466,7 +1466,7 @@ mod tests {
             "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("packages/a/nested/x")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("packages/a").as_path())]
@@ -1493,7 +1493,7 @@ mod tests {
             "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("packages/a/nested/x")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_rel_dirs(&workspace),
             [
@@ -1518,7 +1518,7 @@ mod tests {
             "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": { \"nohoist\": [\"**/foo\"] } }\n",
         );
         let workspace = discover(&dir.path().join("packages/a")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("packages/a").as_path())]
@@ -1545,7 +1545,7 @@ mod tests {
         );
         let inner = dir.path().join("packages/a");
         let workspace = discover(&inner.join("nested/x")).unwrap();
-        assert_eq!(workspace.root(), inner);
+        assert_eq!(workspace.root, inner);
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-x", inner.join("nested/x").as_path())]
@@ -1572,7 +1572,7 @@ mod tests {
         );
         fs::create_dir_all(dir.path().join("packages/a/src")).unwrap();
         let workspace = discover(&dir.path().join("packages/a/src")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [
@@ -1601,7 +1601,7 @@ mod tests {
             "{ \"name\": \"lib\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("apps/web")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [("lib", dir.path().join("packages/lib").as_path())]
@@ -1632,7 +1632,7 @@ mod tests {
             "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("packages/a")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-b", dir.path().join("packages/b").as_path())]
@@ -1659,7 +1659,7 @@ mod tests {
         );
         let example = dir.path().join("examples/x");
         let workspace = discover(&example).unwrap();
-        assert_eq!(workspace.root(), example);
+        assert_eq!(workspace.root, example);
         assert_eq!(
             names_and_dirs(&workspace),
             [("example-x", example.as_path())]
@@ -1686,7 +1686,7 @@ mod tests {
         );
         let stray = dir.path().join("packages/a/src");
         let workspace = discover(&stray).unwrap();
-        assert_eq!(workspace.root(), stray);
+        assert_eq!(workspace.root, stray);
         assert_eq!(names_and_dirs(&workspace), [("stray", stray.as_path())]);
     }
 
@@ -1709,7 +1709,7 @@ mod tests {
             "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("packages/a")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("packages/a").as_path())]
@@ -1740,7 +1740,7 @@ mod tests {
             "{ \"name\": \"pkg-c\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("a/b")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-b", dir.path().join("a/b").as_path())]
@@ -1761,7 +1761,7 @@ mod tests {
             "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(dir.path()).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("packages/a").as_path())]
@@ -2172,7 +2172,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "package.json", "{ \"name\": \"app\" }\n");
         let workspace = discover(dir.path()).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(names_and_dirs(&workspace), []);
     }
 
@@ -2419,7 +2419,7 @@ mod tests {
             "{ \"name\": \"app\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("app")).unwrap();
-        assert_eq!(workspace.root(), dir.path().join("app"));
+        assert_eq!(workspace.root, dir.path().join("app"));
         assert_eq!(
             names_and_dirs(&workspace),
             [("app", dir.path().join("app").as_path())]
@@ -2441,7 +2441,7 @@ mod tests {
             "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("a/b")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-b", dir.path().join("a/b").as_path())]
@@ -2463,7 +2463,7 @@ mod tests {
             "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("a/b")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-b", dir.path().join("a/b").as_path())]
@@ -2481,7 +2481,7 @@ mod tests {
             );
             write(dir.path(), "sub/package.json", stray);
             let workspace = discover(&dir.path().join("sub")).unwrap();
-            assert_eq!(workspace.root(), dir.path().join("sub"), "{stray}");
+            assert_eq!(workspace.root, dir.path().join("sub"), "{stray}");
             assert_eq!(names_and_dirs(&workspace), [], "{stray}");
         }
     }
@@ -2496,7 +2496,7 @@ mod tests {
         );
         fs::create_dir_all(dir.path().join("sub/package.json")).unwrap();
         let workspace = discover(&dir.path().join("sub")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
     }
 
     #[test]
@@ -2533,7 +2533,7 @@ mod tests {
             "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(dir.path()).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(
             names_and_dirs(&workspace),
             [("pkg-a", dir.path().join("packages/a").as_path())]
@@ -2574,7 +2574,7 @@ mod tests {
             "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("a")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(names_and_dirs(&workspace), []);
     }
 
@@ -2593,7 +2593,7 @@ mod tests {
             "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(&dir.path().join("packages/a")).unwrap();
-        assert_eq!(workspace.root(), dir.path());
+        assert_eq!(workspace.root, dir.path());
         assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
     }
 
@@ -2667,7 +2667,7 @@ mod tests {
                 "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
             );
             let workspace = discover(dir.path()).unwrap();
-            assert_eq!(workspace.root(), dir.path(), "{workspaces}");
+            assert_eq!(workspace.root, dir.path(), "{workspaces}");
             assert_eq!(
                 names_and_dirs(&workspace),
                 [("root", dir.path())],
@@ -2779,7 +2779,7 @@ mod tests {
         );
         let inner = dir.path().join("examples/e");
         let workspace = discover(&inner.join("src")).unwrap();
-        assert_eq!(workspace.root(), inner);
+        assert_eq!(workspace.root, inner);
         assert_eq!(names_and_dirs(&workspace), [("example", inner.as_path())]);
         let workspace = discover(dir.path()).unwrap();
         assert_eq!(
@@ -3113,7 +3113,7 @@ mod tests {
         );
         let root = dir.path().join("packages/a");
         let workspace = Workspace::load(&root, None, None).unwrap();
-        assert_eq!(workspace.root(), root);
+        assert_eq!(workspace.root, root);
         assert_eq!(names_and_rel_dirs(&workspace), [("pkg-a", ".")]);
     }
 
@@ -3137,7 +3137,7 @@ mod tests {
         );
         let root = dir.path().join("packages/inner");
         let workspace = Workspace::load(&root, None, None).unwrap();
-        assert_eq!(workspace.root(), root);
+        assert_eq!(workspace.root, root);
         assert_eq!(names_and_rel_dirs(&workspace), [("pkg-x", "libs/x")]);
     }
 

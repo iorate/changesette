@@ -31,7 +31,7 @@ const CONFIG: &str = "{
 /// Creates the `.changeset/` directory at the workspace root with a default
 /// README.md and config.json, creating whichever of them are missing.
 pub(crate) fn run(cwd: &Path, workspace: &Workspace) -> Result<()> {
-    let changeset_dir = workspace.root().join(".changeset");
+    let changeset_dir = workspace.changeset_dir();
     fs::create_dir_all(&changeset_dir).with_context(|| display_path(&changeset_dir))?;
 
     let mut created = false;

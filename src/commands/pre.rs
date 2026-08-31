@@ -12,7 +12,7 @@ use crate::{
 /// Enters pre-release mode by writing `.changeset/pre.json` with `tag`; it
 /// is an error to already be in pre mode.
 pub(crate) fn enter(workspace: &Workspace, tag: &str) -> Result<()> {
-    let changeset_dir = workspace.root().join(".changeset");
+    let changeset_dir = workspace.changeset_dir();
     let pre = PreJson::load(&changeset_dir)?;
 
     // Checked before the tag, so that an existing pre.json with an invalid
@@ -41,7 +41,7 @@ pub(crate) fn enter(workspace: &Workspace, tag: &str) -> Result<()> {
 /// state; it is an error not to have a pre.json, while exiting twice
 /// succeeds.
 pub(crate) fn exit(workspace: &Workspace) -> Result<()> {
-    let changeset_dir = workspace.root().join(".changeset");
+    let changeset_dir = workspace.changeset_dir();
     let Some(mut pre) = PreJson::load(&changeset_dir)? else {
         bail!("not in pre mode; run `changesette pre enter <tag>` to enter");
     };

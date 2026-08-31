@@ -82,6 +82,36 @@ struct AddArgs {
     patch: Vec<String>,
 }
 
+#[derive(clap::Args)]
+struct VersionArgs {
+    /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
+    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
+    ignore: Vec<String>,
+    /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
+    #[arg(
+        long,
+        value_name = "TAG",
+        num_args = 0..=1,
+        value_parser = clap::builder::NonEmptyStringValueParser::new()
+    )]
+    #[expect(clippy::option_option)]
+    snapshot: Option<Option<String>>,
+    /// The snapshot suffix template; the placeholders are {tag}, {timestamp}, and {datetime}
+    #[arg(
+        long,
+        value_name = "TEMPLATE",
+        requires = "snapshot",
+        value_parser = clap::builder::NonEmptyStringValueParser::new()
+    )]
+    snapshot_prerelease_template: Option<String>,
+    /// Succeed even when there are no unreleased changesets
+    #[arg(short, long)]
+    allow_no_changesets: bool,
+    /// Write the release plan to the file (or stdout with `-`) as JSON
+    #[arg(short, long, value_name = "FILE")]
+    output: Option<PathBuf>,
+}
+
 #[derive(clap::Subcommand)]
 enum Command {
     /// Create the changeset directory
@@ -89,34 +119,7 @@ enum Command {
     /// Create a changeset (the default command)
     Add(AddArgs),
     /// Consume changesets: bump each named package's version and update its CHANGELOG.md
-    Version {
-        /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
-        #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-        ignore: Vec<String>,
-        /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
-        #[arg(
-            long,
-            value_name = "TAG",
-            num_args = 0..=1,
-            value_parser = clap::builder::NonEmptyStringValueParser::new()
-        )]
-        #[expect(clippy::option_option)]
-        snapshot: Option<Option<String>>,
-        /// The snapshot suffix template; the placeholders are {tag}, {timestamp}, and {datetime}
-        #[arg(
-            long,
-            value_name = "TEMPLATE",
-            requires = "snapshot",
-            value_parser = clap::builder::NonEmptyStringValueParser::new()
-        )]
-        snapshot_prerelease_template: Option<String>,
-        /// Succeed even when there are no unreleased changesets
-        #[arg(short, long)]
-        allow_no_changesets: bool,
-        /// Write the release plan to the file (or stdout with `-`) as JSON
-        #[arg(short, long, value_name = "FILE")]
-        output: Option<PathBuf>,
-    },
+    Version(VersionArgs),
     /// Enter or exit pre-release mode
     Pre {
         #[command(subcommand)]
@@ -187,26 +190,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command.unwrap_or(Command::Add(cli.add)) {
         Command::Init => commands::init::run(&cwd, &workspace),
         Command::Add(args) => commands::add::run(&cwd, &workspace, &config, args),
-        Command::Version {
-            ignore,
-            snapshot,
-            snapshot_prerelease_template,
-            allow_no_changesets,
-            output,
-        } => {
-            let snapshot = snapshot.map(|tag| snapshot::Snapshot {
-                tag,
-                template: snapshot_prerelease_template,
-            });
-            commands::version::run(
-                workspace,
-                &config,
-                &ignore,
-                allow_no_changesets,
-                output.as_deref(),
-                snapshot.as_ref(),
-            )
-        }
+        Command::Version(args) => commands::version::run(workspace, &config, args),
         Command::Pre { command } => match command {
             PreCommand::Enter { tag } => commands::pre::enter(&workspace, &tag),
             PreCommand::Exit => commands::pre::exit(&workspace),

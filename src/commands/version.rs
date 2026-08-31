@@ -1,10 +1,10 @@
-use std::{fs, path::Path};
+use std::fs;
 
 use anyhow::{Context, Result, bail};
 use tracing::info;
 
 use crate::{
-    config::Config, output::display_path, plan, release_plan, snapshot::Snapshot,
+    VersionArgs, config::Config, output::display_path, plan, release_plan, snapshot::Snapshot,
     workspace::Workspace,
 };
 
@@ -12,15 +12,12 @@ use crate::{
 /// upserts its CHANGELOG.md section, and deletes the consumed files — in pre
 /// mode planning prerelease versions and moving the consumed files to
 /// `.changeset/pre/` instead.
-pub(crate) fn run(
-    workspace: Workspace,
-    config: &Config,
-    ignore: &[String],
-    allow_no_changesets: bool,
-    output_path: Option<&Path>,
-    snapshot: Option<&Snapshot>,
-) -> Result<()> {
-    let planned = plan::plan_version(workspace, config, ignore, snapshot)?;
+pub(crate) fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<()> {
+    let snapshot = args.snapshot.map(|tag| Snapshot {
+        tag,
+        template: args.snapshot_prerelease_template,
+    });
+    let planned = plan::plan_version(workspace, config, &args.ignore, snapshot.as_ref())?;
     let pre = planned.in_pre();
     if let Some(pre) = pre {
         info!(
@@ -30,7 +27,7 @@ pub(crate) fn run(
     }
     let in_pre = pre.is_some();
     let exiting = planned.exiting_pre();
-    if planned.changes.is_empty() && !exiting && !allow_no_changesets {
+    if planned.changes.is_empty() && !exiting && !args.allow_no_changesets {
         bail!("no unreleased changesets found");
     }
 
@@ -80,7 +77,7 @@ pub(crate) fn run(
         }
     }
 
-    if let Some(path) = output_path {
+    if let Some(path) = &args.output {
         return release_plan::write_file(
             path,
             &release_plan::build(&planned.changes, &planned.releases, planned.pre.as_ref()),

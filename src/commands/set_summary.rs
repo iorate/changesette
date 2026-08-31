@@ -8,7 +8,7 @@ use crate::{changeset, output::display_path, workspace::Workspace};
 /// Rewrites the summary of the changeset with the given id, re-rendering the
 /// file in the canonical form `add` writes.
 pub(crate) fn run(cwd: &Path, workspace: &Workspace, id: &str, summary: &str) -> Result<()> {
-    let changeset_dir = workspace.root().join(".changeset");
+    let changeset_dir = workspace.changeset_dir();
 
     let changes = changeset::load(&changeset_dir)?;
     let Some(change) = changes.iter().find(|change| change.id() == id) else {
