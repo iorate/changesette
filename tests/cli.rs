@@ -3995,6 +3995,20 @@ fn config_packages_apply_from_a_member_directory() {
 }
 
 #[test]
+fn config_packages_are_read_from_the_forced_root() {
+    let dir = workspace_dir();
+    let other = tempfile::tempdir().unwrap();
+    write_config_packages(dir.path(), &["packages/a"]);
+    fs::remove_file(dir.path().join("package.json")).unwrap();
+    let output = changesette(
+        other.path(),
+        &["get-packages", "--root", &expected_path(dir.path())],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), PKG_A_JSON);
+}
+
+#[test]
 fn config_packages_entry_errors_name_the_config() {
     let dir = workspace_dir();
     write_config_packages(dir.path(), &["../x"]);
