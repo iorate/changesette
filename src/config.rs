@@ -5,10 +5,7 @@ use fast_glob::{glob_match, validate};
 use serde_json::{Map, Value};
 use tracing::warn;
 
-use crate::{
-    output::display_path,
-    workspace::{parse_rel_dir, read_json},
-};
+use crate::{output::display_path, path::parse_rel_dir, workspace::read_json};
 
 /// The effective settings from `.changeset/config.json`.
 #[derive(Debug, Default)]

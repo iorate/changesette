@@ -17,8 +17,6 @@ use tracing::{debug, warn};
 
 use crate::output::display_path;
 
-pub(crate) use pattern::parse_rel_dir;
-
 #[derive(Debug)]
 pub(crate) struct Workspace {
     root: PathBuf,
