@@ -17,7 +17,6 @@ mod config;
 mod jsonc;
 mod output;
 mod package_json;
-mod path;
 mod plan;
 mod pre;
 mod release_plan;

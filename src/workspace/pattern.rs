@@ -1,5 +1,5 @@
 use std::iter::Peekable;
-use std::path::{Component, Path};
+use std::path::{Component, Path, Prefix};
 use std::str::CharIndices;
 
 use anyhow::{Result, bail};
@@ -56,7 +56,9 @@ pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
         }
         // A leading Windows drive prefix (`C:/x`, or the drive-relative
         // `C:x`) addresses a location outside the root like an absolute
-        // path, so it is the same loud error; on Unix nothing parses as a
+        // path, so it is the same loud error. The `\`-spelled prefix forms
+        // (UNC, verbatim, device) are left to the matcher, where `\` is an
+        // escape and they match nothing; on Unix nothing parses as a
         // prefix and `C:` stays an ordinary name.
         if index == 0 && has_drive_prefix(part) {
             bail!("drive-prefixed patterns are not supported")
@@ -140,7 +142,7 @@ fn skip_class(chars: &mut Peekable<CharIndices<'_>>) {
 fn has_drive_prefix(part: &str) -> bool {
     matches!(
         Path::new(part).components().next(),
-        Some(Component::Prefix(_))
+        Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_))
     )
 }
 
@@ -277,7 +279,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn rejects_a_leading_drive_prefix() {
-        for pattern in ["C:/packages/*", "C:x", "c:/x", "C:", "!C:/x"] {
+        for pattern in ["C:/packages/*", "C:x", "c:/x", "C:", "!C:/x", r"C:\x"] {
             assert!(error(pattern).contains("drive"), "{pattern}");
         }
         assert!(has_drive_prefix("C:"));
@@ -285,6 +287,15 @@ mod tests {
         assert!(has_drive_prefix("C:*"));
         assert!(!has_drive_prefix("x"));
         assert!(!has_drive_prefix("a\\b"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_backslash_spelled_prefix_form_compiles() {
+        for pattern in [r"\\server\share", r"\\?\C:\x"] {
+            assert!(compile(pattern).unwrap().is_some(), "{pattern}");
+            assert!(!has_drive_prefix(pattern), "{pattern}");
+        }
     }
 
     #[cfg(windows)]

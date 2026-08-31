@@ -1,11 +1,14 @@
-use std::{collections::BTreeSet, path::Path};
+use std::{
+    collections::BTreeSet,
+    path::{Component, Path, Prefix},
+};
 
 use anyhow::{Context, Result, bail};
 use fast_glob::{glob_match, validate};
 use serde_json::{Map, Value};
 use tracing::warn;
 
-use crate::{output::display_path, path::parse_rel_dir, workspace::read_json};
+use crate::{output::display_path, workspace::read_json};
 
 /// The effective settings from `.changeset/config.json`.
 #[derive(Debug, Default)]
@@ -281,6 +284,42 @@ fn load_packages(object: &Map<String, Value>) -> Result<Option<Vec<String>>> {
         );
     }
     Ok(Some(packages))
+}
+
+fn parse_rel_dir(text: &str) -> Result<String> {
+    if text.is_empty() {
+        bail!("an empty path is not supported")
+    }
+    if text.starts_with('/') {
+        bail!("absolute paths are not supported")
+    }
+    if text.contains('\\') {
+        bail!("`\\` is not supported; use `/` as the separator")
+    }
+    let mut segs = Vec::new();
+    for part in text.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            bail!("`..` segments are not supported")
+        }
+        if has_drive_prefix(part) {
+            bail!("drive-prefixed segments are not supported")
+        }
+        segs.push(part);
+    }
+    if segs.is_empty() {
+        return Ok(".".to_owned());
+    }
+    Ok(segs.join("/"))
+}
+
+fn has_drive_prefix(part: &str) -> bool {
+    matches!(
+        Path::new(part).components().next(),
+        Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_))
+    )
 }
 
 #[cfg(test)]
@@ -692,5 +731,76 @@ mod tests {
         insta::assert_snapshot!(validate_err(
             "{ \"changesette\": { \"packages\": [\"../x\"] } }\n"
         ));
+    }
+
+    fn rel_dir_err(text: &str) -> String {
+        format!("{:#}", parse_rel_dir(text).unwrap_err())
+    }
+
+    #[test]
+    fn normalizes_a_relative_directory() {
+        for text in ["a", "./a", "a/", "a//", "./a/"] {
+            assert_eq!(parse_rel_dir(text).unwrap(), "a", "{text}");
+        }
+        for text in ["a/b", "a//b", "a/./b", "./a/b/"] {
+            assert_eq!(parse_rel_dir(text).unwrap(), "a/b", "{text}");
+        }
+        for text in [".", "./", "./.", "././"] {
+            assert_eq!(parse_rel_dir(text).unwrap(), ".", "{text}");
+        }
+        assert_eq!(parse_rel_dir("a/!b").unwrap(), "a/!b");
+    }
+
+    #[test]
+    fn rejects_an_empty_path() {
+        assert!(rel_dir_err("").contains("empty"));
+    }
+
+    #[test]
+    fn rejects_an_absolute_path() {
+        for text in ["/a", "/"] {
+            assert!(rel_dir_err(text).contains("absolute"), "{text}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_parent_segment() {
+        for text in ["..", "../a", "a/../b", "a/.."] {
+            assert!(rel_dir_err(text).contains("`..`"), "{text}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_backslash() {
+        for text in ["a\\b", "\\a", "a\\", "\\"] {
+            assert!(rel_dir_err(text).contains("`\\`"), "{text}");
+        }
+    }
+
+    #[test]
+    fn accepts_glob_like_names() {
+        for text in ["packages/*", "a?", "[a]", "a]", "{a,b}", "a}", "!a", "**"] {
+            assert_eq!(parse_rel_dir(text).unwrap(), text, "{text}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_a_drive_prefix_in_any_segment() {
+        for text in ["C:/x", "C:x", "C:", "./C:/x", "packages/C:/x", "a/C:x"] {
+            assert!(rel_dir_err(text).contains("drive"), "{text}");
+        }
+        assert!(has_drive_prefix("C:"));
+        assert!(has_drive_prefix("C:x"));
+        assert!(!has_drive_prefix("a"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_drive_like_segment_is_an_ordinary_name_on_unix() {
+        assert_eq!(parse_rel_dir("C:/x").unwrap(), "C:/x");
+        assert_eq!(parse_rel_dir("./C:/x").unwrap(), "C:/x");
+        assert_eq!(parse_rel_dir("C:x").unwrap(), "C:x");
+        assert!(!has_drive_prefix("C:"));
     }
 }
