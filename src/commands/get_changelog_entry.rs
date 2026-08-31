@@ -10,8 +10,7 @@ use crate::{
 
 /// Prints the body of the given version's section, without the `## <version>`
 /// heading, from the named package's CHANGELOG.md to stdout.
-pub(crate) fn run(package: &str, version: &semver::Version) -> Result<()> {
-    let workspace = Workspace::discover(&std::env::current_dir()?)?;
+pub(crate) fn run(workspace: &Workspace, package: &str, version: &semver::Version) -> Result<()> {
     let member = workspace.member(package)?;
     let path = member.dir().join("CHANGELOG.md");
     let text = match fs::read_to_string(&path) {

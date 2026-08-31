@@ -1,6 +1,13 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::{
+    env,
+    ffi::OsString,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use clap::Parser;
+
+use crate::workspace::Workspace;
 
 mod bump;
 mod changelog;
@@ -10,6 +17,7 @@ mod config;
 mod jsonc;
 mod output;
 mod package_json;
+mod path;
 mod plan;
 mod pre;
 mod release_plan;
@@ -27,6 +35,9 @@ struct Cli {
     /// The lowest level of messages to print to stderr
     #[arg(long, value_name = "LEVEL", global = true, default_value = "info")]
     log_level: LogLevel,
+    /// Use DIR as the workspace root instead of finding it from the working directory; only the markers in DIR decide the members
+    #[arg(long, value_name = "DIR", global = true, env = "CHANGESETTE_ROOT")]
+    root: Option<OsString>,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -71,6 +82,36 @@ struct AddArgs {
     patch: Vec<String>,
 }
 
+#[derive(clap::Args)]
+struct VersionArgs {
+    /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
+    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
+    ignore: Vec<String>,
+    /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
+    #[arg(
+        long,
+        value_name = "TAG",
+        num_args = 0..=1,
+        value_parser = clap::builder::NonEmptyStringValueParser::new()
+    )]
+    #[expect(clippy::option_option)]
+    snapshot: Option<Option<String>>,
+    /// The snapshot suffix template; the placeholders are {tag}, {timestamp}, and {datetime}
+    #[arg(
+        long,
+        value_name = "TEMPLATE",
+        requires = "snapshot",
+        value_parser = clap::builder::NonEmptyStringValueParser::new()
+    )]
+    snapshot_prerelease_template: Option<String>,
+    /// Succeed even when there are no unreleased changesets
+    #[arg(short, long)]
+    allow_no_changesets: bool,
+    /// Write the release plan to the file (or stdout with `-`) as JSON
+    #[arg(short, long, value_name = "FILE")]
+    output: Option<PathBuf>,
+}
+
 #[derive(clap::Subcommand)]
 enum Command {
     /// Create the changeset directory
@@ -78,34 +119,7 @@ enum Command {
     /// Create a changeset (the default command)
     Add(AddArgs),
     /// Consume changesets: bump each named package's version and update its CHANGELOG.md
-    Version {
-        /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
-        #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-        ignore: Vec<String>,
-        /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
-        #[arg(
-            long,
-            value_name = "TAG",
-            num_args = 0..=1,
-            value_parser = clap::builder::NonEmptyStringValueParser::new()
-        )]
-        #[expect(clippy::option_option)]
-        snapshot: Option<Option<String>>,
-        /// The snapshot suffix template; the placeholders are {tag}, {timestamp}, and {datetime}
-        #[arg(
-            long,
-            value_name = "TEMPLATE",
-            requires = "snapshot",
-            value_parser = clap::builder::NonEmptyStringValueParser::new()
-        )]
-        snapshot_prerelease_template: Option<String>,
-        /// Succeed even when there are no unreleased changesets
-        #[arg(short, long)]
-        allow_no_changesets: bool,
-        /// Write the release plan to the file (or stdout with `-`) as JSON
-        #[arg(short, long, value_name = "FILE")]
-        output: Option<PathBuf>,
-    },
+    Version(VersionArgs),
     /// Enter or exit pre-release mode
     Pre {
         #[command(subcommand)]
@@ -166,43 +180,30 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
+    let cwd = env::current_dir()?;
+    let (root, reroot_packages) = match cli.root.filter(|dir| !dir.is_empty()) {
+        Some(dir) => (workspace::normalize_root(&cwd, Path::new(&dir))?, None),
+        None => workspace::find_root(&cwd)?,
+    };
+    let config = config::load(&root.join(".changeset"))?;
+    let workspace = Workspace::load(&root, config.packages.as_deref(), reroot_packages)?;
     match cli.command.unwrap_or(Command::Add(cli.add)) {
-        Command::Init => commands::init::run(),
-        Command::Add(AddArgs {
-            major,
-            minor,
-            patch,
-            message,
-            empty,
-            open,
-        }) => commands::add::run(&major, &minor, &patch, message, empty, open),
-        Command::Version {
-            ignore,
-            snapshot,
-            snapshot_prerelease_template,
-            allow_no_changesets,
-            output,
-        } => {
-            let snapshot = snapshot.map(|tag| snapshot::Snapshot {
-                tag,
-                template: snapshot_prerelease_template,
-            });
-            commands::version::run(
-                &ignore,
-                allow_no_changesets,
-                output.as_deref(),
-                snapshot.as_ref(),
-            )
-        }
+        Command::Init => commands::init::run(&cwd, &workspace),
+        Command::Add(args) => commands::add::run(&cwd, &workspace, &config, args),
+        Command::Version(args) => commands::version::run(workspace, &config, args),
         Command::Pre { command } => match command {
-            PreCommand::Enter { tag } => commands::pre::enter(&tag),
-            PreCommand::Exit => commands::pre::exit(),
+            PreCommand::Enter { tag } => commands::pre::enter(&workspace, &tag),
+            PreCommand::Exit => commands::pre::exit(&workspace),
         },
-        Command::Status { verbose, output } => commands::status::run(verbose, output.as_deref()),
-        Command::GetPackages { all } => commands::get_packages::run(all),
-        Command::GetChangelogEntry { package, version } => {
-            commands::get_changelog_entry::run(&package, &version)
+        Command::Status { verbose, output } => {
+            commands::status::run(workspace, &config, verbose, output.as_deref())
         }
-        Command::SetSummary { id, summary } => commands::set_summary::run(&id, &summary),
+        Command::GetPackages { all } => commands::get_packages::run(&workspace, &config, all),
+        Command::GetChangelogEntry { package, version } => {
+            commands::get_changelog_entry::run(&workspace, &package, &version)
+        }
+        Command::SetSummary { id, summary } => {
+            commands::set_summary::run(&cwd, &workspace, &id, &summary)
+        }
     }
 }

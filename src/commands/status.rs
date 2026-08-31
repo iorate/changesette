@@ -2,13 +2,18 @@ use std::{fmt::Write as _, path::Path};
 
 use anyhow::Result;
 
-use crate::{bump::Bump, output, plan, release_plan};
+use crate::{bump::Bump, config::Config, output, plan, release_plan, workspace::Workspace};
 
 /// Prints the packages to be bumped by `version` — or, with `output_path`,
 /// the release plan as JSON — following the same plan as `version` without
 /// applying it.
-pub(crate) fn run(verbose: bool, output_path: Option<&Path>) -> Result<()> {
-    let planned = plan::plan_version(&[], None)?;
+pub(crate) fn run(
+    workspace: Workspace,
+    config: &Config,
+    verbose: bool,
+    output_path: Option<&Path>,
+) -> Result<()> {
+    let planned = plan::plan_version(workspace, config, &[], None)?;
 
     if let Some(path) = output_path {
         return release_plan::write_file(

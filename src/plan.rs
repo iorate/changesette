@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env, fs, io,
+    fs, io,
     path::PathBuf,
 };
 
@@ -12,7 +12,7 @@ use crate::{
     bump::{self, Bump},
     changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
-    config::{self, ResolvedGroups},
+    config::{Config, ResolvedGroups},
     output::display_path,
     package_json::PackageJson,
     pre::{self, PreJson, PreMode},
@@ -50,18 +50,17 @@ impl PlannedVersion {
     }
 }
 
-/// Discovers the workspace containing the current directory and plans the
-/// pending `version` run, resolving the ignore set from the config or
-/// `cli_ignore` (using both is an error), modifying nothing on disk;
-/// `snapshot` is an error in pre mode.
+/// Plans the pending `version` run of `workspace`, resolving the ignore set
+/// from the config or `cli_ignore` (using both is an error), modifying
+/// nothing on disk; `snapshot` is an error in pre mode.
 pub(crate) fn plan_version(
+    workspace: Workspace,
+    config: &Config,
     cli_ignore: &[String],
     snapshot: Option<&Snapshot>,
 ) -> Result<PlannedVersion> {
-    let workspace = Workspace::discover(&env::current_dir()?)?;
-    let changeset_dir = workspace.root().join(".changeset");
-    let config = config::load(&changeset_dir)?;
-    let skip = SkipSet::load(&workspace, &config, cli_ignore)?;
+    let changeset_dir = workspace.changeset_dir();
+    let skip = SkipSet::load(&workspace, config, cli_ignore)?;
     let names: Vec<&str> = workspace.members().iter().map(Member::name).collect();
     let groups = config
         .resolve_groups(&names)
@@ -78,7 +77,7 @@ pub(crate) fn plan_version(
         pre::validate_tag(pre.tag())?;
     }
     let snapshot_versions = snapshot
-        .map(|snapshot| SnapshotVersions::resolve(snapshot, &config))
+        .map(|snapshot| SnapshotVersions::resolve(snapshot, config))
         .transpose()?;
 
     let mut changes = changeset::load(&changeset_dir)?;
