@@ -119,12 +119,12 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<Vec<Package>>)> {
         // npm looks for its candidate prefix among every matched
         // directory holding a package.json, so the member qualification
         // (and the duplicate-name exclusion) must not run first.
-        let listed = collect_packages(dir, &path, &patterns, pm)?;
-        if listed
+        let packages = collect_packages(dir, &path, &patterns, pm)?;
+        if packages
             .iter()
-            .any(|listed| is_same_file(&listed.dir, prefix_dir).unwrap_or(false))
+            .any(|package| is_same_file(&package.dir, prefix_dir).unwrap_or(false))
         {
-            return Ok((dir.to_path_buf(), Some(listed)));
+            return Ok((dir.to_path_buf(), Some(packages)));
         }
     }
 
@@ -175,7 +175,7 @@ pub(crate) fn normalize_root(cwd: &Path, dir: &Path) -> Result<PathBuf> {
 }
 
 impl Workspace {
-    /// Loads the workspace at `root`: with `packages`, the
+    /// Loads the workspace at `root`: with `rel_dirs`, the
     /// `changesette.packages` directories are the members and nothing is
     /// enumerated; otherwise the `pnpm-workspace.yaml`, `yarn.lock`, or
     /// `package.json` in `root` decides how, `reroot_packages` standing in
@@ -183,11 +183,11 @@ impl Workspace {
     /// workspace when it declares `workspaces`, a single package otherwise.
     pub(crate) fn load(
         root: &Path,
-        packages: Option<&[String]>,
+        rel_dirs: Option<&[String]>,
         reroot_packages: Option<Vec<Package>>,
     ) -> Result<Workspace> {
-        if let Some(rel_dirs) = packages {
-            let mut listed = Vec::new();
+        if let Some(rel_dirs) = rel_dirs {
+            let mut packages = Vec::new();
             for rel_dir in rel_dirs {
                 let dir = if rel_dir == "." {
                     root.to_path_buf()
@@ -201,7 +201,7 @@ impl Workspace {
                         display_path(&manifest)
                     )
                 };
-                listed.push(Package {
+                packages.push(Package {
                     dir,
                     rel_dir: rel_dir.clone(),
                     manifest,
@@ -211,14 +211,14 @@ impl Workspace {
             return Ok(Workspace::new(
                 root.to_path_buf(),
                 "packages from config",
-                qualify_packages(listed),
+                qualify_packages(packages),
             ));
         }
-        if let Some(listed) = reroot_packages {
+        if let Some(packages) = reroot_packages {
             return Ok(Workspace::new(
                 root.to_path_buf(),
                 PackageManager::Npm.name(),
-                qualify_packages(listed),
+                qualify_packages(packages),
             ));
         }
 
@@ -266,7 +266,7 @@ impl Workspace {
         // A single package takes the same qualification as any member;
         // failing it leaves a workspace with zero members rather than an
         // error.
-        let listed = vec![Package {
+        let packages = vec![Package {
             dir: root.to_path_buf(),
             rel_dir: ".".to_owned(),
             manifest: path,
@@ -275,7 +275,7 @@ impl Workspace {
         Ok(Workspace::new(
             root.to_path_buf(),
             "single package",
-            qualify_packages(listed),
+            qualify_packages(packages),
         ))
     }
 
