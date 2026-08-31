@@ -17,9 +17,6 @@ pub(crate) fn parse_rel_dir(text: &str) -> Result<String> {
     if text.contains('\\') {
         bail!("`\\` is not supported; use `/` as the separator")
     }
-    if text.starts_with('!') || text.contains(['*', '?', '[', ']', '{', '}']) {
-        bail!("wildcards are not supported; list each directory")
-    }
     let mut segs = Vec::new();
     for part in text.split('/') {
         if part.is_empty() || part == "." {
@@ -93,9 +90,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_wildcards() {
+    fn accepts_glob_like_names() {
         for text in ["packages/*", "a?", "[a]", "a]", "{a,b}", "a}", "!a", "**"] {
-            assert!(error(text).contains("wildcards"), "{text}");
+            assert_eq!(parse_rel_dir(text).unwrap(), text, "{text}");
         }
     }
 
