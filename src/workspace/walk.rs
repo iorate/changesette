@@ -73,14 +73,9 @@ fn unsupported_manifest(path: &Path) -> anyhow::Error {
 // The manifest probe runs before this, so the debug line only names real
 // candidates.
 fn excluded(rel_dir: &str, negations: &[Pattern]) -> bool {
-    let rel_manifest = if rel_dir == "." {
-        "package.json".to_owned()
-    } else {
-        format!("{rel_dir}/package.json")
-    };
     let excluded = negations
         .iter()
-        .any(|negation| negation.matches(&rel_manifest, true));
+        .any(|negation| negation.matches(rel_dir, true));
     if excluded {
         debug!("{rel_dir}: excluded by a negative workspace pattern");
     }
@@ -92,13 +87,15 @@ fn excluded(rel_dir: &str, negations: &[Pattern]) -> bool {
 type State = (usize, usize);
 
 // Adds the epsilon transitions: a globstar can consume zero segments, so a
-// state resting on one also rests past it. The last segment is always
-// `Glob("package.json")`, so `seg + 1` stays in bounds.
+// state resting on one also rests past it. A state at `segs().len()` is the
+// accepting sentinel: the whole pattern is consumed.
 fn closure(patterns: &[Pattern], mut states: Vec<State>) -> Vec<State> {
     let mut i = 0;
     while i < states.len() {
         let (pattern, seg) = states[i];
-        if matches!(patterns[pattern].segs()[seg], Seg::Globstar) {
+        if seg < patterns[pattern].segs().len()
+            && matches!(patterns[pattern].segs()[seg], Seg::Globstar)
+        {
             let next = (pattern, seg + 1);
             if !states.contains(&next) {
                 states.push(next);
@@ -132,7 +129,7 @@ impl Walker<'_> {
         // covers `x` itself.
         if states
             .iter()
-            .any(|&(pattern, seg)| seg == patterns[pattern].segs().len() - 1)
+            .any(|&(pattern, seg)| seg == patterns[pattern].segs().len())
         {
             let rel_dir = if rel.is_empty() { "." } else { rel };
             if probe_is_file(&dir.join("package.json")) {
@@ -148,8 +145,7 @@ impl Walker<'_> {
                 return Err(unsupported_manifest(&path));
             }
         }
-        // The final `package.json` segment names a file, so consuming it
-        // with a directory can never lead to a candidate. Every other
+        // The accepting sentinel has nothing left to consume. Every other
         // segment, a literal name included, is matched against the
         // directory entries: comparing the names rather than probing a
         // literal by `stat` keeps it exact on a case-insensitive filesystem,
@@ -157,7 +153,7 @@ impl Walker<'_> {
         let pending: Vec<State> = states
             .iter()
             .copied()
-            .filter(|&(pattern, seg_index)| seg_index != patterns[pattern].segs().len() - 1)
+            .filter(|&(pattern, seg_index)| seg_index != patterns[pattern].segs().len())
             .collect();
         if pending.is_empty() {
             return Ok(());
