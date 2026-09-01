@@ -1,9 +1,9 @@
-use std::{fs, io, io::Write, path::Path};
+use std::{fs, io, io::Write};
 
 use anyhow::{Context, Result};
 use tracing::info;
 
-use crate::{output::display_path, workspace::Workspace};
+use crate::workspace::Workspace;
 
 const README: &str = "# Changesets
 
@@ -30,9 +30,9 @@ const CONFIG: &str = "{
 
 /// Creates the `.changeset/` directory at the workspace root with a default
 /// README.md and config.json, creating whichever of them are missing.
-pub(crate) fn run(cwd: &Path, workspace: &Workspace) -> Result<()> {
+pub(crate) fn run(workspace: &Workspace) -> Result<()> {
     let changeset_dir = workspace.changeset_dir();
-    fs::create_dir_all(&changeset_dir).with_context(|| display_path(&changeset_dir))?;
+    fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
 
     let mut created = false;
     for (file_name, content) in [("README.md", README), ("config.json", CONFIG)] {
@@ -44,20 +44,17 @@ pub(crate) fn run(cwd: &Path, workspace: &Workspace) -> Result<()> {
         {
             Ok(mut file) => {
                 file.write_all(content.as_bytes())
-                    .with_context(|| display_path(&path))?;
-                info!("Created {}", workspace.display_path(cwd, &path));
+                    .with_context(|| path.display().to_string())?;
+                info!("Created {}", path.display());
                 created = true;
             }
             Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(err) => return Err(err).context(display_path(&path)),
+            Err(err) => return Err(err).context(path.display().to_string()),
         }
     }
 
     if !created {
-        info!(
-            "{} is already initialized",
-            workspace.display_path(cwd, &changeset_dir)
-        );
+        info!("{} is already initialized", changeset_dir.display());
     }
     Ok(())
 }

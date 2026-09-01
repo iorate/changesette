@@ -187,8 +187,8 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let config = config::load(&root.join(".changeset"))?;
     let workspace = Workspace::load(&root, config.packages.as_deref(), reroot_packages)?;
     match cli.command.unwrap_or(Command::Add(cli.add)) {
-        Command::Init => commands::init::run(&cwd, &workspace),
-        Command::Add(args) => commands::add::run(&cwd, &workspace, &config, args),
+        Command::Init => commands::init::run(&workspace),
+        Command::Add(args) => commands::add::run(&workspace, &config, args),
         Command::Version(args) => commands::version::run(workspace, &config, args),
         Command::Pre { command } => match command {
             PreCommand::Enter { tag } => commands::pre::enter(&workspace, &tag),
@@ -202,7 +202,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             commands::get_changelog_entry::run(&workspace, &package, &version)
         }
         Command::SetSummary { id, summary } => {
-            commands::set_summary::run(&cwd, &workspace, &id, &summary)
+            commands::set_summary::run(&workspace, &id, &summary)
         }
     }
 }

@@ -4,7 +4,6 @@ use anyhow::{Context, Result, bail};
 use tracing::info;
 
 use crate::{
-    output::display_path,
     pre::{self, PreJson, PreMode},
     workspace::Workspace,
 };
@@ -25,9 +24,9 @@ pub(crate) fn enter(workspace: &Workspace, tag: &str) -> Result<()> {
     if let Some(mut pre) = pre {
         pre.set_mode(PreMode::Pre);
         pre.set_tag(tag);
-        fs::write(pre.path(), pre.text()).with_context(|| display_path(pre.path()))?;
+        fs::write(pre.path(), pre.text()).with_context(|| pre.path().display().to_string())?;
     } else {
-        fs::create_dir_all(&changeset_dir).with_context(|| display_path(&changeset_dir))?;
+        fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
         pre::write_new(&changeset_dir, tag)?;
     }
 
@@ -47,7 +46,7 @@ pub(crate) fn exit(workspace: &Workspace) -> Result<()> {
     };
 
     pre.set_mode(PreMode::Exit);
-    fs::write(pre.path(), pre.text()).with_context(|| display_path(pre.path()))?;
+    fs::write(pre.path(), pre.text()).with_context(|| pre.path().display().to_string())?;
 
     info!("Exited pre mode\nRun `changesette version` to bump to final versions");
     Ok(())

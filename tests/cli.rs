@@ -32,12 +32,14 @@ fn stderr(output: &Output) -> String {
     String::from_utf8(output.stderr.clone()).unwrap()
 }
 
-fn expected_path(path: &Path) -> String {
-    if cfg!(windows) {
-        path.display().to_string().replace('\\', "/")
+fn expected_path(dir: &Path, rel: &str) -> String {
+    let mut path = if cfg!(windows) {
+        dir.to_path_buf()
     } else {
-        path.canonicalize().unwrap().display().to_string()
-    }
+        dir.canonicalize().unwrap()
+    };
+    path.extend(rel.split('/').filter(|part| !part.is_empty()));
+    path.display().to_string()
 }
 
 fn package_dir() -> TempDir {
@@ -57,9 +59,17 @@ fn added_path(err: &str) -> &str {
 }
 
 fn assert_changeset_path(line: &str) {
-    let name = line
-        .strip_prefix(".changeset/")
-        .and_then(|rest| rest.strip_suffix(".md"))
+    let path = Path::new(line);
+    assert!(path.is_absolute(), "unexpected path: {line}");
+    assert_eq!(
+        path.parent().and_then(Path::file_name),
+        Some(".changeset".as_ref()),
+        "unexpected path: {line}"
+    );
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".md"))
         .unwrap_or_else(|| panic!("unexpected path: {line}"));
     let words: Vec<&str> = name.split('-').collect();
     assert_eq!(words.len(), 3, "unexpected word count: {name}");
@@ -79,7 +89,11 @@ fn init_creates_the_changeset_directory_with_a_readme_and_a_config() {
     assert_eq!(stdout(&output), "");
     assert_eq!(
         stderr(&output),
-        "Created .changeset/README.md\nCreated .changeset/config.json\n"
+        format!(
+            "Created {}\nCreated {}\n",
+            expected_path(dir.path(), ".changeset/README.md"),
+            expected_path(dir.path(), ".changeset/config.json")
+        )
     );
     let readme = fs::read_to_string(dir.path().join(".changeset/README.md")).unwrap();
     assert!(readme.starts_with("# Changesets\n"), "{readme}");
@@ -97,7 +111,11 @@ fn init_creates_the_directory_at_the_workspace_root() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stderr(&output),
-        "Created ../../.changeset/README.md\nCreated ../../.changeset/config.json\n"
+        format!(
+            "Created {}\nCreated {}\n",
+            expected_path(dir.path(), ".changeset/README.md"),
+            expected_path(dir.path(), ".changeset/config.json")
+        )
     );
     assert!(dir.path().join(".changeset/README.md").is_file());
     assert!(!dir.path().join("packages/a/.changeset").exists());
@@ -111,7 +129,13 @@ fn init_backfills_missing_files_into_an_existing_directory() {
     let output = changesette(dir.path(), &["init"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
-    assert_eq!(stderr(&output), "Created .changeset/config.json\n");
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "Created {}\n",
+            expected_path(dir.path(), ".changeset/config.json")
+        )
+    );
     assert_eq!(
         fs::read_to_string(dir.path().join(".changeset/README.md")).unwrap(),
         "custom\n"
@@ -128,7 +152,13 @@ fn init_does_nothing_when_everything_exists() {
     let output = changesette(dir.path(), &["init"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
-    assert_eq!(stderr(&output), ".changeset is already initialized\n");
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "{} is already initialized\n",
+            expected_path(dir.path(), ".changeset")
+        )
+    );
     assert_eq!(dir_snapshot(dir.path()), before);
 }
 
@@ -542,13 +572,12 @@ fn add_from_a_subdirectory_targets_the_workspace_root() {
     assert!(output.status.success(), "{}", stderr(&output));
     let err = stderr(&output);
     let line = added_path(&err);
-    let rest = line
-        .strip_prefix("../../.changeset/")
-        .unwrap_or_else(|| panic!("unexpected path: {line}"));
-    #[expect(clippy::case_sensitive_file_extension_comparisons)]
-    let is_md = rest.ends_with(".md");
-    assert!(is_md, "{line}");
-    let content = fs::read_to_string(dir.path().join("packages/a").join(line)).unwrap();
+    assert_changeset_path(line);
+    assert!(
+        line.starts_with(&expected_path(dir.path(), ".changeset")),
+        "{line}"
+    );
+    let content = fs::read_to_string(line).unwrap();
     assert_eq!(content, "---\npkg-a: minor\n---\n\nAdd feature\n");
 }
 
@@ -662,7 +691,13 @@ fn set_summary_rewrites_the_summary() {
     );
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
-    assert_eq!(stderr(&output), "Updated .changeset/brave-owls-run.md\n");
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "Updated {}\n",
+            expected_path(dir.path(), ".changeset/brave-owls-run.md")
+        )
+    );
     let content = fs::read_to_string(dir.path().join(".changeset/brave-owls-run.md")).unwrap();
     assert_eq!(content, "---\nublacklist: minor\n---\n\nNew summary\n");
 }
@@ -767,7 +802,13 @@ fn set_summary_rewrites_a_pre_changeset() {
     );
     let output = changesette(dir.path(), &["set-summary", "pre/early", "New summary"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stderr(&output), "Updated .changeset/pre/early.md\n");
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "Updated {}\n",
+            expected_path(dir.path(), ".changeset/pre/early.md")
+        )
+    );
     let content = fs::read_to_string(dir.path().join(".changeset/pre/early.md")).unwrap();
     assert_eq!(content, "---\nublacklist: minor\n---\n\nNew summary\n");
 }
@@ -851,7 +892,7 @@ fn version_fails_for_a_changeset_naming_an_excluded_package() {
     assert!(
         err.contains(&format!(
             "debug: {}: not a workspace member: \"version\" is missing",
-            expected_path(&dir.path().join("package.json"))
+            expected_path(dir.path(), "package.json")
         )),
         "{err}"
     );
@@ -977,8 +1018,7 @@ fn get_packages_warns_about_excluded_candidates_and_omits_them() {
         "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"}]\n"
     );
     let err = stderr(&output);
-    let manifest =
-        |name: &str| expected_path(&dir.path().join("packages").join(name).join("package.json"));
+    let manifest = |name: &str| expected_path(dir.path(), &format!("packages/{name}/package.json"));
     assert!(!err.contains(&manifest("b")), "{err}");
     assert!(!err.contains(&manifest("c")), "{err}");
     assert!(
@@ -1044,7 +1084,7 @@ fn get_packages_debug_reports_the_member_list() {
     assert!(
         err.contains(&format!(
             "debug: workspace {} (npm): members: pkg-a (packages/a)",
-            expected_path(dir.path())
+            expected_path(dir.path(), "")
         )),
         "{err}"
     );
@@ -1064,7 +1104,7 @@ fn get_packages_debug_reports_an_empty_member_list() {
     assert!(
         err.contains(&format!(
             "debug: workspace {} (single package): no members",
-            expected_path(dir.path())
+            expected_path(dir.path(), "")
         )),
         "{err}"
     );
@@ -2444,7 +2484,7 @@ fn version_excludes_a_member_with_an_invalid_version_and_bumps_the_rest() {
     assert!(output.status.success(), "{}", stderr(&output));
     let err = stderr(&output);
     assert!(
-        err.contains(&expected_path(&dir.path().join("packages/b/package.json"))),
+        err.contains(&expected_path(dir.path(), "packages/b/package.json")),
         "{err}"
     );
     assert!(err.ends_with("Bumped pkg-a 3.1.4 -> 3.2.0\n"), "{err}");
@@ -3710,7 +3750,7 @@ fn get_packages_warns_about_a_broken_ancestor_manifest_in_npm_mode() {
     assert!(
         err.contains(&format!(
             "warning: {}: ",
-            expected_path(&dir.path().join("package.json"))
+            expected_path(dir.path(), "package.json")
         )) && err.contains("passed over while looking for an npm workspace root"),
         "{err}"
     );
@@ -3763,7 +3803,7 @@ fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
         stderr(&output),
         format!(
             "warning: {}: \"workspaces\" must be an array or an object: ignored, as Yarn ignores it\n",
-            expected_path(&dir.path().join("package.json"))
+            expected_path(dir.path(), "package.json")
         )
     );
 }
@@ -3772,7 +3812,7 @@ const PKG_A_JSON: &str =
     "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"}]\n";
 
 #[test]
-fn root_option_takes_a_relative_directory_and_keeps_paths_relative() {
+fn root_option_takes_a_relative_directory() {
     let dir = workspace_dir();
     let output = changesette(
         &dir.path().join("packages/a"),
@@ -3781,11 +3821,12 @@ fn root_option_takes_a_relative_directory_and_keeps_paths_relative() {
     assert!(output.status.success(), "{}", stderr(&output));
     let err = stderr(&output);
     let path = added_path(&err);
-    let name = path
-        .strip_prefix("../../")
-        .unwrap_or_else(|| panic!("{path}"));
-    assert_changeset_path(name);
-    assert!(dir.path().join(name).is_file());
+    assert_changeset_path(path);
+    assert!(
+        path.starts_with(&expected_path(dir.path(), ".changeset")),
+        "{path}"
+    );
+    assert!(Path::new(path).is_file());
 }
 
 #[test]
@@ -3808,7 +3849,7 @@ fn root_option_takes_an_absolute_directory_outside_the_working_directory() {
     let other = tempfile::tempdir().unwrap();
     let output = changesette(
         other.path(),
-        &["get-packages", "--root", &expected_path(dir.path())],
+        &["get-packages", "--root", &expected_path(dir.path(), "")],
     );
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), PKG_A_JSON);
@@ -3857,8 +3898,9 @@ fn init_with_root_creates_the_directory_there() {
     assert_eq!(
         stderr(&output),
         format!(
-            "Created {0}/.changeset/README.md\nCreated {0}/.changeset/config.json\n",
-            expected_path(&dir.path().join("packages/a"))
+            "Created {}\nCreated {}\n",
+            expected_path(dir.path(), "packages/a/.changeset/README.md"),
+            expected_path(dir.path(), "packages/a/.changeset/config.json")
         )
     );
     assert!(
@@ -3877,8 +3919,8 @@ fn root_option_rejects_a_missing_directory() {
     let err = stderr(&output);
     assert!(
         err.starts_with(&format!(
-            "error: invalid --root {}/missing: ",
-            expected_path(dir.path())
+            "error: invalid --root {}: ",
+            expected_path(dir.path(), "missing")
         )),
         "{err}"
     );
@@ -3893,7 +3935,7 @@ fn root_option_rejects_a_file() {
         stderr(&output),
         format!(
             "error: invalid --root {}: not a directory\n",
-            expected_path(&dir.path().join("package.json"))
+            expected_path(dir.path(), "package.json")
         )
     );
 }
@@ -3908,7 +3950,7 @@ fn root_option_rejects_a_directory_without_a_manifest() {
         stderr(&output),
         format!(
             "error: no package.json in {}; --root must name a workspace root or a package\n",
-            expected_path(&dir.path().join("empty"))
+            expected_path(dir.path(), "empty")
         )
     );
 }
@@ -3922,8 +3964,9 @@ fn root_option_accepts_a_backslash_separator() {
     assert_eq!(
         stderr(&output),
         format!(
-            "Created {0}/.changeset/README.md\nCreated {0}/.changeset/config.json\n",
-            expected_path(&dir.path().join("packages/a"))
+            "Created {}\nCreated {}\n",
+            expected_path(dir.path(), "packages/a/.changeset/README.md"),
+            expected_path(dir.path(), "packages/a/.changeset/config.json")
         )
     );
 }
@@ -3977,7 +4020,7 @@ fn config_packages_bypass_the_workspace_enumeration() {
         stderr(&output),
         format!(
             "debug: workspace {} (packages from config): members: pkg-a (packages/a)\n",
-            expected_path(dir.path())
+            expected_path(dir.path(), "")
         )
     );
 }
@@ -4002,7 +4045,7 @@ fn config_packages_are_read_from_the_forced_root() {
     fs::remove_file(dir.path().join("package.json")).unwrap();
     let output = changesette(
         other.path(),
-        &["get-packages", "--root", &expected_path(dir.path())],
+        &["get-packages", "--root", &expected_path(dir.path(), "")],
     );
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), PKG_A_JSON);
@@ -4018,7 +4061,7 @@ fn config_packages_entry_errors_name_the_config() {
         stderr(&output),
         format!(
             "error: {}: invalid \"changesette.packages\" entry \"../x\": `..` segments are not supported\n",
-            expected_path(&dir.path().join(".changeset/config.json"))
+            expected_path(dir.path(), ".changeset/config.json")
         )
     );
 }
@@ -4033,7 +4076,7 @@ fn config_packages_missing_directory_is_an_error() {
         stderr(&output),
         format!(
             "error: {}/packages/zzz/package.json: not found (listed in \"changesette.packages\")\n",
-            expected_path(dir.path())
+            expected_path(dir.path(), "")
         )
     );
 }
