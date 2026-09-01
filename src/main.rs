@@ -174,7 +174,7 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
-    let (root, reroot_packages) = match cli.root.filter(|dir| !dir.is_empty()) {
+    let (root, reroot) = match cli.root.filter(|dir| !dir.is_empty()) {
         Some(dir) => {
             let root = PathBuf::from(dir);
             workspace::validate_root(&root)?;
@@ -183,7 +183,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         None => workspace::find_root(&env::current_dir()?)?,
     };
     let config = config::load(&root.join(".changeset"))?;
-    let workspace = Workspace::load(&root, config.packages.as_deref(), reroot_packages)?;
+    let workspace = Workspace::load(&root, config.packages.as_deref(), reroot)?;
     match cli.command.unwrap_or(Command::Add(cli.add)) {
         Command::Init => commands::init::run(&workspace),
         Command::Add(args) => commands::add::run(&workspace, &config, args),

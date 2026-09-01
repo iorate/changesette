@@ -63,13 +63,15 @@ impl PackageManager {
     }
 }
 
+pub(crate) struct NpmReroot(Vec<Package>);
+
 /// Finds the workspace root containing `cwd`: the nearest ancestor with a
 /// `pnpm-workspace.yaml` or `yarn.lock`; without one, npm's rule applies:
 /// the nearest ancestor with a `package.json` is the root unless an ancestor
 /// above it declares `workspaces` listing it as a member, in which case that
 /// ancestor is, and the packages enumerated to decide so come along for
 /// [`Workspace::load`] to take as the members.
-pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<Vec<Package>>)> {
+pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<NpmReroot>)> {
     // Every `workspaces` field the corpus has below a pnpm-workspace.yaml
     // or a yarn.lock is a Yarn worktree child, a Yarn 1 leftover such as
     // `{"nohoist": [...]}` in a pnpm member, or a test fixture, never a
@@ -121,7 +123,7 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<Vec<Package>>)> {
             .iter()
             .any(|package| is_same_file(&package.dir, prefix_dir).unwrap_or(false))
         {
-            return Ok((dir.to_path_buf(), Some(packages)));
+            return Ok((dir.to_path_buf(), Some(NpmReroot(packages))));
         }
     }
 
@@ -147,13 +149,13 @@ impl Workspace {
     /// Loads the workspace at `root`: with `rel_dirs`, the
     /// `changesette.packages` directories are the members and nothing is
     /// enumerated; otherwise the `pnpm-workspace.yaml`, `yarn.lock`, or
-    /// `package.json` in `root` decides how, `reroot_packages` standing in
-    /// for the npm enumeration [`find_root`] already ran. The root is an npm
+    /// `package.json` in `root` decides how, `reroot` standing in for the
+    /// npm enumeration [`find_root`] already ran. The root is an npm
     /// workspace when it declares `workspaces`, a single package otherwise.
     pub(crate) fn load(
         root: &Path,
         rel_dirs: Option<&[String]>,
-        reroot_packages: Option<Vec<Package>>,
+        reroot: Option<NpmReroot>,
     ) -> Result<Workspace> {
         if let Some(rel_dirs) = rel_dirs {
             let mut packages = Vec::new();
@@ -183,7 +185,7 @@ impl Workspace {
                 qualify_packages(packages),
             ));
         }
-        if let Some(packages) = reroot_packages {
+        if let Some(NpmReroot(packages)) = reroot {
             return Ok(Workspace::new(
                 root.to_path_buf(),
                 PackageManager::Npm.name(),
@@ -488,7 +490,7 @@ fn collect_members(
     )?))
 }
 
-pub(crate) struct Package {
+struct Package {
     dir: PathBuf,
     rel_dir: String,
     manifest: PathBuf,
@@ -737,8 +739,8 @@ mod tests {
     }
 
     fn discover(cwd: &Path) -> Result<Workspace> {
-        let (root, reroot_packages) = find_root(cwd)?;
-        Workspace::load(&root, None, reroot_packages)
+        let (root, reroot) = find_root(cwd)?;
+        Workspace::load(&root, None, reroot)
     }
 
     fn discover_ok(case: &str) -> Workspace {
@@ -3305,11 +3307,11 @@ mod tests {
             "packages/b/package.json",
             "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
         );
-        let (root, reroot_packages) = find_root(&dir.path().join("packages/a")).unwrap();
+        let (root, reroot) = find_root(&dir.path().join("packages/a")).unwrap();
         assert_eq!(root, dir.path());
-        assert!(reroot_packages.is_some());
+        assert!(reroot.is_some());
         let packages = vec!["packages/b".to_owned()];
-        let workspace = Workspace::load(&root, Some(&packages), reroot_packages).unwrap();
+        let workspace = Workspace::load(&root, Some(&packages), reroot).unwrap();
         assert_eq!(names_and_rel_dirs(&workspace), [("pkg-b", "packages/b")]);
     }
 
