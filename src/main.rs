@@ -1,9 +1,4 @@
-use std::{
-    env,
-    ffi::OsString,
-    path::{Path, PathBuf},
-    process::ExitCode,
-};
+use std::{env, ffi::OsString, path::PathBuf, process::ExitCode};
 
 use clap::Parser;
 
@@ -179,10 +174,13 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
-    let cwd = env::current_dir()?;
     let (root, reroot_packages) = match cli.root.filter(|dir| !dir.is_empty()) {
-        Some(dir) => (workspace::normalize_root(&cwd, Path::new(&dir))?, None),
-        None => workspace::find_root(&cwd)?,
+        Some(dir) => {
+            let root = PathBuf::from(dir);
+            workspace::validate_root(&root)?;
+            (root, None)
+        }
+        None => workspace::find_root(&env::current_dir()?)?,
     };
     let config = config::load(&root.join(".changeset"))?;
     let workspace = Workspace::load(&root, config.packages.as_deref(), reroot_packages)?;

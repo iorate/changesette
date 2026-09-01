@@ -3,9 +3,8 @@ mod walk;
 
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
-    ffi::OsString,
     fs, io,
-    path::{Component, Path, PathBuf, Prefix},
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, bail};
@@ -135,41 +134,13 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<Vec<Package>>)> {
     Ok((dir, None))
 }
 
-pub(crate) fn normalize_root(cwd: &Path, dir: &Path) -> Result<PathBuf> {
-    let joined = cwd.join(dir);
-    if !joined.is_absolute() {
-        bail!(
-            "invalid --root {}: a drive-relative path is not supported",
-            dir.display()
-        )
-    }
-    let mut root = PathBuf::new();
-    for component in joined.components() {
-        match component {
-            Component::Prefix(prefix) => match prefix.kind() {
-                Prefix::VerbatimDisk(drive) => root.push(format!("{}:", char::from(drive))),
-                Prefix::VerbatimUNC(server, share) => {
-                    let mut unc = OsString::from(r"\\");
-                    unc.push(server);
-                    unc.push(r"\");
-                    unc.push(share);
-                    root.push(unc);
-                }
-                _ => root.push(component),
-            },
-            Component::RootDir | Component::Normal(_) => root.push(component),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                root.pop();
-            }
-        }
-    }
+pub(crate) fn validate_root(dir: &Path) -> Result<()> {
     let metadata =
-        fs::metadata(&root).with_context(|| format!("invalid --root {}", root.display()))?;
+        fs::metadata(dir).with_context(|| format!("invalid --root {}", dir.display()))?;
     if !metadata.is_dir() {
-        bail!("invalid --root {}: not a directory", root.display())
+        bail!("invalid --root {}: not a directory", dir.display())
     }
-    Ok(root)
+    Ok(())
 }
 
 impl Workspace {
@@ -3375,85 +3346,20 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_a_root_against_the_working_directory() {
-        let dir = tempfile::tempdir().unwrap();
-        let cwd = dir.path().join("a/b");
-        fs::create_dir_all(&cwd).unwrap();
-        assert_eq!(normalize_root(&cwd, Path::new(".")).unwrap(), cwd);
-        assert_eq!(
-            normalize_root(&cwd, Path::new("..")).unwrap(),
-            dir.path().join("a")
-        );
-        assert_eq!(
-            normalize_root(&cwd, Path::new("../..")).unwrap(),
-            dir.path()
-        );
-        assert_eq!(normalize_root(dir.path(), Path::new("a/b/")).unwrap(), cwd);
-        assert_eq!(
-            normalize_root(dir.path(), Path::new("./a/../a/./b")).unwrap(),
-            cwd
-        );
-        let other = tempfile::tempdir().unwrap();
-        assert_eq!(normalize_root(other.path(), &cwd).unwrap(), cwd);
-        assert!(
-            normalize_root(&cwd, Path::new(&"../".repeat(64)))
-                .unwrap()
-                .parent()
-                .is_none()
-        );
-    }
-
-    #[test]
     fn rejects_a_root_that_is_missing_or_a_file() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "file", "");
-        let err = format!(
-            "{:#}",
-            normalize_root(dir.path(), Path::new("missing")).unwrap_err()
-        );
+        let missing = dir.path().join("missing");
+        let err = format!("{:#}", validate_root(&missing).unwrap_err());
         assert!(
-            err.starts_with(&format!(
-                "invalid --root {}: ",
-                dir.path().join("missing").display()
-            )),
+            err.starts_with(&format!("invalid --root {}: ", missing.display())),
             "{err}"
         );
-        let err = format!(
-            "{:#}",
-            normalize_root(dir.path(), Path::new("file")).unwrap_err()
-        );
+        let file = dir.path().join("file");
+        let err = format!("{:#}", validate_root(&file).unwrap_err());
         assert_eq!(
             err,
-            format!(
-                "invalid --root {}: not a directory",
-                dir.path().join("file").display()
-            )
+            format!("invalid --root {}: not a directory", file.display())
         );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn normalizes_windows_root_spellings() {
-        let dir = tempfile::tempdir().unwrap();
-        let sub = dir.path().join("a").join("b");
-        fs::create_dir_all(&sub).unwrap();
-        assert_eq!(normalize_root(dir.path(), Path::new("a\\b")).unwrap(), sub);
-        assert_eq!(
-            normalize_root(dir.path(), Path::new("a\\b\\")).unwrap(),
-            sub
-        );
-        let err = format!(
-            "{:#}",
-            normalize_root(dir.path(), Path::new("C:x")).unwrap_err()
-        );
-        assert!(err.contains("drive-relative"), "{err}");
-        let Some(Component::Prefix(prefix)) = sub.components().next() else {
-            panic!("{}", sub.display());
-        };
-        let rootless = Path::new("\\").join(sub.strip_prefix(prefix.as_os_str()).unwrap());
-        assert!(!rootless.is_absolute());
-        assert_eq!(normalize_root(dir.path(), &rootless).unwrap(), sub);
-        let verbatim = PathBuf::from(format!("\\\\?\\{}", sub.display()));
-        assert_eq!(normalize_root(dir.path(), &verbatim).unwrap(), sub);
     }
 }

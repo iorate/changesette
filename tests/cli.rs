@@ -3814,19 +3814,21 @@ const PKG_A_JSON: &str =
 #[test]
 fn root_option_takes_a_relative_directory() {
     let dir = workspace_dir();
+    let cwd = dir.path().join("packages/a");
     let output = changesette(
-        &dir.path().join("packages/a"),
+        &cwd,
         &["add", "--patch", "pkg-a", "-m", "Fix", "--root", "../.."],
     );
     assert!(output.status.success(), "{}", stderr(&output));
     let err = stderr(&output);
     let path = added_path(&err);
-    assert_changeset_path(path);
     assert!(
-        path.starts_with(&expected_path(dir.path(), ".changeset")),
+        Path::new(path).starts_with(Path::new("../..").join(".changeset")),
         "{path}"
     );
-    assert!(Path::new(path).is_file());
+    let file = cwd.join(path);
+    assert_changeset_path(file.to_str().unwrap());
+    assert!(file.is_file());
 }
 
 #[test]
@@ -3895,12 +3897,13 @@ fn init_with_root_creates_the_directory_there() {
     let dir = workspace_dir();
     let output = changesette(dir.path(), &["init", "--root", "packages/a"]);
     assert!(output.status.success(), "{}", stderr(&output));
+    let changeset_dir = Path::new("packages/a").join(".changeset");
     assert_eq!(
         stderr(&output),
         format!(
             "Created {}\nCreated {}\n",
-            expected_path(dir.path(), "packages/a/.changeset/README.md"),
-            expected_path(dir.path(), "packages/a/.changeset/config.json")
+            changeset_dir.join("README.md").display(),
+            changeset_dir.join("config.json").display()
         )
     );
     assert!(
@@ -3917,13 +3920,7 @@ fn root_option_rejects_a_missing_directory() {
     let output = changesette(dir.path(), &["get-packages", "--root", "missing"]);
     assert!(!output.status.success());
     let err = stderr(&output);
-    assert!(
-        err.starts_with(&format!(
-            "error: invalid --root {}: ",
-            expected_path(dir.path(), "missing")
-        )),
-        "{err}"
-    );
+    assert!(err.starts_with("error: invalid --root missing: "), "{err}");
 }
 
 #[test]
@@ -3933,10 +3930,7 @@ fn root_option_rejects_a_file() {
     assert!(!output.status.success());
     assert_eq!(
         stderr(&output),
-        format!(
-            "error: invalid --root {}: not a directory\n",
-            expected_path(dir.path(), "package.json")
-        )
+        "error: invalid --root package.json: not a directory\n"
     );
 }
 
@@ -3948,10 +3942,7 @@ fn root_option_rejects_a_directory_without_a_manifest() {
     assert!(!output.status.success());
     assert_eq!(
         stderr(&output),
-        format!(
-            "error: no package.json in {}; --root must name a workspace root or a package\n",
-            expected_path(dir.path(), "empty")
-        )
+        "error: no package.json in empty; --root must name a workspace root or a package\n"
     );
 }
 
@@ -3961,12 +3952,13 @@ fn root_option_accepts_a_backslash_separator() {
     let dir = workspace_dir();
     let output = changesette(dir.path(), &["init", "--root", "packages\\a"]);
     assert!(output.status.success(), "{}", stderr(&output));
+    let changeset_dir = Path::new("packages\\a").join(".changeset");
     assert_eq!(
         stderr(&output),
         format!(
             "Created {}\nCreated {}\n",
-            expected_path(dir.path(), "packages/a/.changeset/README.md"),
-            expected_path(dir.path(), "packages/a/.changeset/config.json")
+            changeset_dir.join("README.md").display(),
+            changeset_dir.join("config.json").display()
         )
     );
 }
