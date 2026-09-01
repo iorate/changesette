@@ -104,7 +104,7 @@ mod tests {
     }
 
     fn load_err(case: &str) -> String {
-        format!("{:#}", PackageJson::load(&fixture(case)).err().unwrap())
+        format!("{:#}", PackageJson::load(&fixture(case)).err().unwrap()).replace('\\', "/")
     }
 
     #[test]
@@ -140,7 +140,7 @@ mod tests {
         let err = package_json
             .set_version(&semver::Version::new(10, 1, 0))
             .unwrap_err();
-        insta::assert_snapshot!(format!("{err:#}"));
+        insta::assert_snapshot!(format!("{err:#}").replace('\\', "/"));
     }
 
     #[test]

@@ -226,7 +226,7 @@ mod tests {
     }
 
     fn load_err(case: &str) -> String {
-        format!("{:#}", load(&fixture(case)).unwrap_err())
+        format!("{:#}", load(&fixture(case)).unwrap_err()).replace('\\', "/")
     }
 
     #[test]

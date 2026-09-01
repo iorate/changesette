@@ -779,7 +779,11 @@ mod tests {
     }
 
     fn discover_err(case: &str) -> String {
-        format!("{:#}", discover(&fixture(case)).unwrap_err())
+        let text = format!("{:#}", discover(&fixture(case)).unwrap_err());
+        match text.split_once(": ") {
+            Some((path, rest)) => format!("{}: {rest}", path.replace('\\', "/")),
+            None => text.replace('\\', "/"),
+        }
     }
 
     fn write(root: &Path, rel: &str, text: &str) {
@@ -2373,7 +2377,13 @@ mod tests {
         );
         let err = format!("{:#}", discover(&dir.path().join("app")).unwrap_err());
         assert!(
-            err.contains(&dir.path().join("app/package.json").display().to_string()),
+            err.contains(
+                &dir.path()
+                    .join("app")
+                    .join("package.json")
+                    .display()
+                    .to_string()
+            ),
             "{err}"
         );
     }
@@ -2526,7 +2536,9 @@ mod tests {
         assert!(
             err.contains(
                 &dir.path()
-                    .join("packages/a/package.json")
+                    .join("packages")
+                    .join("a")
+                    .join("package.json")
                     .display()
                     .to_string()
             ),
@@ -2928,7 +2940,9 @@ mod tests {
         assert!(
             err.contains(
                 &dir.path()
-                    .join("packages/a/package.json")
+                    .join("packages")
+                    .join("a")
+                    .join("package.json")
                     .display()
                     .to_string()
             ),
@@ -2969,10 +2983,12 @@ mod tests {
             );
             write(dir.path(), rel, "name: pkg\nversion: 1.0.0\n");
             let err = format!("{:#}", discover(dir.path()).unwrap_err());
+            let mut manifest = dir.path().to_path_buf();
+            manifest.extend(rel.split('/'));
             assert!(
                 err.contains(&format!(
                     "{}: only package.json manifests are supported",
-                    dir.path().join(rel).display()
+                    manifest.display()
                 )),
                 "{rel}: {err}"
             );
@@ -3226,7 +3242,10 @@ mod tests {
         assert!(
             err.contains(&format!(
                 "{}: not found (listed in \"changesette.packages\")",
-                dir.path().join("packages/missing/package.json").display()
+                dir.path()
+                    .join("packages/missing")
+                    .join("package.json")
+                    .display()
             )),
             "{err}"
         );
@@ -3240,7 +3259,8 @@ mod tests {
         assert!(
             err.starts_with(
                 &dir.path()
-                    .join("packages/a/package.json")
+                    .join("packages/a")
+                    .join("package.json")
                     .display()
                     .to_string()
             ),
@@ -3256,7 +3276,8 @@ mod tests {
         assert!(
             err.starts_with(
                 &dir.path()
-                    .join("packages/a/package.json")
+                    .join("packages/a")
+                    .join("package.json")
                     .display()
                     .to_string()
             ),
