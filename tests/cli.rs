@@ -4004,7 +4004,7 @@ fn config_packages_bypass_the_workspace_enumeration() {
     .unwrap();
     let output = changesette(dir.path(), &["get-packages"]);
     assert!(!output.status.success());
-    write_config_packages(dir.path(), &["./packages/a/"]);
+    write_config_packages(dir.path(), &["packages/a"]);
     let output = changesette(dir.path(), &["get-packages", "--log-level", "debug"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), PKG_A_JSON);
@@ -4074,4 +4074,16 @@ fn config_packages_missing_directory_is_an_error() {
             manifest.display()
         )
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn config_packages_mid_path_drive_prefix_fails_at_the_filesystem() {
+    let dir = workspace_dir();
+    write_config_packages(dir.path(), &["packages/C:x"]);
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.starts_with("error: "), "{err}");
+    assert!(err.contains("C:x"), "{err}");
 }
