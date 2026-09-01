@@ -2,7 +2,7 @@
 changesette: minor
 ---
 
-**Nearly breaking:** workspace discovery now follows each package manager more closely, so the workspace root and the members found for an existing repository can differ from those of the previous release.
+**Semi-breaking:** workspace discovery now follows each package manager more closely, so the workspace root and the members found for an existing repository can differ from those of the previous release.
 
 - A `yarn.lock` marks a Yarn workspace root. The nearest `pnpm-workspace.yaml` or `yarn.lock` above the working directory is the root (within one directory the former wins). Without either, npm's own rule applies: the nearest `package.json` is the root unless the `workspaces` of an ancestor lists it as a member, in which case that ancestor is. So a `workspaces` field below one of those markers, such as in a Yarn worktree child or a leftover `{"nohoist": [...]}` in a pnpm member, no longer becomes a root of its own; a leftover `workspaces` in an npm member no longer does either, as npm re-roots to the workspace root; and a package the npm root above does not list, such as an example, is a single package, as it is for npm.
 - While looking for an npm workspace root, a `package.json` above the nearest one that fails to parse is passed over with a warning, as npm reads it as `{}`; the nearest one still has to parse.
