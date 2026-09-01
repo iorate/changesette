@@ -257,7 +257,7 @@ To turn the hash into a link and add the pull request and author, as `@changeset
 
 ## CLI
 
-Every command accepts `--log-level <error|warn|info|debug>` (default `info`) after the subcommand, setting the lowest level of the messages printed to stderr.
+Every command accepts `--log-level <error|warn|info|debug>` (default `info`) after the subcommand, setting the lowest level of the messages printed to stderr. Every command also accepts `--root <dir>`, using the given directory as the root instead of finding it from the working directory (see [Workspaces](#workspaces)); the `CHANGESETTE_ROOT` environment variable does the same.
 
 ### `changesette init`
 
@@ -385,6 +385,12 @@ Default: `{ "useCalculatedVersion": false }`.
 
 Options for [snapshot releases](#snapshot-releases). `useCalculatedVersion` bases snapshot versions on the calculated next version instead of `0.0.0`; `prereleaseTemplate`, unset by default, sets the suffix template (`--snapshot-prerelease-template` overrides it).
 
+### `changesette`
+
+Default: `{}`.
+
+Settings specific to `changesette`. `packages`, unset by default, lists the directories of the workspace packages as literal `/`-separated paths relative to the root (`.` for the root itself), used instead of discovering them (see [Workspaces](#workspaces)).
+
 ## Workspaces
 
 `changesette` works on npm / yarn / pnpm workspaces, and its changeset files are format-compatible with changesets — but `version` deliberately does not behave like `changeset version` in a workspace. The dependency management changesets performs is two separate jobs, and `changesette` does neither: **internal dependency ranges are never rewritten, and dependents of a bumped package are never bumped** (so no "Updated dependencies" changelog lines either).
@@ -392,6 +398,8 @@ Options for [snapshot releases](#snapshot-releases). `useCalculatedVersion` base
 Ranges are a mechanical job, and the `workspace:` protocol of yarn and pnpm makes it the package manager's: in development a `workspace:` dependency always resolves to the local copy, and at publish the range is derived from the dependency's current version (`workspace:^` becomes a caret range, `workspace:*` an exact pin, and so on), so published ranges always reflect the versions the dependent was actually built against. Plain npm workspaces work too, but literal ranges like `^1.2.0` are then yours to maintain: rewrite them when the dependency moves to a new major (otherwise npm stops linking the local copy), and raise them when the dependent starts relying on newer behavior.
 
 Dependent releases are a judgment, not bookkeeping. Already-published dependents keep working after an internal dependency's major release: their published ranges still resolve to the old, compatible versions. So release a dependent when it has changes of its own; the one other reason is a consumer who cannot run two copies of the dependency side by side (a peer dependency conflict, a shared singleton) and so needs a published range that accepts the new major. Either way, name the dependent in a changeset like any other change.
+
+`changesette` resolves the workspace with its own implementation of the npm / yarn / pnpm rules, which can disagree with the package manager in corner cases. When it does, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
 
 ## Pre-release mode
 
