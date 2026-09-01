@@ -4,13 +4,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use tracing::info;
 
-use crate::{
-    bump::Bump,
-    changeset::LoadedChange,
-    output::{self, display_path},
-    plan::PlannedRelease,
-    pre::PreJson,
-};
+use crate::{bump::Bump, changeset::LoadedChange, output, plan::PlannedRelease, pre::PreJson};
 
 /// The JSON document that `version` and `status` write with `--output`,
 /// mirroring the upstream `ReleasePlan` type (plus `changelogEntry` on each
@@ -105,7 +99,7 @@ pub(crate) fn write_file(path: &Path, plan: &ReleasePlan) -> Result<()> {
         return output::print_json(plan);
     }
     let json = serde_json::to_string_pretty(plan)? + "\n";
-    fs::write(path, json).with_context(|| display_path(path))?;
-    info!("Wrote the release plan to {}", display_path(path));
+    fs::write(path, json).with_context(|| path.display().to_string())?;
+    info!("Wrote the release plan to {}", path.display());
     Ok(())
 }

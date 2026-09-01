@@ -15,8 +15,6 @@ use semver::Version;
 use serde_json::Value;
 use tracing::{debug, warn};
 
-use crate::output::display_path;
-
 #[derive(Debug)]
 pub(crate) struct Workspace {
     root: PathBuf,
@@ -131,7 +129,7 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<Vec<Package>>)> {
     let Some(dir) = prefix else {
         bail!(
             "no package.json found in {} or any parent directory",
-            display_path(cwd)
+            cwd.display()
         )
     };
     Ok((dir, None))
@@ -142,7 +140,7 @@ pub(crate) fn normalize_root(cwd: &Path, dir: &Path) -> Result<PathBuf> {
     if !joined.is_absolute() {
         bail!(
             "invalid --root {}: a drive-relative path is not supported",
-            display_path(dir)
+            dir.display()
         )
     }
     let mut root = PathBuf::new();
@@ -167,9 +165,9 @@ pub(crate) fn normalize_root(cwd: &Path, dir: &Path) -> Result<PathBuf> {
         }
     }
     let metadata =
-        fs::metadata(&root).with_context(|| format!("invalid --root {}", display_path(&root)))?;
+        fs::metadata(&root).with_context(|| format!("invalid --root {}", root.display()))?;
     if !metadata.is_dir() {
-        bail!("invalid --root {}: not a directory", display_path(&root))
+        bail!("invalid --root {}: not a directory", root.display())
     }
     Ok(root)
 }
@@ -198,7 +196,7 @@ impl Workspace {
                 let Some(value) = read_manifest(&manifest)? else {
                     bail!(
                         "{}: not found (listed in \"changesette.packages\")",
-                        display_path(&manifest)
+                        manifest.display()
                     )
                 };
                 packages.push(Package {
@@ -252,7 +250,7 @@ impl Workspace {
         let Some(value) = read_manifest(&path)? else {
             bail!(
                 "no package.json in {}; --root must name a workspace root or a package",
-                display_path(root)
+                root.display()
             )
         };
         let pm = PackageManager::Npm;
@@ -284,13 +282,13 @@ impl Workspace {
     // found".
     fn new(root: PathBuf, source: &'static str, members: Vec<Member>) -> Workspace {
         if members.is_empty() {
-            debug!("workspace {} ({source}): no members", display_path(&root));
+            debug!("workspace {} ({source}): no members", root.display());
         } else {
             // The list is built inside the macro so that the event macro's
             // enabled check makes it free at the default level.
             debug!(
                 "workspace {} ({source}): members: {}",
-                display_path(&root),
+                root.display(),
                 members
                     .iter()
                     .map(|member| format!("{} ({})", member.name, member.rel_dir))
@@ -325,22 +323,6 @@ impl Workspace {
             .collect::<Vec<_>>()
             .join(", ");
         bail!("package `{name}` not found; known packages: {known}")
-    }
-
-    /// Renders `path` relative to `cwd` for display; renders `path` as is
-    /// when either path is not under the workspace root.
-    pub(crate) fn display_path(&self, cwd: &Path, path: &Path) -> String {
-        match (cwd.strip_prefix(&self.root), path.strip_prefix(&self.root)) {
-            (Ok(cwd_rel), Ok(path_rel)) => {
-                let mut display = PathBuf::new();
-                for _ in cwd_rel.components() {
-                    display.push("..");
-                }
-                display.push(path_rel);
-                display_path(&display)
-            }
-            _ => display_path(path),
-        }
     }
 }
 
@@ -393,7 +375,7 @@ pub(crate) fn report_fs_error(path: &Path, err: &io::Error) {
         err.kind(),
         io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
     ) {
-        warn!("{}: {err}", display_path(path));
+        warn!("{}: {err}", path.display());
     }
 }
 
@@ -404,10 +386,10 @@ fn read_manifest(path: &Path) -> Result<Option<Value>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err).context(display_path(path)),
+        Err(err) => return Err(err).context(path.display().to_string()),
     };
     let value = serde_json::from_str(text.strip_prefix('\u{feff}').unwrap_or(&text))
-        .with_context(|| display_path(path))?;
+        .with_context(|| path.display().to_string())?;
     Ok(Some(value))
 }
 
@@ -418,9 +400,9 @@ pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err).context(display_path(path)),
+        Err(err) => return Err(err).context(path.display().to_string()),
     };
-    let value = serde_json::from_str(&text).with_context(|| display_path(path))?;
+    let value = serde_json::from_str(&text).with_context(|| path.display().to_string())?;
     Ok(Some(value))
 }
 
@@ -429,10 +411,10 @@ pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
 // absent, matching pnpm; any other type mismatch is an error, as it is in
 // pnpm itself.
 fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
-    let text = fs::read_to_string(path).with_context(|| display_path(path))?;
+    let text = fs::read_to_string(path).with_context(|| path.display().to_string())?;
     let docs = match Yaml::load_from_str(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
         Ok(docs) => docs,
-        Err(err) => bail!("{}: invalid YAML: {err}", display_path(path)),
+        Err(err) => bail!("{}: invalid YAML: {err}", path.display()),
     };
     // A missing or null document keeps an empty or comment-only file a
     // valid settings-only root.
@@ -443,7 +425,7 @@ fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
         return Ok(Vec::new());
     }
     let Yaml::Mapping(mapping) = doc else {
-        bail!("{}: not a YAML mapping", display_path(path))
+        bail!("{}: not a YAML mapping", path.display())
     };
     let packages = mapping
         .iter()
@@ -454,18 +436,12 @@ fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
     let items = match packages {
         Yaml::Sequence(items) => items,
         _ if packages.is_null() => return Ok(Vec::new()),
-        _ => bail!(
-            "{}: \"packages\" must be a list of strings",
-            display_path(path)
-        ),
+        _ => bail!("{}: \"packages\" must be a list of strings", path.display()),
     };
     let mut patterns = Vec::new();
     for item in items {
         let Some(pattern) = item.as_str() else {
-            bail!(
-                "{}: \"packages\" must be a list of strings",
-                display_path(path)
-            )
+            bail!("{}: \"packages\" must be a list of strings", path.display())
         };
         patterns.push(pattern.to_owned());
     }
@@ -505,13 +481,10 @@ fn workspaces_patterns(
             "\"workspaces\" must be an array or an object"
         };
         if pm == PackageManager::Yarn {
-            warn!(
-                "{}: {what}: ignored, as Yarn ignores it",
-                display_path(path)
-            );
+            warn!("{}: {what}: ignored, as Yarn ignores it", path.display());
             return Ok(None);
         }
-        bail!("{}: {what}", display_path(path))
+        bail!("{}: {what}", path.display())
     };
     let mut patterns = Vec::new();
     for item in items {
@@ -519,13 +492,13 @@ fn workspaces_patterns(
             if pm == PackageManager::Yarn {
                 warn!(
                     "{}: a non-string \"workspaces\" pattern is skipped, as Yarn skips it",
-                    display_path(path)
+                    path.display()
                 );
                 continue;
             }
             bail!(
                 "{}: \"workspaces\" patterns must be strings",
-                display_path(path)
+                path.display()
             )
         };
         patterns.push(pattern.to_owned());
@@ -639,13 +612,13 @@ fn enumerate(
         let compiled = pattern::compile(original).with_context(|| {
             format!(
                 "{}: invalid workspace pattern {original:?}",
-                display_path(manifest)
+                manifest.display()
             )
         })?;
         let Some((negated, compiled)) = compiled else {
             debug!(
                 "{}: the empty workspace pattern {original:?} matches nothing",
-                display_path(manifest)
+                manifest.display()
             );
             continue;
         };
@@ -681,7 +654,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
     let Some(object) = value.as_object() else {
         warn!(
             "{}: not a workspace member: the manifest is not a JSON object",
-            display_path(path)
+            path.display()
         );
         return None;
     };
@@ -689,14 +662,14 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
         None => {
             debug!(
                 "{}: not a workspace member: \"name\" is missing",
-                display_path(path)
+                path.display()
             );
             return None;
         }
         Some(Value::String(name)) if name.is_empty() => {
             warn!(
                 "{}: not a workspace member: \"name\" is an empty string",
-                display_path(path)
+                path.display()
             );
             return None;
         }
@@ -704,7 +677,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
         Some(_) => {
             warn!(
                 "{}: not a workspace member: \"name\" is not a string",
-                display_path(path)
+                path.display()
             );
             return None;
         }
@@ -713,7 +686,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
         None => {
             debug!(
                 "{}: not a workspace member: \"version\" is missing",
-                display_path(path)
+                path.display()
             );
             return None;
         }
@@ -721,7 +694,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
             let Ok(version) = version.parse::<Version>() else {
                 warn!(
                     "{}: not a workspace member: \"version\" {version:?} is not a valid semver",
-                    display_path(path)
+                    path.display()
                 );
                 return None;
             };
@@ -730,7 +703,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
         Some(_) => {
             warn!(
                 "{}: not a workspace member: \"version\" is not a string",
-                display_path(path)
+                path.display()
             );
             return None;
         }
@@ -774,7 +747,7 @@ fn exclude_duplicate_names(members: &mut Vec<Member>) {
             for member in group {
                 warn!(
                     "{}: not a workspace member: the name `{}` is used by more than one package",
-                    display_path(&member.dir.join("package.json")),
+                    member.dir.join("package.json").display(),
                     member.name
                 );
             }
@@ -806,7 +779,11 @@ mod tests {
     }
 
     fn discover_err(case: &str) -> String {
-        format!("{:#}", discover(&fixture(case)).unwrap_err())
+        let text = format!("{:#}", discover(&fixture(case)).unwrap_err());
+        match text.split_once(": ") {
+            Some((path, rest)) => format!("{}: {rest}", path.replace('\\', "/")),
+            None => text.replace('\\', "/"),
+        }
     }
 
     fn write(root: &Path, rel: &str, text: &str) {
@@ -2400,7 +2377,13 @@ mod tests {
         );
         let err = format!("{:#}", discover(&dir.path().join("app")).unwrap_err());
         assert!(
-            err.contains(&display_path(&dir.path().join("app/package.json"))),
+            err.contains(
+                &dir.path()
+                    .join("app")
+                    .join("package.json")
+                    .display()
+                    .to_string()
+            ),
             "{err}"
         );
     }
@@ -2551,7 +2534,14 @@ mod tests {
         write(dir.path(), "packages/a/package.json", "{ broken");
         let err = format!("{:#}", discover(dir.path()).unwrap_err());
         assert!(
-            err.contains(&display_path(&dir.path().join("packages/a/package.json"))),
+            err.contains(
+                &dir.path()
+                    .join("packages")
+                    .join("a")
+                    .join("package.json")
+                    .display()
+                    .to_string()
+            ),
             "{err}"
         );
     }
@@ -2948,7 +2938,14 @@ mod tests {
         let err = format!("{:#}", discover(dir.path()).unwrap_err());
         assert!(err.contains("invalid workspace pattern \"../b\""), "{err}");
         assert!(
-            err.contains(&display_path(&dir.path().join("packages/a/package.json"))),
+            err.contains(
+                &dir.path()
+                    .join("packages")
+                    .join("a")
+                    .join("package.json")
+                    .display()
+                    .to_string()
+            ),
             "{err}"
         );
     }
@@ -2986,10 +2983,12 @@ mod tests {
             );
             write(dir.path(), rel, "name: pkg\nversion: 1.0.0\n");
             let err = format!("{:#}", discover(dir.path()).unwrap_err());
+            let mut manifest = dir.path().to_path_buf();
+            manifest.extend(rel.split('/'));
             assert!(
                 err.contains(&format!(
                     "{}: only package.json manifests are supported",
-                    display_path(&dir.path().join(rel))
+                    manifest.display()
                 )),
                 "{rel}: {err}"
             );
@@ -3243,7 +3242,10 @@ mod tests {
         assert!(
             err.contains(&format!(
                 "{}: not found (listed in \"changesette.packages\")",
-                display_path(&dir.path().join("packages/missing/package.json"))
+                dir.path()
+                    .join("packages/missing")
+                    .join("package.json")
+                    .display()
             )),
             "{err}"
         );
@@ -3255,7 +3257,13 @@ mod tests {
         write(dir.path(), "packages/a/package.json", "{\n");
         let err = load_listed_err(dir.path(), &["packages/a"]);
         assert!(
-            err.starts_with(&display_path(&dir.path().join("packages/a/package.json"))),
+            err.starts_with(
+                &dir.path()
+                    .join("packages/a")
+                    .join("package.json")
+                    .display()
+                    .to_string()
+            ),
             "{err}"
         );
     }
@@ -3266,7 +3274,13 @@ mod tests {
         write(dir.path(), "packages/a", "not a directory\n");
         let err = load_listed_err(dir.path(), &["packages/a"]);
         assert!(
-            err.starts_with(&display_path(&dir.path().join("packages/a/package.json"))),
+            err.starts_with(
+                &dir.path()
+                    .join("packages/a")
+                    .join("package.json")
+                    .display()
+                    .to_string()
+            ),
             "{err}"
         );
     }
@@ -3400,7 +3414,7 @@ mod tests {
         assert!(
             err.starts_with(&format!(
                 "invalid --root {}: ",
-                display_path(&dir.path().join("missing"))
+                dir.path().join("missing").display()
             )),
             "{err}"
         );
@@ -3412,7 +3426,7 @@ mod tests {
             err,
             format!(
                 "invalid --root {}: not a directory",
-                display_path(&dir.path().join("file"))
+                dir.path().join("file").display()
             )
         );
     }

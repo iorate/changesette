@@ -8,7 +8,7 @@ use fast_glob::{glob_match, validate};
 use serde_json::{Map, Value};
 use tracing::warn;
 
-use crate::{output::display_path, workspace::read_json};
+use crate::workspace::read_json;
 
 /// The effective settings from `.changeset/config.json`.
 #[derive(Debug, Default)]
@@ -150,7 +150,7 @@ pub(crate) fn load(changeset_dir: &Path) -> Result<Config> {
     let Some(value) = read_json(&path)? else {
         return Ok(Config::default());
     };
-    load_value(&value).with_context(|| display_path(&path))
+    load_value(&value).with_context(|| path.display().to_string())
 }
 
 fn load_value(value: &Value) -> Result<Config> {
@@ -347,7 +347,7 @@ mod tests {
         fs::write(dir.path().join("config.json"), text).unwrap();
         let err = load(dir.path()).err().unwrap();
         format!("{err:#}").replace(
-            &display_path(&dir.path().join("config.json")),
+            &dir.path().join("config.json").display().to_string(),
             ".changeset/config.json",
         )
     }

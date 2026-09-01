@@ -4,8 +4,7 @@ use anyhow::{Context, Result, bail};
 use tracing::info;
 
 use crate::{
-    VersionArgs, config::Config, output::display_path, plan, release_plan, snapshot::Snapshot,
-    workspace::Workspace,
+    VersionArgs, config::Config, plan, release_plan, snapshot::Snapshot, workspace::Workspace,
 };
 
 /// Consumes every changeset: bumps each named package's package.json,
@@ -37,11 +36,11 @@ pub(crate) fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> R
     if in_pre {
         for change in &planned.consumed_changes {
             let path = pre_dir.join(&change.file_name);
-            if path.try_exists().with_context(|| display_path(&path))? {
-                bail!(
-                    "{}: already exists; refusing to overwrite",
-                    display_path(&path)
-                );
+            if path
+                .try_exists()
+                .with_context(|| path.display().to_string())?
+            {
+                bail!("{}: already exists; refusing to overwrite", path.display());
             }
         }
     }
@@ -53,19 +52,18 @@ pub(crate) fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> R
 
     if in_pre {
         if !planned.consumed_changes.is_empty() {
-            fs::create_dir_all(&pre_dir).with_context(|| display_path(&pre_dir))?;
+            fs::create_dir_all(&pre_dir).with_context(|| pre_dir.display().to_string())?;
         }
         for change in &planned.consumed_changes {
             let path = planned.changeset_dir.join(change.rel_path());
             let pre_path = pre_dir.join(&change.file_name);
-            fs::rename(&path, &pre_path).with_context(|| {
-                format!("{} -> {}", display_path(&path), display_path(&pre_path))
-            })?;
+            fs::rename(&path, &pre_path)
+                .with_context(|| format!("{} -> {}", path.display(), pre_path.display()))?;
         }
     } else {
         for change in &planned.consumed_changes {
             let path = planned.changeset_dir.join(change.rel_path());
-            fs::remove_file(&path).with_context(|| display_path(&path))?;
+            fs::remove_file(&path).with_context(|| path.display().to_string())?;
         }
         // Deleted even with nothing to release, so that an exited pre mode
         // always ends here; a snapshot run keeps it, leaving the exit to the
@@ -73,7 +71,7 @@ pub(crate) fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> R
         if let Some(pre) = &planned.pre
             && snapshot.is_none()
         {
-            fs::remove_file(pre.path()).with_context(|| display_path(pre.path()))?;
+            fs::remove_file(pre.path()).with_context(|| pre.path().display().to_string())?;
         }
     }
 

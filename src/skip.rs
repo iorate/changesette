@@ -6,7 +6,6 @@ use tracing::debug;
 use crate::{
     changeset::LoadedChange,
     config::Config,
-    output::display_path,
     workspace::{Member, Workspace},
 };
 
@@ -71,7 +70,7 @@ impl SkipSet {
             for (name, _) in &change.releases {
                 workspace
                     .member(name)
-                    .with_context(|| display_path(&changeset_dir.join(change.rel_path())))?;
+                    .with_context(|| changeset_dir.join(change.rel_path()).display().to_string())?;
             }
         }
 
@@ -87,7 +86,7 @@ impl SkipSet {
             } else if !not_skipped.is_empty() {
                 bail!(
                     "{}: cannot mix skipped packages ({}) and not skipped packages ({})",
-                    display_path(&changeset_dir.join(change.rel_path())),
+                    changeset_dir.join(change.rel_path()).display(),
                     quote_list(&skipped),
                     quote_list(&not_skipped)
                 );

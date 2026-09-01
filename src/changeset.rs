@@ -1,10 +1,15 @@
-use std::{collections::BTreeMap, fs, io, path::Path, sync::LazyLock};
+use std::{
+    collections::BTreeMap,
+    fs, io,
+    path::{Path, PathBuf},
+    sync::LazyLock,
+};
 
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use saphyr::{LoadableYamlNode, Mapping, Scalar, Yaml, YamlEmitter};
 
-use crate::{bump::Bump, output::display_path};
+use crate::bump::Bump;
 
 const IGNORED_FILE_NAMES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "GEMINI.md"];
 
@@ -41,13 +46,12 @@ impl LoadedChange {
         }
     }
 
-    /// The path of the file relative to the changeset directory,
-    /// `/`-separated.
-    pub(crate) fn rel_path(&self) -> String {
+    /// The path of the file relative to the changeset directory.
+    pub(crate) fn rel_path(&self) -> PathBuf {
         if self.in_pre {
-            format!("pre/{}", self.file_name)
+            Path::new("pre").join(&self.file_name)
         } else {
-            self.file_name.clone()
+            PathBuf::from(self.file_name.clone())
         }
     }
 }
@@ -78,12 +82,12 @@ fn scan(dir: &Path) -> Result<Option<Vec<String>>> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err).context(display_path(dir)),
+        Err(err) => return Err(err).context(dir.display().to_string()),
     };
 
     let mut file_names = Vec::new();
     for entry in entries {
-        let entry = entry.with_context(|| display_path(dir))?;
+        let entry = entry.with_context(|| dir.display().to_string())?;
         let Ok(file_name) = entry.file_name().into_string() else {
             continue;
         };
@@ -147,11 +151,12 @@ pub(crate) fn render(releases: &[(String, Option<Bump>)], summary: &str) -> Resu
 fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
     let file_path = dir.join(file_name);
 
-    let content = fs::read_to_string(&file_path).with_context(|| display_path(&file_path))?;
+    let content =
+        fs::read_to_string(&file_path).with_context(|| file_path.display().to_string())?;
     let Some(captures) = FRONTMATTER.captures(&content) else {
         bail!(
             "{}: missing frontmatter (expected `---`-delimited YAML)",
-            display_path(&file_path)
+            file_path.display()
         )
     };
     let frontmatter = &captures[1];
@@ -161,7 +166,7 @@ fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
         Ok(docs) => docs,
         Err(err) => bail!(
             "{}: invalid YAML in frontmatter: {err}",
-            display_path(&file_path)
+            file_path.display()
         ),
     };
 
@@ -174,7 +179,7 @@ fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
                 let Some(name) = key.as_str() else {
                     bail!(
                         "{}: invalid package name in frontmatter",
-                        display_path(&file_path)
+                        file_path.display()
                     )
                 };
                 let bump = match value.as_str() {
@@ -184,11 +189,11 @@ fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
                     Some("none") => None,
                     Some(other) => bail!(
                         "{}: unknown bump type {other:?}; expected major, minor, patch, or none",
-                        display_path(&file_path)
+                        file_path.display()
                     ),
                     None => bail!(
                         "{}: invalid bump type; expected major, minor, patch, or none",
-                        display_path(&file_path)
+                        file_path.display()
                     ),
                 };
                 releases.push((name.to_owned(), bump));
@@ -196,7 +201,7 @@ fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
         }
         Some(_) => bail!(
             "{}: frontmatter must be a mapping of package names to bump types",
-            display_path(&file_path)
+            file_path.display()
         ),
     }
 
@@ -221,7 +226,7 @@ mod tests {
     }
 
     fn load_err(case: &str) -> String {
-        format!("{:#}", load(&fixture(case)).unwrap_err())
+        format!("{:#}", load(&fixture(case)).unwrap_err()).replace('\\', "/")
     }
 
     #[test]
@@ -238,11 +243,18 @@ mod tests {
     fn loads_pre_changesets_last_with_prefixed_ids() {
         let changes = load_ok("with-pre");
         insta::assert_debug_snapshot!(changes);
-        insta::assert_debug_snapshot!(
-            changes
-                .iter()
-                .map(|change| (change.id(), change.rel_path()))
-                .collect::<Vec<_>>()
+        assert_eq!(
+            changes.iter().map(LoadedChange::id).collect::<Vec<_>>(),
+            [
+                "brave-lions-dance",
+                "pre/atomic-pugs-smile",
+                "pre/zany-moons-sing"
+            ]
+        );
+        assert_eq!(changes[0].rel_path(), Path::new("brave-lions-dance.md"));
+        assert_eq!(
+            changes[1].rel_path(),
+            Path::new("pre").join("atomic-pugs-smile.md")
         );
     }
 

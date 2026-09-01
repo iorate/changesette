@@ -17,7 +17,6 @@ use crate::{
     bump::Bump,
     changeset,
     config::Config,
-    output::display_path,
     skip::SkipSet,
     workspace::{Member, Workspace},
 };
@@ -25,7 +24,7 @@ use crate::{
 /// Creates a changeset file under the workspace root's `.changeset/`, taking
 /// the releases and summary from the flags and prompting interactively for
 /// missing inputs.
-pub(crate) fn run(cwd: &Path, workspace: &Workspace, config: &Config, args: AddArgs) -> Result<()> {
+pub(crate) fn run(workspace: &Workspace, config: &Config, args: AddArgs) -> Result<()> {
     ensure!(
         !args.open || (io::stdin().is_terminal() && io::stderr().is_terminal()),
         "cannot use --open in non-interactive mode"
@@ -47,7 +46,7 @@ pub(crate) fn run(cwd: &Path, workspace: &Workspace, config: &Config, args: AddA
         !packages.is_empty(),
         "no versionable packages found; ensure the packages are not private or ignored and have a version field in package.json"
     );
-    fs::create_dir_all(&changeset_dir).with_context(|| display_path(&changeset_dir))?;
+    fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
 
     let (releases, summary) = if args.empty {
         (Vec::new(), args.message.unwrap_or_default())
@@ -105,7 +104,7 @@ pub(crate) fn run(cwd: &Path, workspace: &Workspace, config: &Config, args: AddA
         .create_new(true)
         .open(&path)
         .and_then(|mut file| file.write_all(content.as_bytes()))
-        .with_context(|| display_path(&path))?;
+        .with_context(|| path.display().to_string())?;
 
     if !args.empty {
         let mut confirmation = String::from("Summary of changesets:");
@@ -122,7 +121,7 @@ pub(crate) fn run(cwd: &Path, workspace: &Workspace, config: &Config, args: AddA
         info!("{confirmation}");
     }
 
-    info!("Added {}", workspace.display_path(cwd, &path));
+    info!("Added {}", path.display());
 
     if args.open {
         open_editor(&path)?;
