@@ -4072,11 +4072,14 @@ fn config_packages_missing_directory_is_an_error() {
     write_config_packages(dir.path(), &["packages/a", "packages/zzz"]);
     let output = changesette(dir.path(), &["get-packages"]);
     assert!(!output.status.success());
+    let manifest = Path::new(&expected_path(dir.path(), ""))
+        .join("packages/zzz")
+        .join("package.json");
     assert_eq!(
         stderr(&output),
         format!(
-            "error: {}/packages/zzz/package.json: not found (listed in \"changesette.packages\")\n",
-            expected_path(dir.path(), "")
+            "error: {}: not found (listed in \"changesette.packages\")\n",
+            manifest.display()
         )
     );
 }
