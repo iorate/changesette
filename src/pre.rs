@@ -26,8 +26,6 @@ impl PreMode {
     }
 }
 
-/// A loaded `.changeset/pre.json` whose serialization preserves the original
-/// formatting and unknown fields, changing only the rewritten values.
 pub(crate) struct PreJson {
     path: PathBuf,
     root: CstRootNode,
@@ -38,7 +36,6 @@ pub(crate) struct PreJson {
 }
 
 impl PreJson {
-    /// Loads `changeset_dir/pre.json`, or `Ok(None)` when it does not exist.
     pub(crate) fn load(changeset_dir: &Path) -> Result<Option<Self>> {
         let path = changeset_dir.join("pre.json");
         let text = match fs::read_to_string(&path) {
@@ -104,7 +101,7 @@ impl PreJson {
         self.mode = mode;
     }
 
-    /// Sets the tag; `tag` must have passed `validate_tag`.
+    // `tag` must have passed `validate_tag`.
     pub(crate) fn set_tag(&mut self, tag: &str) {
         set_string_value(&self.tag_lit, tag);
         tag.clone_into(&mut self.tag);
@@ -115,8 +112,6 @@ impl PreJson {
     }
 }
 
-/// Checks that `tag` is usable as the leading identifiers of a semver
-/// pre-release, so that `-{tag}.{n}` is a valid version.
 pub(crate) fn validate_tag(tag: &str) -> Result<()> {
     // An empty pre-release parses, so the counter is appended before the
     // check to reject an empty tag along with the invalid ones.
@@ -126,7 +121,6 @@ pub(crate) fn validate_tag(tag: &str) -> Result<()> {
     Ok(())
 }
 
-/// Writes a fresh `pre.json` in pre mode.
 pub(crate) fn write_new(changeset_dir: &Path, tag: &str) -> Result<()> {
     let path = changeset_dir.join("pre.json");
     let text = format!("{{\n  \"mode\": \"pre\",\n  \"tag\": \"{tag}\"\n}}\n");

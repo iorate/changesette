@@ -7,10 +7,6 @@ use crate::{
     VersionArgs, config::Config, plan, release_plan, snapshot::Snapshot, workspace::Workspace,
 };
 
-/// Consumes every changeset: bumps each named package's package.json,
-/// upserts its CHANGELOG.md section, and deletes the consumed files — in pre
-/// mode planning prerelease versions and moving the consumed files to
-/// `.changeset/pre/` instead.
 pub(crate) fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<()> {
     let snapshot = args.snapshot.map(|tag| Snapshot {
         tag,

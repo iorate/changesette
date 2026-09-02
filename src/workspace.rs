@@ -56,8 +56,6 @@ impl PackageManager {
         }
     }
 
-    // pnpm (#1986) and Yarn always have the root as a workspace, and not
-    // even a negation excludes it; npm only when a pattern matches it.
     fn root_always(self) -> bool {
         self != PackageManager::Npm
     }
@@ -65,23 +63,8 @@ impl PackageManager {
 
 pub(crate) struct NpmReroot(Vec<Package>);
 
-/// Finds the workspace root containing `cwd`: the nearest ancestor with a
-/// `pnpm-workspace.yaml` or `yarn.lock`; without one, npm's rule applies:
-/// the nearest ancestor with a `package.json` is the root unless an ancestor
-/// above it declares `workspaces` listing it as a member, in which case that
-/// ancestor is, and the packages enumerated to decide so come along for
-/// [`Workspace::load`] to take as the members.
 pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<NpmReroot>)> {
-    // Every `workspaces` field the corpus has below a pnpm-workspace.yaml
-    // or a yarn.lock is a Yarn worktree child, a Yarn 1 leftover such as
-    // `{"nohoist": [...]}` in a pnpm member, or a test fixture, never a
-    // root of its own, and opening a member's manifest to find the root
-    // turns such a leftover into an error. Neither pnpm nor Yarn looks at
-    // the other's marker, and the lockfile a migration leaves behind sits
-    // beside the new pnpm-workspace.yaml (a settings-only one included).
     for dir in cwd.ancestors() {
-        // Yarn takes the nearest yarn.lock as its project root whether or
-        // not a package.json sits beside it.
         if probe_is_file(&dir.join("pnpm-workspace.yaml")) || probe_is_file(&dir.join("yarn.lock"))
         {
             return Ok((dir.to_path_buf(), None));
@@ -100,9 +83,6 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<NpmReroot>)> {
             }
             continue;
         };
-        // npm reads an ancestor above its candidate prefix as `{}` when
-        // the file fails to parse, whereas the candidate itself is opened
-        // by every later step and fails there.
         let value = match read_manifest(&path) {
             Ok(Some(value)) => value,
             Ok(None) => continue,
@@ -115,9 +95,9 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<NpmReroot>)> {
         let Some(patterns) = workspaces_patterns(&value, &path, pm)? else {
             continue;
         };
-        // npm looks for its candidate prefix among every matched
-        // directory holding a package.json, so the member qualification
-        // (and the duplicate-name exclusion) must not run first.
+        // The candidate prefix is looked for among every matched directory
+        // holding a package.json, so the member qualification (and the
+        // duplicate-name exclusion) must not run first.
         let packages = collect_packages(dir, &path, &patterns, pm)?;
         if packages
             .iter()
@@ -146,12 +126,6 @@ pub(crate) fn validate_root(dir: &Path) -> Result<()> {
 }
 
 impl Workspace {
-    /// Loads the workspace at `root`: with `rel_dirs`, the
-    /// `changesette.packages` directories are the members and nothing is
-    /// enumerated; otherwise the `pnpm-workspace.yaml`, `yarn.lock`, or
-    /// `package.json` in `root` decides how, `reroot` standing in for the
-    /// npm enumeration [`find_root`] already ran. The root is an npm
-    /// workspace when it declares `workspaces`, a single package otherwise.
     pub(crate) fn load(
         root: &Path,
         rel_dirs: Option<&[String]>,
@@ -276,8 +250,6 @@ impl Workspace {
         self.root.join(".changeset")
     }
 
-    /// In package-name order; empty when the globs match nothing or every
-    /// candidate fails member qualification.
     pub(crate) fn members(&self) -> &[Member] {
         &self.members
     }
@@ -308,27 +280,19 @@ impl Member {
         &self.dir
     }
 
-    /// The member directory relative to the workspace root, `/`-separated
-    /// and spelled as the pattern or `changesette.packages` entry had it;
-    /// `.` for the root itself.
     pub(crate) fn rel_dir(&self) -> &str {
         &self.rel_dir
     }
 
-    /// The manifest's top-level `version`, parsed at discovery; every member
-    /// has one, as versionless candidates are excluded.
     pub(crate) fn version(&self) -> &Version {
         &self.version
     }
 
-    /// Whether the manifest sets top-level `private` to boolean `true`.
     pub(crate) fn private(&self) -> bool {
         self.private
     }
 }
 
-/// Whether `path` is an existing file, following symlinks; a probe failure
-/// is never fatal, but [`report_fs_error`] decides whether it warns.
 pub(crate) fn probe_is_file(path: &Path) -> bool {
     match fs::metadata(path) {
         Ok(metadata) => metadata.is_file(),
@@ -339,7 +303,6 @@ pub(crate) fn probe_is_file(path: &Path) -> bool {
     }
 }
 
-/// Reports a filesystem error swallowed by discovery as a warning.
 pub(crate) fn report_fs_error(path: &Path, err: &io::Error) {
     // Plain absence — NotFound from a missing or dangling path, NotADirectory
     // from a path crossing a regular file — is an ordinary no-match for every
@@ -353,9 +316,7 @@ pub(crate) fn report_fs_error(path: &Path, err: &io::Error) {
     }
 }
 
-// Reads a package.json, treating a missing file as `None` and a parse
-// failure as an error. A UTF-8 BOM is stripped before parsing: BOM'd
-// manifests exist in the wild and pnpm accepts them.
+// BOM'd manifests exist in the wild, so the BOM is stripped before parsing.
 fn read_manifest(path: &Path) -> Result<Option<Value>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
@@ -367,9 +328,7 @@ fn read_manifest(path: &Path) -> Result<Option<Value>> {
     Ok(Some(value))
 }
 
-/// Reads `path` as JSON, treating a missing file as `None` and attaching the
-/// path to any error; unlike the workspace manifests, a BOM is not accepted,
-/// matching the upstream's plain `JSON.parse` of config.json.
+// Unlike `read_manifest`, a BOM is deliberately not accepted.
 pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
@@ -380,10 +339,8 @@ pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
     Ok(Some(value))
 }
 
-// Reads the `packages` patterns from a pnpm-workspace.yaml. A null
-// `packages` is the plain YAML spelling of an empty list and reads as
-// absent, matching pnpm; any other type mismatch is an error, as it is in
-// pnpm itself.
+// A null `packages` is the plain YAML spelling of an empty list and reads as
+// absent.
 fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
     let text = fs::read_to_string(path).with_context(|| path.display().to_string())?;
     let docs = match Yaml::load_from_str(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
@@ -422,11 +379,6 @@ fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
     Ok(patterns)
 }
 
-// A falsy `workspaces` (`null`, `false`, `0`, `""`) reads as absent, as npm
-// passes those over and Yarn ignores them. Any other invalid shape is an
-// error under npm, which fails the same way wherever it reads one; Yarn
-// ignores the field, and skips a non-string pattern, without a word, so a
-// warning keeps the mistake visible without changing the answer.
 fn workspaces_patterns(
     value: &Value,
     path: &Path,
@@ -626,13 +578,9 @@ fn enumerate(
     Ok(candidates)
 }
 
-// Applies the member qualification: a candidate without a nonempty string
-// `name` and a valid semver `version` is excluded rather than erroring, so a
-// repository with fixture or junk manifests still works; changesette cannot
-// address a nameless package anyway, and cannot bump a versionless one. A
-// missing `name` or `version` key is only reported at debug level — fixture,
-// private-root, and docs-site manifests omit them legitimately — while a key
-// carrying an invalid value can only be a mistake and warns.
+// A missing `name` or `version` key is only reported at debug level —
+// fixture, private-root, and docs-site manifests omit them legitimately —
+// while a key carrying an invalid value can only be a mistake and warns.
 fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<Member> {
     let Some(object) = value.as_object() else {
         warn!(
@@ -703,9 +651,6 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
     })
 }
 
-// Excludes every member of a duplicated name: changesette can only address
-// packages by name, so a duplicated one cannot be referred to at all, and an
-// error here would make repositories with duplicated fixture names unusable.
 // Qualification runs first, so a disqualified candidate sharing a real
 // package's name does not evict it. Aliases of one physical directory are
 // one package and collapse into the first; an `is_same_file` error counts as

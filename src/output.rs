@@ -14,8 +14,6 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
-/// Installs the global tracing subscriber that renders every event at or
-/// above `max_level` to stderr through [`Formatter`].
 pub(crate) fn init_subscriber(max_level: LevelFilter) {
     tracing_subscriber::fmt()
         .event_format(Formatter)
@@ -26,9 +24,6 @@ pub(crate) fn init_subscriber(max_level: LevelFilter) {
         .init();
 }
 
-/// Renders an event as `error: message`, `warning: message`, or
-/// `debug: message` — info messages are results of the normal flow and are
-/// printed bare, in the cargo / git style.
 pub(crate) struct Formatter;
 
 impl<S, N> FormatEvent<S, N> for Formatter
@@ -75,9 +70,6 @@ impl Write for LenientStderr {
     }
 }
 
-/// Prints `value` as JSON and a newline to stdout — pretty-printed when
-/// stdout is a terminal, single-line otherwise; a broken pipe counts as
-/// success.
 pub(crate) fn print_json(value: &impl Serialize) -> Result<()> {
     let json = if io::stdout().is_terminal() {
         serde_json::to_string_pretty(value)?
@@ -87,8 +79,6 @@ pub(crate) fn print_json(value: &impl Serialize) -> Result<()> {
     print_line(&json)
 }
 
-/// Prints `text` and a newline to stdout, flushing immediately; a broken
-/// pipe counts as success.
 pub(crate) fn print_line(text: &str) -> Result<()> {
     let mut stdout = io::stdout().lock();
     match writeln!(stdout, "{text}").and_then(|()| stdout.flush()) {

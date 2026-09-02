@@ -8,8 +8,6 @@ use crate::{
     workspace::Workspace,
 };
 
-/// Enters pre-release mode by writing `.changeset/pre.json` with `tag`; it
-/// is an error to already be in pre mode.
 pub(crate) fn enter(workspace: &Workspace, tag: &str) -> Result<()> {
     let changeset_dir = workspace.changeset_dir();
     let pre = PreJson::load(&changeset_dir)?;
@@ -36,9 +34,7 @@ pub(crate) fn enter(workspace: &Workspace, tag: &str) -> Result<()> {
     Ok(())
 }
 
-/// Exits pre-release mode by flipping `.changeset/pre.json` to the exited
-/// state; it is an error not to have a pre.json, while exiting twice
-/// succeeds.
+// Exiting twice is deliberately not an error.
 pub(crate) fn exit(workspace: &Workspace) -> Result<()> {
     let changeset_dir = workspace.changeset_dir();
     let Some(mut pre) = PreJson::load(&changeset_dir)? else {

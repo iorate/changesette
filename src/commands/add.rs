@@ -21,9 +21,6 @@ use crate::{
     workspace::{Member, Workspace},
 };
 
-/// Creates a changeset file under the workspace root's `.changeset/`, taking
-/// the releases and summary from the flags and prompting interactively for
-/// missing inputs.
 pub(crate) fn run(workspace: &Workspace, config: &Config, args: AddArgs) -> Result<()> {
     ensure!(
         !args.open || (io::stdin().is_terminal() && io::stderr().is_terminal()),

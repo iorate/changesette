@@ -20,16 +20,14 @@ use crate::{
     workspace::{Member, Workspace},
 };
 
-/// A planned `version` run: the changesets to consume and the releases to
-/// apply, produced by `plan_version` without modifying anything on disk.
 pub(crate) struct PlannedVersion {
     pub(crate) workspace: Workspace,
     pub(crate) changeset_dir: PathBuf,
     pub(crate) pre: Option<PreJson>,
-    /// Every unreleased changeset, the ones naming only skipped packages
-    /// included; the release plan reports all of them.
+    // The release plan reports every unreleased changeset, the ones naming
+    // only skipped packages included, so `changes` stays unfiltered beside
+    // the skip-filtered `consumed_changes`.
     pub(crate) changes: Vec<LoadedChange>,
-    /// The changesets `version` consumes, skip-filtered.
     pub(crate) consumed_changes: Vec<LoadedChange>,
     pub(crate) releases: Vec<PlannedRelease>,
 }
@@ -39,7 +37,6 @@ fn pre_state(pre: Option<&PreJson>) -> Option<&PreJson> {
 }
 
 impl PlannedVersion {
-    /// The pre state when in pre mode.
     pub(crate) fn in_pre(&self) -> Option<&PreJson> {
         pre_state(self.pre.as_ref())
     }
@@ -49,9 +46,6 @@ impl PlannedVersion {
     }
 }
 
-/// Plans the pending `version` run of `workspace`, resolving the ignore set
-/// from the config or `cli_ignore` (using both is an error), modifying
-/// nothing on disk; `snapshot` is an error in pre mode.
 pub(crate) fn plan_version(
     workspace: Workspace,
     config: &Config,
@@ -107,21 +101,13 @@ pub(crate) fn plan_version(
 
 pub(crate) struct PlannedRelease {
     pub(crate) name: String,
-    /// The widest bump requested for the package; `None` when it is only
-    /// ever named with the `none` type.
     pub(crate) bump: Option<Bump>,
     pub(crate) old_version: Version,
     pub(crate) new_version: Version,
-    /// The ids of the changesets naming this package (`none` entries
-    /// included), in load order (root changesets first, then `pre/`).
     pub(crate) changeset_ids: Vec<String>,
-    /// The body of the new `## <new_version>` section, without the heading;
-    /// `None` for a `None` bump.
     pub(crate) changelog_entry: Option<String>,
 }
 
-// Plans the releases requested by `changes` (plus, when exiting pre mode,
-// the members still on a pre-release version), modifying nothing on disk.
 fn plan_releases(
     workspace: &Workspace,
     changes: &[LoadedChange],
@@ -131,8 +117,8 @@ fn plan_releases(
     groups: &ResolvedGroups,
 ) -> Result<Vec<PlannedRelease>> {
     let mut max_bumps = changeset::max_bumps(changes);
-    // The upstream applies the group passes before the pre exit rescue, so a
-    // rescued member does not pull its group along.
+    // The group passes run before the pre exit rescue so that a rescued
+    // member does not pull its group along.
     let overrides = apply_groups(
         workspace,
         groups,
@@ -201,23 +187,13 @@ fn plan_releases(
     Ok(releases)
 }
 
-// The per-member adjustments the group passes make beyond `max_bumps`.
 struct GroupOverrides {
-    // The `old_version` a group member plans against instead of its own:
-    // the highest current version in its group.
     old_versions: BTreeMap<String, Version>,
-    // The pre-release counter a group member uses in pre mode: the highest
-    // `pre_counter` in its group.
     pre_counters: BTreeMap<String, u64>,
 }
 
-// Applies the `fixed` and `linked` group semantics to `max_bumps`, following
-// the upstream matchFixedConstraint and applyLinks: when a group has a
-// releasing member, `fixed` releases every non-skipped member at the group's
-// widest bump, while `linked` only aligns the members already releasing;
-// both plan against the group's highest current version. One pass per kind
-// reaches the fixed point because config validation keeps the groups
-// disjoint and changesette adds no dependents.
+// One pass per kind reaches the fixed point because config validation keeps
+// the groups disjoint and changesette adds no dependents.
 fn apply_groups<'a>(
     workspace: &'a Workspace,
     groups: &ResolvedGroups,
@@ -270,7 +246,7 @@ fn apply_groups<'a>(
     if let Some(tag) = pre_tag {
         // The old_version override alone would miss a member whose version
         // is low but whose counter is high, so the counter is aligned
-        // separately, as the upstream getPreInfo does with preVersions.
+        // separately.
         for group in groups.fixed.iter().chain(&groups.linked) {
             let mut counter = 0;
             for name in group {
@@ -288,8 +264,6 @@ fn apply_groups<'a>(
     })
 }
 
-// The widest bump among the group's releasing members, or `None` when no
-// member releases (a `none`-only entry does not count as releasing).
 fn group_max_bump(group: &[String], max_bumps: &BTreeMap<&str, Option<Bump>>) -> Option<Bump> {
     group
         .iter()
@@ -297,8 +271,7 @@ fn group_max_bump(group: &[String], max_bumps: &BTreeMap<&str, Option<Bump>>) ->
         .max()
 }
 
-// The highest current version among all group members, the skipped ones
-// included as in the upstream getCurrentHighestVersion.
+// The skipped members count too; only the bump application excludes them.
 fn group_highest_version(workspace: &Workspace, group: &[String]) -> Result<Version> {
     let mut highest: Option<&Version> = None;
     for name in group {
@@ -312,12 +285,9 @@ fn group_highest_version(workspace: &Workspace, group: &[String]) -> Result<Vers
         .clone())
 }
 
-// Forces a patch bump on every member left on a pre-release version that no
-// changeset releases, and on every non-skipped member of a `fixed` /
-// `linked` group containing such a version — each at its own version, as the
-// upstream group override of preVersions makes the exit rescue do.
-// `next_version` then merely drops the pre-release, and the empty summary
-// list renders a heading-only changelog section.
+// Each rescued member is planned at its own version: `next_version` then
+// merely drops the pre-release, and the empty summary list renders a
+// heading-only changelog section.
 fn rescue_prereleases<'a>(
     workspace: &'a Workspace,
     skip: &SkipSet,
@@ -326,8 +296,8 @@ fn rescue_prereleases<'a>(
 ) -> Result<()> {
     let mut group_rescued = BTreeSet::new();
     for group in groups.fixed.iter().chain(&groups.linked) {
-        // The skipped members count here too, like in the upstream
-        // getHighestPreVersion; only the rescue itself excludes them.
+        // The skipped members count here too; only the rescue itself excludes
+        // them.
         let mut on_prerelease = false;
         for name in group {
             if !workspace.member(name)?.version().pre.is_empty() {
@@ -362,8 +332,6 @@ impl StagedWrite {
     }
 }
 
-/// Stages the package.json and CHANGELOG.md writes that apply `releases`,
-/// modifying nothing on disk.
 pub(crate) fn stage_writes(
     workspace: &Workspace,
     releases: &[PlannedRelease],

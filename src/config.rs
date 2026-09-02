@@ -10,38 +10,22 @@ use tracing::warn;
 
 use crate::workspace::read_json;
 
-/// The effective settings from `.changeset/config.json`.
 #[derive(Debug, Default)]
 pub(crate) struct Config {
-    // The patterns of the `ignore` setting as written; `resolve_ignore`
-    // expands them into package names.
     ignore: Vec<String>,
-    // The pattern groups of the `fixed` / `linked` settings as written;
-    // `resolve_groups` expands them into package-name groups.
     fixed: Vec<Vec<String>>,
     linked: Vec<Vec<String>>,
-    /// Whether private packages are versioned, per the `privatePackages`
-    /// setting.
     pub(crate) private_packages_version: bool,
-    /// Whether snapshot versions build on the normally calculated version
-    /// instead of `0.0.0`, per the `snapshot.useCalculatedVersion` setting.
     pub(crate) snapshot_use_calculated_version: bool,
-    /// The suffix template from the `snapshot.prereleaseTemplate` setting;
-    /// never empty.
     pub(crate) snapshot_prerelease_template: Option<String>,
     pub(crate) packages: Option<Vec<String>>,
 }
 
 impl Config {
-    /// Whether the `ignore` setting defines any patterns.
     pub(crate) fn has_ignore(&self) -> bool {
         !self.ignore.is_empty()
     }
 
-    /// Expands the `ignore` patterns against `names` and returns the matching
-    /// names in input order, with a `!`-prefixed pattern un-ignoring the
-    /// names it matches, in order; a pattern matching no name matches
-    /// nothing.
     pub(crate) fn resolve_ignore<'a>(
         &self,
         names: impl IntoIterator<Item = &'a str>,
@@ -49,10 +33,6 @@ impl Config {
         expand_patterns(&self.ignore, names)
     }
 
-    /// Expands the `fixed` / `linked` pattern groups against `names` with the
-    /// same ordered `!` negation as `resolve_ignore`, erroring on a package
-    /// in multiple same-kind groups or in both a `fixed` and a `linked`
-    /// group, and warning on a pattern matching no package.
     pub(crate) fn resolve_groups(&self, names: &[&str]) -> Result<ResolvedGroups> {
         let expand = |groups: &[Vec<String>]| -> Vec<Vec<String>> {
             groups
@@ -76,10 +56,9 @@ impl Config {
 
         for (key, groups) in [("fixed", &self.fixed), ("linked", &self.linked)] {
             for pattern in groups.iter().flatten() {
-                // Following the upstream getUnmatchedPatterns, each pattern
-                // is judged alone, which is exactly what the leading `!` of
-                // fast-glob does, so the pattern is matched as written here —
-                // unlike the ordered expansion above.
+                // Each pattern is judged alone, unlike the ordered expansion
+                // above, so it is handed to the matcher as written, its
+                // leading `!` included.
                 if !names.iter().any(|name| glob_match(pattern, *name)) {
                     warn!(
                         "{key}: the package or glob {pattern:?} does not match any package in the workspace"
@@ -92,8 +71,6 @@ impl Config {
     }
 }
 
-/// The `fixed` / `linked` groups expanded into package names by
-/// `Config::resolve_groups`.
 pub(crate) struct ResolvedGroups {
     pub(crate) fixed: Vec<Vec<String>>,
     pub(crate) linked: Vec<Vec<String>>,
@@ -122,8 +99,6 @@ fn expand_patterns<'a>(
     resolved
 }
 
-// Repeated leading `!`s toggle the negation as in the upstream picomatch, so
-// `!!pkg-a` is the plain pattern `pkg-a` again.
 fn split_negation(pattern: &str) -> (bool, &str) {
     let body = pattern.trim_start_matches('!');
     ((pattern.len() - body.len()) % 2 == 1, body)
@@ -143,8 +118,6 @@ fn check_group_duplicates(key: &str, groups: &[Vec<String>]) -> Result<()> {
     Ok(())
 }
 
-/// Loads the supported subset of `changeset_dir/config.json`, treating a
-/// missing file as all defaults and ignoring unknown keys.
 pub(crate) fn load(changeset_dir: &Path) -> Result<Config> {
     let path = changeset_dir.join("config.json");
     let Some(value) = read_json(&path)? else {
@@ -445,8 +418,6 @@ mod tests {
         load_ok("{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]], \"linked\": [[\"@scope/*\"]] }\n");
     }
 
-    // Runs `f` under a subscriber writing to a buffer, and returns what the
-    // stderr layer would have printed.
     fn capture_output(f: impl FnOnce()) -> String {
         #[derive(Clone, Default)]
         struct Buffer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);

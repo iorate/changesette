@@ -6,14 +6,10 @@ use tracing::info;
 
 use crate::{bump::Bump, changeset::LoadedChange, output, plan::PlannedRelease, pre::PreJson};
 
-/// The JSON document that `version` and `status` write with `--output`,
-/// mirroring the upstream `ReleasePlan` type (plus `changelogEntry` on each
-/// release).
 #[derive(Serialize)]
 pub(crate) struct ReleasePlan {
     pub(crate) changesets: Vec<ChangesetEntry>,
     pub(crate) releases: Vec<Release>,
-    /// The state of `.changeset/pre.json`, absent when there is no such file.
     #[serde(rename = "preState", skip_serializing_if = "Option::is_none")]
     pub(crate) pre_state: Option<PreState>,
 }
@@ -46,11 +42,7 @@ pub(crate) struct Release {
     pub(crate) bump: &'static str,
     pub(crate) old_version: String,
     pub(crate) new_version: String,
-    /// The ids of the changesets naming this package (`none` entries
-    /// included), in load order (root changesets first, then `pre/`).
     pub(crate) changesets: Vec<String>,
-    /// The body of the new `## <new_version>` section, without the heading;
-    /// absent for `none`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) changelog_entry: Option<String>,
 }
