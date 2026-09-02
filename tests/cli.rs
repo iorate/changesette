@@ -852,8 +852,7 @@ fn get_packages_keeps_dirs_relative_to_the_root_from_a_subdirectory() {
     );
 }
 
-#[test]
-fn get_packages_fails_on_a_parent_directory_pattern() {
+fn sibling_pattern_dir() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join("ws")).unwrap();
     fs::write(
@@ -867,12 +866,52 @@ fn get_packages_fails_on_a_parent_directory_pattern() {
         "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
     )
     .unwrap();
+    dir
+}
+
+const SIBLING_A_JSON: &str =
+    "[{\"name\":\"pkg-a\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"../sibling/a\"}]\n";
+
+#[test]
+fn get_packages_reports_a_member_outside_the_root() {
+    let dir = sibling_pattern_dir();
     let output = changesette(&dir.path().join("ws"), &["get-packages"]);
-    assert!(!output.status.success());
-    let err = stderr(&output);
-    assert!(
-        err.contains("invalid workspace pattern \"../sibling/*\""),
-        "{err}"
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), SIBLING_A_JSON);
+}
+
+#[test]
+fn get_packages_reports_a_member_outside_a_relative_root() {
+    let dir = sibling_pattern_dir();
+    let output = changesette(dir.path(), &["get-packages", "--root", "ws"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), SIBLING_A_JSON);
+}
+
+#[test]
+fn a_yarn_root_listed_by_a_parent_pattern_is_expanded_once() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("root/packages/a")).unwrap();
+    fs::write(dir.path().join("root/yarn.lock"), "").unwrap();
+    fs::write(
+        dir.path().join("root/package.json"),
+        "{ \"workspaces\": [\"../*\", \"packages/*\"] }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("root/packages/a/package.json"),
+        "{ \"name\": \"pkg-a\", \"version\": \"1.0\" }\n",
+    )
+    .unwrap();
+    let output = changesette(&dir.path().join("root"), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "[]\n");
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "warning: {}: not a workspace member: \"version\" \"1.0\" is not a valid semver\n",
+            expected_path(dir.path(), "root/packages/a/package.json")
+        )
     );
 }
 
@@ -3999,7 +4038,7 @@ fn config_packages_bypass_the_workspace_enumeration() {
     let dir = workspace_dir();
     fs::write(
         dir.path().join("package.json"),
-        "{\n  \"workspaces\": [\"../sibling/*\"]\n}\n",
+        "{\n  \"workspaces\": [\"packages/../*\"]\n}\n",
     )
     .unwrap();
     let output = changesette(dir.path(), &["get-packages"]);
@@ -4073,6 +4112,22 @@ fn config_packages_missing_directory_is_an_error() {
             "error: {}: not found (listed in \"changesette.packages\")\n",
             manifest.display()
         )
+    );
+}
+
+#[test]
+fn config_packages_aliases_collapse_into_the_first_listed_spelling() {
+    let dir = workspace_dir();
+    write_config_packages(dir.path(), &["packages/a", "./packages/a"]);
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), PKG_A_JSON);
+    write_config_packages(dir.path(), &["./packages/a"]);
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"./packages/a\"}]\n"
     );
 }
 

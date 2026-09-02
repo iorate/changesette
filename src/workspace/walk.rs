@@ -10,12 +10,12 @@ use tracing::{debug, warn};
 use super::pattern::{Pattern, Seg, seg_matches};
 use super::{probe_is_file, report_fs_error};
 
-/// Collects the member candidate directories under `root` matching
-/// `positives` minus `negations`, keyed by the root-relative `/`-separated
-/// directory (`.` for the root itself); reading the manifests is left to the
-/// caller. Directories named in `excluded_names` are never entered nor
-/// matched, and `reject_pnpm_manifests` makes a matched directory that is
-/// not negated away and carries only a pnpm-specific manifest an error.
+/// Collects the member candidate directories matching `positives` minus
+/// `negations`, keyed by the `/`-separated directory relative to `root`
+/// (`.` for the root itself); reading the manifests is left to the caller.
+/// Directories named in `excluded_names` are never entered nor matched, and
+/// `reject_pnpm_manifests` makes a matched directory that is not negated
+/// away and carries only a pnpm-specific manifest an error.
 pub(crate) fn collect(
     root: &Path,
     positives: &[Pattern],
@@ -30,12 +30,21 @@ pub(crate) fn collect(
         reject_pnpm_manifests,
         candidates: BTreeMap::new(),
     };
-    if !positives.is_empty() {
-        let states = closure(
-            positives,
-            (0..positives.len()).map(|pattern| (pattern, 0)).collect(),
-        );
-        walker.walk(root, "", &states)?;
+    // `..` is pushed rather than taken from `Path::ancestors()`: the OS
+    // resolves it, and a relative root has no ancestors.
+    let mut groups: BTreeMap<usize, Vec<State>> = BTreeMap::new();
+    for (index, pattern) in positives.iter().enumerate() {
+        groups.entry(pattern.ascend()).or_default().push((index, 0));
+    }
+    for (ascend, states) in groups {
+        let mut dir = root.to_path_buf();
+        let mut rel = String::new();
+        for _ in 0..ascend {
+            dir.push("..");
+            rel = child_rel(&rel, "..");
+        }
+        let states = closure(positives, states);
+        walker.walk(&dir, &rel, &states)?;
     }
     Ok(walker.candidates)
 }
