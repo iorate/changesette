@@ -1,5 +1,5 @@
 ---
 source: src/config.rs
-expression: "validate_err(\"{ \\\"changesette\\\": { \\\"packages\\\": [\\\"../x\\\"] } }\\n\")"
+expression: "validate_err(\"{ \\\"changesette\\\": { \\\"packages\\\": [\\\"/x\\\"] } }\\n\")"
 ---
-.changeset/config.json: invalid "changesette.packages" entry "../x": `..` segments are not supported
+.changeset/config.json: invalid "changesette.packages" entry "/x": absolute paths are not supported

@@ -296,22 +296,8 @@ fn validate_rel_dir(text: &str) -> Result<()> {
     if text.starts_with('/') {
         bail!("absolute paths are not supported")
     }
-    if text == "." {
-        return Ok(());
-    }
-    for (index, part) in text.split('/').enumerate() {
-        if part.is_empty() {
-            bail!("empty segments are not supported")
-        }
-        if part == "." {
-            bail!("`.` segments are not supported")
-        }
-        if part == ".." {
-            bail!("`..` segments are not supported")
-        }
-        if index == 0 && has_drive_prefix(part) {
-            bail!("drive-prefixed paths are not supported")
-        }
+    if has_drive_prefix(text.split('/').next().unwrap_or_default()) {
+        bail!("drive-prefixed paths are not supported")
     }
     Ok(())
 }
@@ -730,7 +716,7 @@ mod tests {
     #[test]
     fn rejects_an_invalid_changesette_packages_entry() {
         insta::assert_snapshot!(validate_err(
-            "{ \"changesette\": { \"packages\": [\"../x\"] } }\n"
+            "{ \"changesette\": { \"packages\": [\"/x\"] } }\n"
         ));
     }
 
@@ -739,15 +725,11 @@ mod tests {
     }
 
     #[test]
-    fn accepts_only_the_canonical_spelling() {
-        for text in ["a", "a/b", "a/!b", "."] {
+    fn accepts_non_canonical_spellings() {
+        for text in [
+            "a", "a/b", "a/!b", ".", "../a", "a/../b", "..", "./a", "a//b", "a/", "./",
+        ] {
             validate_rel_dir(text).unwrap();
-        }
-        for text in ["./a", "a/./b", "./", "./.", "././", "./a/b/"] {
-            assert!(rel_dir_err(text).contains("`.` segments"), "{text}");
-        }
-        for text in ["a/", "a//", "a//b"] {
-            assert!(rel_dir_err(text).contains("empty segments"), "{text}");
         }
     }
 
@@ -760,13 +742,6 @@ mod tests {
     fn rejects_an_absolute_path() {
         for text in ["/a", "/"] {
             assert!(rel_dir_err(text).contains("absolute"), "{text}");
-        }
-    }
-
-    #[test]
-    fn rejects_a_parent_segment() {
-        for text in ["..", "../a", "a/../b", "a/.."] {
-            assert!(rel_dir_err(text).contains("`..`"), "{text}");
         }
     }
 
@@ -799,7 +774,7 @@ mod tests {
         for text in ["C:/x", "C:x", "C:"] {
             assert!(rel_dir_err(text).contains("drive"), "{text}");
         }
-        for text in ["packages/C:/x", "a/C:x"] {
+        for text in ["packages/C:/x", "a/C:x", "../C:/x"] {
             validate_rel_dir(text).unwrap();
         }
         assert!(has_drive_prefix("C:"));
