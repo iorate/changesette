@@ -4046,13 +4046,13 @@ fn config_packages_are_read_from_the_forced_root() {
 #[test]
 fn config_packages_entry_errors_name_the_config() {
     let dir = workspace_dir();
-    write_config_packages(dir.path(), &["../x"]);
+    write_config_packages(dir.path(), &["/x"]);
     let output = changesette(dir.path(), &["get-packages"]);
     assert!(!output.status.success());
     assert_eq!(
         stderr(&output),
         format!(
-            "error: {}: invalid \"changesette.packages\" entry \"../x\": `..` segments are not supported\n",
+            "error: {}: invalid \"changesette.packages\" entry \"/x\": absolute paths are not supported\n",
             expected_path(dir.path(), ".changeset/config.json")
         )
     );
@@ -4067,6 +4067,72 @@ fn config_packages_missing_directory_is_an_error() {
     let manifest = Path::new(&expected_path(dir.path(), ""))
         .join("packages/zzz")
         .join("package.json");
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "error: {}: not found (listed in \"changesette.packages\")\n",
+            manifest.display()
+        )
+    );
+}
+
+fn sibling_workspace_dir() -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("ws")).unwrap();
+    fs::write(dir.path().join("ws/package.json"), "{}\n").unwrap();
+    write_config_packages(&dir.path().join("ws"), &["../shared"]);
+    fs::create_dir_all(dir.path().join("shared")).unwrap();
+    fs::write(
+        dir.path().join("shared/package.json"),
+        "{\n  \"name\": \"shared\",\n  \"version\": \"1.0.0\"\n}\n",
+    )
+    .unwrap();
+    dir
+}
+
+const SHARED_JSON: &str =
+    "[{\"name\":\"shared\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"../shared\"}]\n";
+
+#[test]
+fn config_packages_reach_outside_the_root() {
+    let dir = sibling_workspace_dir();
+    let output = changesette(&dir.path().join("ws"), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), SHARED_JSON);
+}
+
+#[test]
+fn config_packages_reach_outside_a_relative_root() {
+    let dir = sibling_workspace_dir();
+    let output = changesette(dir.path(), &["get-packages", "--root", "ws"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), SHARED_JSON);
+}
+
+#[test]
+fn config_packages_keep_the_spelling_of_the_root() {
+    let dir = workspace_dir();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"name\": \"root\",\n  \"version\": \"1.0.0\"\n}\n",
+    )
+    .unwrap();
+    for rel_dir in [".", "./"] {
+        write_config_packages(dir.path(), &[rel_dir]);
+        let output = changesette(dir.path(), &["get-packages"]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_eq!(
+            stdout(&output),
+            format!(
+                "[{{\"name\":\"root\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"{rel_dir}\"}}]\n"
+            )
+        );
+    }
+    fs::remove_file(dir.path().join("package.json")).unwrap();
+    let root = expected_path(dir.path(), "");
+    let output = changesette(dir.path(), &["get-packages", "--root", &root]);
+    assert!(!output.status.success());
+    let manifest = Path::new(&root).join("./package.json");
     assert_eq!(
         stderr(&output),
         format!(
