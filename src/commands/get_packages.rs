@@ -13,7 +13,8 @@ struct Package<'a> {
 
 /// Prints the packages managed by `version` — every workspace member with
 /// `all` — to stdout as a JSON array of `{name, version, private, dir}`
-/// objects, `dir` being relative to the workspace root.
+/// objects, `dir` being the `/`-separated path relative to the workspace
+/// root as the pattern or `changesette.packages` entry spelled it.
 pub(crate) fn run(workspace: &Workspace, config: &Config, all: bool) -> Result<()> {
     let skip = SkipSet::load(workspace, config, &[])?;
     let mut packages = Vec::new();

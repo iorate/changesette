@@ -13,9 +13,10 @@ pub(crate) enum Seg {
 }
 
 /// A workspace pattern compiled to `/`-separated segments, matching
-/// root-relative directory paths.
+/// directory paths relative to the declaring directory.
 #[derive(Debug)]
 pub(crate) struct Pattern {
+    ascend: usize,
     segs: Vec<Seg>,
 }
 
@@ -39,20 +40,24 @@ pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
     if body.is_empty() {
         return Ok(None);
     }
-    // An absolute path and a `..` segment are the patterns the upstream
-    // tools silently break on or resolve outside the root, so they are loud
-    // errors rather than a silent no-match.
+    // An absolute path is a pattern the upstream tools silently break on,
+    // so it is a loud error rather than a silent no-match.
     if body.starts_with('/') || body.starts_with("\\/") {
         bail!("absolute patterns are not supported")
     }
     let parts = split(body)?;
+    let mut ascend = 0;
     let mut segs = Vec::new();
     for (index, part) in parts.into_iter().enumerate() {
         if part.is_empty() || part == "." {
             continue;
         }
         if part == ".." {
-            bail!("`..` segments are not supported")
+            if !segs.is_empty() {
+                bail!("`..` segments are only supported at the start")
+            }
+            ascend += 1;
+            continue;
         }
         // A leading Windows drive prefix (`C:/x`, or the drive-relative
         // `C:x`) addresses a location outside the root like an absolute
@@ -65,7 +70,7 @@ pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
         }
         segs.push(classify(part)?);
     }
-    Ok(Some((negated, Pattern { segs })))
+    Ok(Some((negated, Pattern { ascend, segs })))
 }
 
 fn split(body: &str) -> Result<Vec<&str>> {
@@ -161,19 +166,25 @@ fn classify(part: &str) -> Result<Seg> {
 }
 
 impl Pattern {
+    pub(crate) fn ascend(&self) -> usize {
+        self.ascend
+    }
+
     pub(crate) fn segs(&self) -> &[Seg] {
         &self.segs
     }
 
-    /// Matches a root-relative `/`-separated directory path in full; a
-    /// negation passes `dot_permissive` so its wildcards cover dot segments.
+    /// Matches a `/`-separated directory path in full, `.` standing for the
+    /// declaring directory; a negation passes `dot_permissive` so its
+    /// wildcards cover dot segments.
     pub(crate) fn matches(&self, rel_dir: &str, dot_permissive: bool) -> bool {
         let names: Vec<&str> = if rel_dir == "." {
             Vec::new()
         } else {
             rel_dir.split('/').collect()
         };
-        matches_from(&self.segs, &names, dot_permissive)
+        let ascend = names.iter().take_while(|name| **name == "..").count();
+        ascend == self.ascend && matches_from(&self.segs, &names[ascend..], dot_permissive)
     }
 }
 
@@ -306,6 +317,7 @@ mod tests {
             [seg("packages"), seg("C:"), seg("x")]
         );
         assert_eq!(positive("./C:/x").segs(), [seg("C:"), seg("x")]);
+        assert_eq!(positive("../C:/x").segs(), [seg("C:"), seg("x")]);
     }
 
     #[cfg(unix)]
@@ -317,10 +329,36 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_parent_segment() {
-        for pattern in ["../x", "!../x", "a/../b", ".."] {
-            assert!(error(pattern).contains("`..`"), "{pattern}");
+    fn a_leading_parent_run_ascends() {
+        for pattern in ["../x", "./../x", "..//x"] {
+            let compiled = positive(pattern);
+            assert_eq!(compiled.ascend(), 1, "{pattern}");
+            assert_eq!(compiled.segs(), [seg("x")], "{pattern}");
         }
+        assert_eq!(negation("!../x").ascend(), 1);
+        let dot_dot = positive("..");
+        assert_eq!(dot_dot.ascend(), 1);
+        assert_eq!(dot_dot.segs(), [] as [Seg; 0]);
+        assert_eq!(positive("../../x").ascend(), 2);
+        assert_eq!(positive("x").ascend(), 0);
+        for pattern in ["a/../b", "../a/../b", "a/.."] {
+            assert!(
+                error(pattern).contains("only supported at the start"),
+                "{pattern}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_match_requires_the_same_number_of_leading_parents() {
+        assert!(negation("!../ext/o").matches("../ext/o", true));
+        assert!(!negation("!**/o").matches("../ext/o", true));
+        assert!(negation("!../*/o").matches("../ext/o", true));
+        assert!(negation("!..").matches("..", true));
+        assert!(!negation("!..").matches(".", true));
+        assert!(!negation("!../x").matches("x", true));
+        assert!(!negation("!../x").matches("../../x", true));
+        assert!(!positive("x").matches("../x", false));
     }
 
     #[test]
