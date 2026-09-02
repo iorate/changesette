@@ -10,12 +10,6 @@ use tracing::{debug, warn};
 use super::pattern::{Pattern, Seg, seg_matches};
 use super::{probe_is_file, report_fs_error};
 
-/// Collects the member candidate directories matching `positives` minus
-/// `negations`, keyed by the `/`-separated directory relative to `root`
-/// (`.` for the root itself); reading the manifests is left to the caller.
-/// Directories named in `excluded_names` are never entered nor matched, and
-/// `reject_pnpm_manifests` makes a matched directory that is not negated
-/// away and carries only a pnpm-specific manifest an error.
 pub(crate) fn collect(
     root: &Path,
     positives: &[Pattern],
@@ -49,8 +43,6 @@ pub(crate) fn collect(
     Ok(walker.candidates)
 }
 
-/// Whether `dir` holds a `package.json`; with `reject_pnpm_manifests`, a
-/// `package.yaml` or `package.json5` found instead is an error.
 pub(crate) fn has_manifest(dir: &Path, reject_pnpm_manifests: bool) -> Result<bool> {
     if probe_is_file(&dir.join("package.json")) {
         return Ok(true);
@@ -68,9 +60,8 @@ fn pnpm_only_manifest(dir: &Path) -> Option<PathBuf> {
         .find(|path| probe_is_file(path))
 }
 
-// pnpm reads these as first-class manifests, and honoring them would mean
-// writing versions back into them too; stopping loudly beats silently
-// dropping the package.
+// Honoring these manifests would mean writing versions back into them too;
+// stopping loudly beats silently dropping the package.
 fn unsupported_manifest(path: &Path) -> anyhow::Error {
     anyhow!(
         "{}: only package.json manifests are supported",
@@ -156,8 +147,7 @@ impl Walker<'_> {
         // The accepting sentinel has nothing left to consume. Every other
         // segment, a literal name included, is matched against the
         // directory entries: comparing the names rather than probing a
-        // literal by `stat` keeps it exact on a case-insensitive filesystem,
-        // as it is under Yarn and pnpm.
+        // literal by `stat` keeps it exact on a case-insensitive filesystem.
         let pending: Vec<State> = states
             .iter()
             .copied()
@@ -174,7 +164,7 @@ impl Walker<'_> {
         let entries = match fs::read_dir(dir) {
             Ok(entries) => entries,
             // An unreadable directory (permissions, a concurrent removal)
-            // skips its whole subtree, like the upstream globbers do.
+            // skips its whole subtree rather than aborting the walk.
             Err(err) => {
                 report_fs_error(dir, &err);
                 return Ok(());
@@ -232,10 +222,9 @@ impl Walker<'_> {
                     continue;
                 }
                 // A single-segment glob enters a symlinked directory one
-                // level, as every package manager does; a globstar does not,
-                // which keeps a symlink cycle finite: every other consumption
-                // advances the index, bounding the descent by the pattern
-                // length.
+                // level; a globstar does not, which keeps a symlink cycle
+                // finite: every other consumption advances the index,
+                // bounding the descent by the pattern length.
                 if is_symlink && matches!(seg, Seg::Globstar) {
                     globstar_skipped = true;
                     continue;

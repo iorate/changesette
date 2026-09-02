@@ -6,42 +6,32 @@ use anyhow::{Result, bail};
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Seg {
-    /// A single-segment glob, matched with `fast_glob`; a literal name is
-    /// one without wildcards.
     Glob(String),
     Globstar,
 }
 
-/// A workspace pattern compiled to `/`-separated segments, matching
-/// directory paths relative to the declaring directory.
 #[derive(Debug)]
 pub(crate) struct Pattern {
     ascend: usize,
     segs: Vec<Seg>,
 }
 
-/// Compiles one workspace pattern into its polarity (`true` for a `!`
-/// negation) and matcher, or `None` for an empty pattern; the errors name
-/// only the offense, and the caller attaches the manifest path and the
-/// original pattern. The body is read as one fast-glob glob and split at its
-/// top-level separators.
 pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
-    // Every leading `!` flips the polarity, as npm counts them; leaving one
-    // in the body would hand it to the glob matcher.
+    // Every leading `!` flips the polarity; leaving one in the body would
+    // hand it to the glob matcher.
     let mut negated = false;
     let mut body = original;
     while let Some(rest) = body.strip_prefix('!') {
         negated = !negated;
         body = rest;
     }
-    // An empty pattern matches nothing, as in npm (Yarn and pnpm error on
-    // it); reading it as `.` would silently opt the root into versioning,
-    // and an intentional root reference has a `.` segment.
+    // An empty pattern matches nothing: reading it as `.` would silently opt
+    // the root into versioning, and an intentional root reference has a `.`
+    // segment.
     if body.is_empty() {
         return Ok(None);
     }
-    // An absolute path is a pattern the upstream tools silently break on,
-    // so it is a loud error rather than a silent no-match.
+    // A loud error rather than a silent no-match.
     if body.starts_with('/') || body.starts_with("\\/") {
         bail!("absolute patterns are not supported")
     }
@@ -60,11 +50,11 @@ pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
             continue;
         }
         // A leading Windows drive prefix (`C:/x`, or the drive-relative
-        // `C:x`) addresses a location outside the root like an absolute
-        // path, so it is the same loud error. The `\`-spelled prefix forms
-        // (UNC, verbatim, device) are left to the matcher, where `\` is an
-        // escape and they match nothing; on Unix nothing parses as a
-        // prefix and `C:` stays an ordinary name.
+        // `C:x`) addresses a location outside the root, so it is the same
+        // loud error. The `\`-spelled prefix forms (UNC, verbatim, device)
+        // are left to the matcher, where `\` is an escape and they match
+        // nothing; on Unix nothing parses as a prefix and `C:` stays an
+        // ordinary name.
         if index == 0 && has_drive_prefix(part) {
             bail!("drive-prefixed patterns are not supported")
         }
@@ -81,9 +71,9 @@ fn split(body: &str) -> Result<Vec<&str>> {
     while let Some((index, c)) = chars.next() {
         match c {
             '\\' => {
-                // A separator cannot be escaped: fast-glob unescapes `\/`
-                // right back into one, so `\/` splits like a bare `/` (with
-                // the `\` dropped) rather than diverging from the matcher.
+                // A separator cannot be escaped in the glob dialect, so `\/`
+                // splits like a bare `/` (with the `\` dropped) rather than
+                // diverging from the matcher.
                 if let Some(&(slash_index, '/')) = chars.peek() {
                     if brace_depth > 0 {
                         bail!("`/` inside braces is not supported")
@@ -92,16 +82,10 @@ fn split(body: &str) -> Result<Vec<&str>> {
                     parts.push(&body[start..index]);
                     start = slash_index + 1;
                 } else {
-                    // An escaped character, or a trailing `\` that the
-                    // per-segment validation rejects.
                     chars.next();
                 }
             }
             '/' => {
-                // Braces spanning segments are deliberately unsupported
-                // (zero occurrences in the wild): an intended error now,
-                // where the shattered halves used to fail the glob
-                // validation by accident.
                 if brace_depth > 0 {
                     bail!("`/` inside braces is not supported")
                 }
@@ -120,12 +104,12 @@ fn split(body: &str) -> Result<Vec<&str>> {
 }
 
 fn skip_class(chars: &mut Peekable<CharIndices<'_>>) {
-    // Mirrors fast-glob's class parsing: an optional `^`/`!` prefix, then
-    // the first character is a literal member (so a leading `]` does not
-    // close the class), and `\` escapes the next character. An unclosed
-    // class swallows the rest of the body and is left for the per-segment
-    // validation to reject. A `/` inside the class stays a member, as Yarn
-    // reads it; no segment name contains one, so it simply never matches.
+    // An optional `^`/`!` prefix, then the first character is a literal
+    // member (so a leading `]` does not close the class), and `\` escapes the
+    // next character. An unclosed class swallows the rest of the body and is
+    // left for the per-segment validation to reject. A `/` inside the class
+    // stays a member; no segment name contains one, so it simply never
+    // matches.
     if matches!(chars.peek(), Some((_, '^' | '!'))) {
         chars.next();
     }
@@ -174,9 +158,6 @@ impl Pattern {
         &self.segs
     }
 
-    /// Matches a `/`-separated directory path in full, `.` standing for the
-    /// declaring directory; a negation passes `dot_permissive` so its
-    /// wildcards cover dot segments.
     pub(crate) fn matches(&self, rel_dir: &str, dot_permissive: bool) -> bool {
         let names: Vec<&str> = if rel_dir == "." {
             Vec::new()
@@ -193,7 +174,6 @@ fn matches_from(segs: &[Seg], names: &[&str], dot_permissive: bool) -> bool {
         return names.is_empty();
     };
     if let Seg::Globstar = seg {
-        // A globstar consumes zero or more segments.
         if matches_from(segs_rest, names, dot_permissive) {
             return true;
         }
@@ -213,9 +193,6 @@ fn matches_from(segs: &[Seg], names: &[&str], dot_permissive: bool) -> bool {
     }
 }
 
-/// Matches one pattern segment against one path segment, applying the dot
-/// rule unless `dot_permissive`: a `.`-leading name matches only a pattern
-/// segment that literally starts with `.`.
 pub(crate) fn seg_matches(seg: &Seg, name: &str, dot_permissive: bool) -> bool {
     if !dot_permissive && name.starts_with('.') {
         let dot_ok = match seg {

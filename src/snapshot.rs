@@ -20,12 +20,6 @@ pub(crate) struct SnapshotVersions {
 }
 
 impl SnapshotVersions {
-    /// Computes the suffix following upstream changesets: renders the
-    /// template (`--snapshot-prerelease-template`, or the config's
-    /// `snapshot.prereleaseTemplate`, or `{tag}-{datetime}` / `{datetime}`
-    /// by default), reading the clock, and validates the result as a semver
-    /// pre-release; the upstream `{commit}` / `{commit-short}` placeholders
-    /// are an error.
     pub(crate) fn resolve(snapshot: &Snapshot, config: &Config) -> Result<Self> {
         let template = snapshot
             .template
@@ -42,9 +36,6 @@ impl SnapshotVersions {
         })
     }
 
-    /// Returns the snapshot version replacing the normal `next_version`
-    /// result: the suffix on `0.0.0`, or on the normally calculated version
-    /// when `snapshot.useCalculatedVersion` is set.
     pub(crate) fn apply(&self, old_version: &Version, bump: Bump) -> Version {
         let mut version = if self.use_calculated_version {
             bump::next_version(old_version, bump)
@@ -89,8 +80,6 @@ fn render_suffix(tag: Option<&str>, template: Option<&str>, millis: u128) -> Res
                 .replace("{datetime}", &datetime)
         }
     };
-    // Deliberately stricter than upstream, which writes the suffix into
-    // package.json unchecked.
     Prerelease::new(&suffix).with_context(|| format!("invalid snapshot suffix {suffix:?}"))
 }
 

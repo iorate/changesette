@@ -4,8 +4,6 @@ use anyhow::{Context, Result, bail};
 
 use crate::{changelog, output, workspace::Workspace};
 
-/// Prints the body of the given version's section, without the `## <version>`
-/// heading, from the named package's CHANGELOG.md to stdout.
 pub(crate) fn run(workspace: &Workspace, package: &str, version: &semver::Version) -> Result<()> {
     let member = workspace.member(package)?;
     let path = member.dir().join("CHANGELOG.md");

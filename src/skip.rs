@@ -9,15 +9,11 @@ use crate::{
     workspace::{Member, Workspace},
 };
 
-/// The names of the workspace members `version` skips.
 pub(crate) struct SkipSet {
     names: BTreeSet<String>,
 }
 
 impl SkipSet {
-    /// Collects the members skipped as private or ignored, resolving the
-    /// ignore names from the config or `cli_ignore` (using both is an
-    /// error).
     pub(crate) fn load(
         workspace: &Workspace,
         config: &Config,
@@ -54,9 +50,6 @@ impl SkipSet {
         self.names.contains(name)
     }
 
-    /// Returns the changesets in `changes` whose releases are not all
-    /// skipped; a changeset mixing skipped and not skipped packages is an
-    /// error, as is one naming a non-member package.
     pub(crate) fn filter_changes(
         &self,
         workspace: &Workspace,

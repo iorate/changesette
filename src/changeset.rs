@@ -13,27 +13,18 @@ use crate::bump::Bump;
 
 const IGNORED_FILE_NAMES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "GEMINI.md"];
 
-// A port of the upstream `@changesets/parse` regex; capture 1 is the
-// frontmatter YAML and capture 2 is the summary.
 static FRONTMATTER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)\s*---(.*?)\r?\n\s*---(\s*(?:\n|$).*)").unwrap());
 
 #[derive(Clone, Debug)]
 pub(crate) struct LoadedChange {
     pub(crate) file_name: String,
-    /// Whether the file was loaded from `pre/` in the changeset directory.
     pub(crate) in_pre: bool,
-    /// The packages named in the frontmatter, in order, each with its
-    /// requested bump (`None` for the `none` type); empty for an empty
-    /// changeset.
     pub(crate) releases: Vec<(String, Option<Bump>)>,
-    /// The summary text below the frontmatter, trimmed; may be empty.
     pub(crate) summary: String,
 }
 
 impl LoadedChange {
-    /// The file name without its `.md` suffix, prefixed with `pre/` for a
-    /// `pre/` changeset.
     pub(crate) fn id(&self) -> String {
         let stem = self
             .file_name
@@ -46,7 +37,6 @@ impl LoadedChange {
         }
     }
 
-    /// The path of the file relative to the changeset directory.
     pub(crate) fn rel_path(&self) -> PathBuf {
         if self.in_pre {
             Path::new("pre").join(&self.file_name)
@@ -56,10 +46,6 @@ impl LoadedChange {
     }
 }
 
-/// Loads every changeset in `changeset_dir`, the ones directly in it first
-/// and then the ones in its `pre/` subdirectory as in the upstream reader,
-/// each group in file-name order, treating a missing directory as empty and
-/// leaving package-name validation to the callers.
 pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
     let file_names = scan(changeset_dir)?.unwrap_or_default();
     let pre_dir = changeset_dir.join("pre");
@@ -76,8 +62,6 @@ pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
         .collect()
 }
 
-// Returns the names of the changeset files directly in `dir`, sorted, or
-// `Ok(None)` if `dir` does not exist.
 fn scan(dir: &Path) -> Result<Option<Vec<String>>> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -107,9 +91,6 @@ fn scan(dir: &Path) -> Result<Option<Vec<String>>> {
     Ok(Some(file_names))
 }
 
-/// Groups `changes` by package name: each named package maps to the widest
-/// bump requested for it, or `None` when it is only ever named with the
-/// `none` type.
 pub(crate) fn max_bumps(changes: &[LoadedChange]) -> BTreeMap<&str, Option<Bump>> {
     let mut bumps = BTreeMap::new();
     for change in changes {
@@ -121,9 +102,6 @@ pub(crate) fn max_bumps(changes: &[LoadedChange]) -> BTreeMap<&str, Option<Bump>
     bumps
 }
 
-/// Renders the canonical changeset file content for `releases` and
-/// `summary`, emitting a `None` bump as the `none` type and trimming the
-/// summary.
 pub(crate) fn render(releases: &[(String, Option<Bump>)], summary: &str) -> Result<String> {
     let summary = summary.trim();
     let mut content = if releases.is_empty() {

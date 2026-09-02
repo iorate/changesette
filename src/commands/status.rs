@@ -4,9 +4,6 @@ use anyhow::Result;
 
 use crate::{bump::Bump, config::Config, output, plan, release_plan, workspace::Workspace};
 
-/// Prints the packages to be bumped by `version` — or, with `output_path`,
-/// the release plan as JSON — following the same plan as `version` without
-/// applying it.
 pub(crate) fn run(
     workspace: Workspace,
     config: &Config,

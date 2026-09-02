@@ -6,9 +6,6 @@ use semver::Version;
 
 use crate::bump::Bump;
 
-/// Renders a version's changelog entry from changeset summaries, grouped
-/// under Major/Minor/Patch headings, with no `## <version>` heading and no
-/// surrounding newlines.
 pub(crate) fn render_entry(summaries: &[(Bump, &str)]) -> String {
     let mut blocks = Vec::new();
     for (bump, heading) in [
@@ -29,8 +26,6 @@ pub(crate) fn render_entry(summaries: &[(Bump, &str)]) -> String {
     blocks.join("\n\n")
 }
 
-/// Renders a `## <version>` section from a `render_entry` result, with no
-/// surrounding newlines.
 pub(crate) fn render_section(version: &Version, entry: &str) -> String {
     if entry.is_empty() {
         format!("## {version}")
@@ -53,10 +48,6 @@ fn render_release_line(body: &str) -> String {
     text
 }
 
-/// Upserts `section` (a `render_section` result) as the `## <version>`
-/// section of the CHANGELOG text and returns the new text, replacing an
-/// existing section of the same version and copying everything outside the
-/// splice points verbatim.
 pub(crate) fn upsert_section(
     text: &str,
     package_name: &str,
@@ -78,17 +69,12 @@ pub(crate) fn upsert_section(
     let mut text = text.to_owned();
     let mut headings = parse_headings(&text);
 
-    // Remove existing sections of the same version. Normally there is at most
-    // one.
     while let Some(index) = find_h2(&headings, version) {
         let end = next_h2_start(&headings, index, text.len());
         text.replace_range(headings[index].range.start..end, "");
         headings = parse_headings(&text);
     }
 
-    // A changelog is expected to open with an H1 title (`# <package_name>`);
-    // supplement one if the document does not start with an H1 (counting
-    // documents with no headings at all, and empty ones).
     let has_top_h1 = headings.first().is_some_and(|heading| {
         heading.level == HeadingLevel::H1 && text[..heading.range.start].trim().is_empty()
     });
@@ -97,12 +83,9 @@ pub(crate) fn upsert_section(
         headings = parse_headings(&text);
     }
 
-    // Insert before the first section — keeping the H1 title and any
-    // preamble prose above the new one — or at the end if there is none,
-    // normalizing to one blank line between the new section and each
-    // neighbor. `before` holds at least the H1, so the blank line after it
-    // never turns into a leading newline; `section` has no surrounding
-    // newlines, so the result ends with exactly one.
+    // `before` holds at least the H1, so the blank line after it never turns
+    // into a leading newline; `section` has no surrounding newlines, so the
+    // result ends with exactly one.
     let position = headings
         .iter()
         .find(|heading| heading.level == HeadingLevel::H2)
@@ -120,9 +103,6 @@ pub(crate) fn upsert_section(
     result
 }
 
-/// Returns the body of the `## <version>` section with surrounding blank
-/// lines trimmed and no trailing newline, erroring when the section is not
-/// found.
 pub(crate) fn extract_section(text: &str, version: &str) -> Result<String> {
     // A BOM only hides a `## <version>` heading on the very first line, but
     // strip it as upsert_section does.
@@ -136,16 +116,11 @@ pub(crate) fn extract_section(text: &str, version: &str) -> Result<String> {
 
 struct Heading {
     level: HeadingLevel,
-    // Byte range of the whole heading in the source text, trailing newline
-    // included (pinned by a unit test).
+    // Trailing newline included (pinned by a unit test).
     range: Range<usize>,
-    // The heading's inner text with inline markup dropped, e.g. "1.0.0".
     text: String,
 }
 
-// Parses the whole document and collects its top-level headings in source
-// order.
-//
 // Positions come from the parser's byte ranges, never from line scanning, so
 // a `## ...` line inside a code block is not mistaken for a heading. Headings
 // nested inside a container (list item or block quote) are skipped: an entry
@@ -190,8 +165,6 @@ fn find_h2(headings: &[Heading], text: &str) -> Option<usize> {
         .position(|heading| heading.level == HeadingLevel::H2 && heading.text == text)
 }
 
-// The section starting at `headings[index]` ends where the next H2 begins,
-// or at `end_of_text` if it is the last section.
 fn next_h2_start(headings: &[Heading], index: usize, end_of_text: usize) -> usize {
     headings[index + 1..]
         .iter()
@@ -199,9 +172,6 @@ fn next_h2_start(headings: &[Heading], index: usize, end_of_text: usize) -> usiz
         .map_or(end_of_text, |heading| heading.range.start)
 }
 
-// Trims leading and trailing blank (empty or whitespace-only) lines, plus the
-// trailing newline of the last remaining line. Unlike `str::trim`, keeps the
-// indentation and trailing whitespace of non-blank lines.
 fn trim_blank_lines(mut text: &str) -> &str {
     while let Some(index) = text.find('\n') {
         if !text[..index].trim().is_empty() {

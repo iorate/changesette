@@ -1,6 +1,6 @@
 use semver::{Prerelease, Version};
 
-/// A semver bump type, ordered so that `max` picks the widest one.
+// Ordered so that `max` picks the widest bump.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Bump {
     Patch,
@@ -9,7 +9,6 @@ pub(crate) enum Bump {
 }
 
 impl Bump {
-    /// The lowercase name used in changeset frontmatter and CLI values.
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Bump::Patch => "patch",
@@ -19,8 +18,6 @@ impl Bump {
     }
 }
 
-/// Returns `current` incremented by `bump`, following node-semver's `inc` as
-/// used by changesets.
 pub(crate) fn next_version(current: &Version, bump: Bump) -> Version {
     let pre = !current.pre.is_empty();
     match bump {
@@ -42,8 +39,6 @@ fn checked_inc(number: u64) -> u64 {
     number.checked_add(1).expect("version number overflow")
 }
 
-/// The counter of the `-{tag}.{n}` pre-release following `current`: one past
-/// `current`'s counter when its tag matches, `0` otherwise.
 pub(crate) fn pre_counter(current: &Version, tag: &str) -> u64 {
     // Counting on the tag, rather than on the second pre-release identifier,
     // keeps a dotted tag (`beta.2`) counting and restarts on a tag switch.
@@ -55,15 +50,10 @@ pub(crate) fn pre_counter(current: &Version, tag: &str) -> u64 {
         .map_or(0, checked_inc)
 }
 
-/// Returns `next_version(current, bump)` with the pre-release `-{tag}.{n}`
-/// attached, continuing `current`'s counter when its tag matches; `tag` must
-/// have passed `pre::validate_tag`.
 pub(crate) fn next_pre_version(current: &Version, bump: Bump, tag: &str) -> Version {
     next_pre_version_with(current, bump, tag, pre_counter(current, tag))
 }
 
-/// Returns `next_version(current, bump)` with the pre-release
-/// `-{tag}.{counter}` attached; `tag` must have passed `pre::validate_tag`.
 pub(crate) fn next_pre_version_with(
     current: &Version,
     bump: Bump,

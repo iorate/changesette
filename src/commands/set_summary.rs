@@ -5,8 +5,6 @@ use tracing::info;
 
 use crate::{changeset, workspace::Workspace};
 
-/// Rewrites the summary of the changeset with the given id, re-rendering the
-/// file in the canonical form `add` writes.
 pub(crate) fn run(workspace: &Workspace, id: &str, summary: &str) -> Result<()> {
     let changeset_dir = workspace.changeset_dir();
 
