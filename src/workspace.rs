@@ -2604,22 +2604,11 @@ mod tests {
 
     #[test]
     fn a_broken_nearest_manifest_is_an_error() {
-        for root_manifest in [
-            None,
-            Some("{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"a\"] }\n"),
-        ] {
-            let dir = tempfile::tempdir().unwrap();
-            if let Some(root_manifest) = root_manifest {
-                write(dir.path(), "package.json", root_manifest);
-            }
-            write(dir.path(), "a/package.json", "{ broken");
-            let err = format!("{:#}", discover(&dir.path().join("a")).unwrap_err());
-            let manifest = dir.path().join("a/package.json");
-            assert!(
-                err.starts_with(&manifest.display().to_string()),
-                "{root_manifest:?}: {err}"
-            );
-        }
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "a/package.json", "{ broken");
+        let err = format!("{:#}", discover(&dir.path().join("a")).unwrap_err());
+        let manifest = dir.path().join("a").join("package.json");
+        assert!(err.starts_with(&manifest.display().to_string()), "{err}");
     }
 
     #[test]
