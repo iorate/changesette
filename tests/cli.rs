@@ -1234,6 +1234,34 @@ fn get_packages_treats_an_escaped_slash_pattern_as_a_path() {
 }
 
 #[test]
+fn get_packages_expands_a_brace_alternative_holding_a_slash() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"packages/{a,b/c}\"]\n}\n",
+    )
+    .unwrap();
+    for (rel, name) in [
+        ("packages/a", "pkg-a"),
+        ("packages/b", "pkg-b"),
+        ("packages/b/c", "pkg-bc"),
+    ] {
+        fs::create_dir_all(dir.path().join(rel)).unwrap();
+        fs::write(
+            dir.path().join(rel).join("package.json"),
+            format!("{{ \"name\": \"{name}\", \"version\": \"1.0.0\" }}\n"),
+        )
+        .unwrap();
+    }
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"pkg-bc\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"packages/b/c\"}]\n"
+    );
+}
+
+#[test]
 fn get_packages_applies_leading_bang_parity() {
     let dir = workspace_dir();
     fs::write(

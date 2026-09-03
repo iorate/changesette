@@ -544,23 +544,23 @@ fn enumerate(
     let mut positives = Vec::new();
     let mut negations = Vec::new();
     for original in patterns {
-        let compiled = pattern::compile(original).with_context(|| {
+        let (negated, compiled) = pattern::compile(original).with_context(|| {
             format!(
                 "{}: invalid workspace pattern {original:?}",
                 manifest.display()
             )
         })?;
-        let Some((negated, compiled)) = compiled else {
+        if compiled.is_empty() {
             debug!(
-                "{}: the empty workspace pattern {original:?} matches nothing",
+                "{}: the workspace pattern {original:?} matches nothing",
                 manifest.display()
             );
             continue;
-        };
+        }
         if negated {
-            negations.push(compiled);
+            negations.extend(compiled);
         } else {
-            positives.push(compiled);
+            positives.extend(compiled);
         }
     }
 
@@ -1777,7 +1777,7 @@ mod tests {
         write(
             dir.path(),
             "pnpm-workspace.yaml",
-            "packages:\n  - \"packages/{a,b}\"\n",
+            "packages:\n  - \"packages/{a,b/c}\"\n",
         );
         write(
             dir.path(),
@@ -1786,13 +1786,26 @@ mod tests {
         );
         write(
             dir.path(),
-            "packages/{a,b}/package.json",
+            "packages/b/package.json",
+            "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "packages/b/c/package.json",
+            "{ \"name\": \"pkg-bc\", \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "packages/{a,b/c}/package.json",
             "{ \"name\": \"pkg-braced\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(dir.path()).unwrap();
         assert_eq!(
             names_and_dirs(&workspace),
-            [("pkg-a", dir.path().join("packages/a").as_path())]
+            [
+                ("pkg-a", dir.path().join("packages/a").as_path()),
+                ("pkg-bc", dir.path().join("packages/b/c").as_path())
+            ]
         );
     }
 
