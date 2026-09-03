@@ -40,7 +40,7 @@ enum PackageManager {
 }
 
 impl PackageManager {
-    fn name(self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
             PackageManager::Npm => "npm",
             PackageManager::Yarn => "yarn",
@@ -161,7 +161,7 @@ impl Workspace {
         match marker {
             RootMarker::NpmReroot(packages) => Ok(Workspace::new(
                 root.to_path_buf(),
-                PackageManager::Npm.name(),
+                PackageManager::Npm.as_str(),
                 qualify_packages(packages),
             )),
             RootMarker::PnpmWorkspaceYaml => {
@@ -170,7 +170,7 @@ impl Workspace {
                 let pm = PackageManager::Pnpm;
                 Ok(Workspace::new(
                     root.to_path_buf(),
-                    pm.name(),
+                    pm.as_str(),
                     collect_members(root, &manifest, &patterns, pm)?,
                 ))
             }
@@ -185,7 +185,7 @@ impl Workspace {
                 }
                 Ok(Workspace::new(
                     root.to_path_buf(),
-                    pm.name(),
+                    pm.as_str(),
                     collect_members(root, &path, &patterns, pm)?,
                 ))
             }
@@ -200,7 +200,7 @@ impl Workspace {
                 if let Some(patterns) = workspaces_patterns(&value, &path, pm)? {
                     return Ok(Workspace::new(
                         root.to_path_buf(),
-                        pm.name(),
+                        pm.as_str(),
                         collect_members(root, &path, &patterns, pm)?,
                     ));
                 }
@@ -1903,7 +1903,7 @@ mod tests {
                 names_and_rel_dirs(&workspace),
                 [("root", "."), ("sib", "../sib")],
                 "{}",
-                pm.name()
+                pm.as_str()
             );
         }
     }
