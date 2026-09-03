@@ -4,7 +4,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Result, anyhow};
 use tracing::{debug, warn};
 
 use super::pattern::{Pattern, Seg, seg_matches};
@@ -14,15 +13,11 @@ pub(crate) fn collect(
     root: &Path,
     positives: &[Pattern],
     negations: &[Pattern],
-    excluded_names: &[&str],
-    reject_pnpm_manifests: bool,
-) -> Result<BTreeMap<String, PathBuf>> {
+) -> BTreeMap<String, PathBuf> {
     let mut walker = Walker {
         root,
         patterns: positives,
         negations,
-        excluded_names,
-        reject_pnpm_manifests,
         candidates: BTreeMap::new(),
     };
     let mut groups: BTreeMap<usize, Vec<State>> = BTreeMap::new();
@@ -39,9 +34,9 @@ pub(crate) fn collect(
         };
         let rel = vec![".."; ascend].join("/");
         let states = closure(positives, states);
-        walker.walk(dir, &rel, &states)?;
+        walker.walk(dir, &rel, &states);
     }
-    Ok(walker.candidates)
+    walker.candidates
 }
 
 fn ancestor(root: &Path, ascend: usize) -> Option<&Path> {
@@ -50,32 +45,6 @@ fn ancestor(root: &Path, ascend: usize) -> Option<&Path> {
         dir = dir.parent()?;
     }
     Some(dir)
-}
-
-pub(crate) fn has_manifest(dir: &Path, reject_pnpm_manifests: bool) -> Result<bool> {
-    if probe_is_file(&dir.join("package.json")) {
-        return Ok(true);
-    }
-    if reject_pnpm_manifests && let Some(path) = pnpm_only_manifest(dir) {
-        return Err(unsupported_manifest(&path));
-    }
-    Ok(false)
-}
-
-fn pnpm_only_manifest(dir: &Path) -> Option<PathBuf> {
-    ["package.yaml", "package.json5"]
-        .into_iter()
-        .map(|name| dir.join(name))
-        .find(|path| probe_is_file(path))
-}
-
-// Honoring these manifests would mean writing versions back into them too;
-// stopping loudly beats silently dropping the package.
-fn unsupported_manifest(path: &Path) -> anyhow::Error {
-    anyhow!(
-        "{}: only package.json manifests are supported",
-        path.display()
-    )
 }
 
 // The manifest probe runs before this, so the debug line only names real
@@ -126,13 +95,11 @@ struct Walker<'a> {
     root: &'a Path,
     patterns: &'a [Pattern],
     negations: &'a [Pattern],
-    excluded_names: &'a [&'a str],
-    reject_pnpm_manifests: bool,
     candidates: BTreeMap<String, PathBuf>,
 }
 
 impl Walker<'_> {
-    fn walk(&mut self, dir: &Path, rel: &str, states: &[State]) -> Result<()> {
+    fn walk(&mut self, dir: &Path, rel: &str, states: &[State]) {
         let patterns = self.patterns;
         // The candidate check runs after the epsilon closure so that `x/**`
         // covers `x` itself.
@@ -145,17 +112,10 @@ impl Walker<'_> {
             // collapses into the direct spelling, and the negations see the
             // same spelling that `dir` reports.
             let rel_dir = rel_dir_between(self.root, dir);
-            if probe_is_file(&dir.join("package.json")) {
-                if !excluded(&rel_dir, self.negations) {
-                    self.candidates
-                        .entry(rel_dir)
-                        .or_insert_with(|| dir.to_path_buf());
-                }
-            } else if self.reject_pnpm_manifests
-                && let Some(path) = pnpm_only_manifest(dir)
-                && !excluded(&rel_dir, self.negations)
-            {
-                return Err(unsupported_manifest(&path));
+            if probe_is_file(&dir.join("package.json")) && !excluded(&rel_dir, self.negations) {
+                self.candidates
+                    .entry(rel_dir)
+                    .or_insert_with(|| dir.to_path_buf());
             }
         }
         // The accepting sentinel has nothing left to consume. Every other
@@ -168,12 +128,12 @@ impl Walker<'_> {
             .filter(|&(pattern, seg_index)| seg_index != patterns[pattern].segs().len())
             .collect();
         if pending.is_empty() {
-            return Ok(());
+            return;
         }
-        self.read_entries(dir, rel, &pending)
+        self.read_entries(dir, rel, &pending);
     }
 
-    fn read_entries(&mut self, dir: &Path, rel: &str, pending: &[State]) -> Result<()> {
+    fn read_entries(&mut self, dir: &Path, rel: &str, pending: &[State]) {
         let patterns = self.patterns;
         let entries = match fs::read_dir(dir) {
             Ok(entries) => entries,
@@ -181,7 +141,7 @@ impl Walker<'_> {
             // skips its whole subtree rather than aborting the walk.
             Err(err) => {
                 report_fs_error(dir, &err);
-                return Ok(());
+                return;
             }
         };
         for entry in entries {
@@ -202,7 +162,7 @@ impl Walker<'_> {
                 );
                 continue;
             };
-            if self.excluded_names.contains(&name) {
+            if name == "node_modules" {
                 continue;
             }
             let file_type = match entry.file_type() {
@@ -265,9 +225,8 @@ impl Walker<'_> {
                 continue;
             }
             let next = closure(patterns, next);
-            self.walk(&entry.path(), &child_rel(rel, name), &next)?;
+            self.walk(&entry.path(), &child_rel(rel, name), &next);
         }
-        Ok(())
     }
 }
 
@@ -290,16 +249,9 @@ mod tests {
         (positives, negations)
     }
 
-    fn rel_dirs_with(root: &Path, patterns: &[&str], excluded_names: &[&str]) -> Vec<String> {
-        let (positives, negations) = compile(patterns);
-        collect(root, &positives, &negations, excluded_names, false)
-            .unwrap()
-            .into_keys()
-            .collect()
-    }
-
     fn rel_dirs(root: &Path, patterns: &[&str]) -> Vec<String> {
-        rel_dirs_with(root, patterns, &["node_modules"])
+        let (positives, negations) = compile(patterns);
+        collect(root, &positives, &negations).into_keys().collect()
     }
 
     fn touch(root: &Path, rel_manifest: &str) {
@@ -366,13 +318,14 @@ mod tests {
     }
 
     #[test]
-    fn an_excluded_name_is_never_entered_nor_named() {
+    fn node_modules_is_never_entered_nor_named() {
         let dir = tempfile::tempdir().unwrap();
         touch(dir.path(), "package.json");
         touch(dir.path(), "a/package.json");
         touch(dir.path(), "node_modules/evil/package.json");
         touch(dir.path(), "bower_components/old/package.json");
         touch(dir.path(), ".yarn/x/package.json");
+        touch(dir.path(), ".git/c/package.json");
         assert_eq!(
             rel_dirs(dir.path(), &["**"]),
             [".", "a", "bower_components/old"]
@@ -382,18 +335,8 @@ mod tests {
             [] as [String; 0]
         );
         assert_eq!(rel_dirs(dir.path(), &["node_modules/*"]), [] as [String; 0]);
-        let pnpm = ["node_modules", "bower_components"];
-        assert_eq!(rel_dirs_with(dir.path(), &["**"], &pnpm), [".", "a"]);
-        assert_eq!(
-            rel_dirs_with(dir.path(), &["bower_components/old"], &pnpm),
-            [] as [String; 0]
-        );
-        let yarn = ["node_modules", ".git", ".yarn"];
-        assert_eq!(
-            rel_dirs_with(dir.path(), &[".yarn/x"], &yarn),
-            [] as [String; 0]
-        );
         assert_eq!(rel_dirs(dir.path(), &[".yarn/x"]), [".yarn/x"]);
+        assert_eq!(rel_dirs(dir.path(), &[".git/c"]), [".git/c"]);
     }
 
     #[test]
@@ -544,39 +487,5 @@ mod tests {
         touch(dir.path(), "real/a/package.json");
         std::os::unix::fs::symlink("real", dir.path().join("link")).unwrap();
         assert_eq!(rel_dirs(dir.path(), &["link/*"]), ["link/a"]);
-    }
-
-    #[test]
-    fn a_pnpm_only_manifest_is_an_error_when_rejected() {
-        let dir = tempfile::tempdir().unwrap();
-        touch(dir.path(), "packages/a/package.yaml");
-        touch(dir.path(), "packages/b/package.json");
-        touch(dir.path(), "packages/b/package.json5");
-        let (positives, negations) = compile(&["packages/*"]);
-        let err = collect(dir.path(), &positives, &negations, &["node_modules"], true).unwrap_err();
-        assert!(
-            format!("{err:#}").contains("package.yaml: only package.json manifests are supported"),
-            "{err:#}"
-        );
-        assert_eq!(rel_dirs(dir.path(), &["packages/*"]), ["packages/b"]);
-        touch(dir.path(), "packages/a/package.json");
-        let candidates =
-            collect(dir.path(), &positives, &negations, &["node_modules"], true).unwrap();
-        assert_eq!(
-            candidates.into_keys().collect::<Vec<_>>(),
-            ["packages/a", "packages/b"]
-        );
-    }
-
-    #[test]
-    fn a_pnpm_only_manifest_in_a_negated_directory_is_passed_over() {
-        let dir = tempfile::tempdir().unwrap();
-        touch(dir.path(), "packages/a/package.json");
-        touch(dir.path(), "packages/legacy/package.yaml");
-        touch(dir.path(), "packages/legacy/sub/package.json5");
-        let (positives, negations) = compile(&["packages/**", "!packages/legacy/**"]);
-        let candidates =
-            collect(dir.path(), &positives, &negations, &["node_modules"], true).unwrap();
-        assert_eq!(candidates.into_keys().collect::<Vec<_>>(), ["packages/a"]);
     }
 }
