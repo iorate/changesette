@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use same_file::is_same_file;
+use file_id::{FileId, get_file_id};
 use saphyr::{LoadableYamlNode, Yaml};
 use semver::Version;
 use serde_json::Value;
@@ -92,10 +92,7 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, RootMarker)> {
         // holding a package.json, so the member qualification (and the
         // duplicate-name exclusion) must not run first.
         let packages = collect_packages(dir, &path, &patterns, pm)?;
-        if packages
-            .iter()
-            .any(|package| is_same_file(&package.dir, prefix_dir).unwrap_or(false))
-        {
+        if lists_dir(&packages, prefix_dir)? {
             return Ok((dir.to_path_buf(), RootMarker::NpmReroot(packages)));
         }
     }
@@ -146,7 +143,7 @@ impl Workspace {
             return Ok(Workspace::new(
                 root.to_path_buf(),
                 "packages from config",
-                qualify_packages(packages),
+                qualify_packages(packages)?,
             ));
         }
         let marker = match marker {
@@ -162,7 +159,7 @@ impl Workspace {
             RootMarker::NpmReroot(packages) => Ok(Workspace::new(
                 root.to_path_buf(),
                 PackageManager::Npm.as_str(),
-                qualify_packages(packages),
+                qualify_packages(packages)?,
             )),
             RootMarker::PnpmWorkspaceYaml => {
                 let manifest = root.join("pnpm-workspace.yaml");
@@ -216,7 +213,7 @@ impl Workspace {
                 Ok(Workspace::new(
                     root.to_path_buf(),
                     "single package",
-                    qualify_packages(packages),
+                    qualify_packages(packages)?,
                 ))
             }
         }
@@ -493,9 +490,7 @@ fn collect_members(
     patterns: &[String],
     pm: PackageManager,
 ) -> Result<Vec<Member>> {
-    Ok(qualify_packages(collect_packages(
-        root, manifest, patterns, pm,
-    )?))
+    qualify_packages(collect_packages(root, manifest, patterns, pm)?)
 }
 
 pub(crate) struct Package {
@@ -519,13 +514,13 @@ fn collect_packages(
         manifest.to_path_buf(),
         patterns.to_vec(),
     )]);
-    // Keyed by the physical directory, so that a member declaring a symlink
-    // to itself is not requeued forever; the root goes in first, as a `..`
-    // pattern lists it again. Only the queue is guarded, leaving the alias
-    // spelling to `exclude_duplicate_names`.
+    // Keyed by the file id, so that a member declaring a symlink to itself is
+    // not requeued forever; the root goes in first, as a `..` pattern lists it
+    // again. Only the queue is guarded, leaving the alias spelling to
+    // `exclude_duplicate_names`.
     let mut visited = HashSet::new();
     if pm == PackageManager::Yarn {
-        visited.insert(physical_key(root));
+        visited.insert(dir_id(root)?);
     }
     while let Some((dir, manifest, patterns)) = queue.pop_front() {
         for child_dir in enumerate(&dir, &manifest, &patterns, pm)?.into_values() {
@@ -537,7 +532,7 @@ fn collect_packages(
             if pm == PackageManager::Yarn
                 && rel_dir != "."
                 && let Some(declared) = workspaces_patterns(&value, &path, pm)?
-                && visited.insert(physical_key(&child_dir))
+                && visited.insert(dir_id(&child_dir)?)
             {
                 queue.push_back((child_dir.clone(), path.clone(), declared));
             }
@@ -552,17 +547,21 @@ fn collect_packages(
     Ok(packages)
 }
 
-fn physical_key(dir: &Path) -> PathBuf {
-    match fs::canonicalize(dir) {
-        Ok(key) => key,
-        Err(err) => {
-            report_fs_error(dir, &err);
-            dir.to_path_buf()
-        }
-    }
+fn dir_id(dir: &Path) -> Result<FileId> {
+    get_file_id(dir).with_context(|| dir.display().to_string())
 }
 
-fn qualify_packages(packages: Vec<Package>) -> Vec<Member> {
+fn lists_dir(packages: &[Package], dir: &Path) -> Result<bool> {
+    let id = dir_id(dir)?;
+    for package in packages {
+        if dir_id(&package.dir)? == id {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn qualify_packages(packages: Vec<Package>) -> Result<Vec<Member>> {
     let mut members: Vec<Member> = packages
         .into_iter()
         .filter_map(|package| {
@@ -575,8 +574,8 @@ fn qualify_packages(packages: Vec<Package>) -> Vec<Member> {
         })
         .collect();
     members.sort_by(|a, b| (&a.name, &a.dir).cmp(&(&b.name, &b.dir)));
-    exclude_duplicate_names(&mut members);
-    members
+    exclude_duplicate_names(&mut members)?;
+    Ok(members)
 }
 
 fn enumerate(
@@ -692,25 +691,25 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
 
 // Qualification runs first, so a disqualified candidate sharing a real
 // package's name does not evict it. Aliases of one physical directory are
-// one package and collapse into the first; an `is_same_file` error counts as
-// a distinct directory. Expects `members` sorted by (name, dir) with a stable
-// sort: aliases collapse into the smallest dir, and one directory spelled
-// twice keeps its first listing.
-fn exclude_duplicate_names(members: &mut Vec<Member>) {
+// one package and collapse into the first. Expects `members` sorted by
+// (name, dir) with a stable sort: aliases collapse into the smallest dir, and
+// one directory spelled twice keeps its first listing.
+fn exclude_duplicate_names(members: &mut Vec<Member>) -> Result<()> {
     let mut iter = std::mem::take(members).into_iter().peekable();
     while let Some(first) = iter.next() {
-        let mut group = vec![first];
-        while iter.peek().is_some_and(|next| next.name == group[0].name) {
-            let member = iter.next().unwrap();
-            if !group
-                .iter()
-                .any(|kept| is_same_file(&kept.dir, &member.dir).unwrap_or(false))
-            {
-                group.push(member);
+        if iter.peek().is_none_or(|next| next.name != first.name) {
+            members.push(first);
+            continue;
+        }
+        let mut group = vec![(dir_id(&first.dir)?, first)];
+        while let Some(member) = iter.next_if(|next| next.name == group[0].1.name) {
+            let id = dir_id(&member.dir)?;
+            if !group.iter().any(|(kept, _)| *kept == id) {
+                group.push((id, member));
             }
         }
         if group.len() > 1 {
-            for member in group {
+            for (_, member) in group {
                 warn!(
                     "{}: not a workspace member: the name `{}` is used by more than one package",
                     member.dir.join("package.json").display(),
@@ -718,9 +717,10 @@ fn exclude_duplicate_names(members: &mut Vec<Member>) {
                 );
             }
         } else {
-            members.extend(group);
+            members.extend(group.into_iter().map(|(_, member)| member));
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1489,6 +1489,29 @@ mod tests {
                 ("pkg-a", dir.path().join("packages/a").as_path()),
                 ("pkg-b", dir.path().join("packages/b").as_path()),
             ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn re_roots_from_a_member_the_npm_root_lists_through_a_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": [\"link/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "real/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        std::os::unix::fs::symlink("real", dir.path().join("link")).unwrap();
+        let workspace = discover(&dir.path().join("real/a")).unwrap();
+        assert_eq!(workspace.root, dir.path());
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("link/a").as_path())]
         );
     }
 
