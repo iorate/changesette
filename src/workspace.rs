@@ -711,7 +711,8 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
 // package's name does not evict it. Aliases of one physical directory are
 // one package and collapse into the first; an `is_same_file` error counts as
 // a distinct directory. Expects `members` sorted by (name, dir) with a stable
-// sort, so one directory spelled twice keeps its first listing.
+// sort: aliases collapse into the smallest dir, and one directory spelled
+// twice keeps its first listing.
 fn exclude_duplicate_names(members: &mut Vec<Member>) {
     let mut iter = std::mem::take(members).into_iter().peekable();
     while let Some(first) = iter.next() {
