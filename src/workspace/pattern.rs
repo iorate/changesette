@@ -16,15 +16,110 @@ pub(crate) struct Pattern {
     segs: Vec<Seg>,
 }
 
-pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
+// The same limit as fast_glob's, which never sees the braces once they are
+// expanded here.
+const MAX_BRACE_NESTING: usize = 10;
+// Chained braces multiply, and this expansion is the one place a pattern's
+// cost stops being linear in its length.
+const MAX_BRACE_EXPANSIONS: usize = 100_000;
+
+pub(crate) fn compile(original: &str) -> Result<(bool, Vec<Pattern>)> {
     // Every leading `!` flips the polarity; leaving one in the body would
-    // hand it to the glob matcher.
+    // hand it to the glob matcher. A `!` inside a brace alternative is
+    // literal, so the polarity is read before the braces are expanded.
     let mut negated = false;
     let mut body = original;
     while let Some(rest) = body.strip_prefix('!') {
         negated = !negated;
         body = rest;
     }
+    // Braces are expanded before the split into segments so that an
+    // alternative containing a `/` goes through the same per-segment rules
+    // as any other pattern.
+    let mut patterns = Vec::new();
+    for alternative in expand(body)? {
+        if let Some(pattern) = compile_alternative(&alternative)? {
+            patterns.push(pattern);
+        }
+    }
+    Ok((negated, patterns))
+}
+
+fn expand(body: &str) -> Result<Vec<String>> {
+    struct Frame {
+        outer: Vec<String>,
+        alternatives: Vec<String>,
+    }
+    let mut stack: Vec<Frame> = Vec::new();
+    let mut current = vec![String::new()];
+    let mut literal_start = 0;
+    let mut chars = body.char_indices().peekable();
+    while let Some((index, c)) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+            }
+            '[' => skip_class(&mut chars),
+            '{' => {
+                if stack.len() == MAX_BRACE_NESTING {
+                    bail!(
+                        "brace expansions nested deeper than {MAX_BRACE_NESTING} levels are not supported"
+                    )
+                }
+                append(&mut current, &body[literal_start..index]);
+                stack.push(Frame {
+                    outer: current,
+                    alternatives: Vec::new(),
+                });
+                current = vec![String::new()];
+                literal_start = index + 1;
+            }
+            ',' if !stack.is_empty() => {
+                append(&mut current, &body[literal_start..index]);
+                stack.last_mut().unwrap().alternatives.append(&mut current);
+                current = vec![String::new()];
+                literal_start = index + 1;
+            }
+            '}' if !stack.is_empty() => {
+                append(&mut current, &body[literal_start..index]);
+                let mut frame = stack.pop().unwrap();
+                frame.alternatives.append(&mut current);
+                if frame.outer.len() * frame.alternatives.len() > MAX_BRACE_EXPANSIONS {
+                    bail!(
+                        "brace expansions into more than {MAX_BRACE_EXPANSIONS} patterns are not supported"
+                    )
+                }
+                current = frame
+                    .outer
+                    .iter()
+                    .flat_map(|prefix| {
+                        frame
+                            .alternatives
+                            .iter()
+                            .map(move |suffix| format!("{prefix}{suffix}"))
+                    })
+                    .collect();
+                literal_start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    // The matcher rejects an unclosed `{` too, so it is an error rather than
+    // a literal.
+    if !stack.is_empty() {
+        bail!("unclosed `{{`")
+    }
+    append(&mut current, &body[literal_start..]);
+    Ok(current)
+}
+
+fn append(results: &mut [String], literal: &str) {
+    for result in results {
+        result.push_str(literal);
+    }
+}
+
+fn compile_alternative(body: &str) -> Result<Option<Pattern>> {
     // An empty pattern matches nothing: reading it as `.` would silently opt
     // the root into versioning, and an intentional root reference has a `.`
     // segment.
@@ -35,7 +130,7 @@ pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
     if body.starts_with('/') || body.starts_with("\\/") {
         bail!("absolute patterns are not supported")
     }
-    let parts = split(body)?;
+    let parts = split(body);
     let mut ascend = 0;
     let mut segs = Vec::new();
     for (index, part) in parts.into_iter().enumerate() {
@@ -60,13 +155,12 @@ pub(crate) fn compile(original: &str) -> Result<Option<(bool, Pattern)>> {
         }
         segs.push(classify(part)?);
     }
-    Ok(Some((negated, Pattern { ascend, segs })))
+    Ok(Some(Pattern { ascend, segs }))
 }
 
-fn split(body: &str) -> Result<Vec<&str>> {
+fn split(body: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut start = 0;
-    let mut brace_depth: usize = 0;
     let mut chars = body.char_indices().peekable();
     while let Some((index, c)) = chars.next() {
         match c {
@@ -75,9 +169,6 @@ fn split(body: &str) -> Result<Vec<&str>> {
                 // splits like a bare `/` (with the `\` dropped) rather than
                 // diverging from the matcher.
                 if let Some(&(slash_index, '/')) = chars.peek() {
-                    if brace_depth > 0 {
-                        bail!("`/` inside braces is not supported")
-                    }
                     chars.next();
                     parts.push(&body[start..index]);
                     start = slash_index + 1;
@@ -86,30 +177,24 @@ fn split(body: &str) -> Result<Vec<&str>> {
                 }
             }
             '/' => {
-                if brace_depth > 0 {
-                    bail!("`/` inside braces is not supported")
-                }
                 parts.push(&body[start..index]);
                 start = index + 1;
             }
-            '{' => brace_depth += 1,
-            // A `}` without a matching `{` is an ordinary character.
-            '}' => brace_depth = brace_depth.saturating_sub(1),
             '[' => skip_class(&mut chars),
             _ => {}
         }
     }
     parts.push(&body[start..]);
-    Ok(parts)
+    parts
 }
 
 fn skip_class(chars: &mut Peekable<CharIndices<'_>>) {
     // An optional `^`/`!` prefix, then the first character is a literal
     // member (so a leading `]` does not close the class), and `\` escapes the
-    // next character. An unclosed class swallows the rest of the body and is
-    // left for the per-segment validation to reject. A `/` inside the class
-    // stays a member; no segment name contains one, so it simply never
-    // matches.
+    // next character. An unclosed class swallows the rest of the body; the
+    // per-segment validation rejects it, as does the brace expansion when
+    // the class swallows a `}`. A `/` inside the class stays a member; no
+    // segment name contains one, so it simply never matches.
     if matches!(chars.peek(), Some((_, '^' | '!'))) {
         chars.next();
     }
@@ -141,8 +226,9 @@ fn classify(part: &str) -> Result<Seg> {
     }
     fast_glob::validate(part)?;
     // fast_glob reads every leading `!` of the string it is handed as a
-    // negation, while in the whole pattern this `!` sits mid-glob and is
-    // literal — escape it so the matcher reads it that way too.
+    // negation, while in the whole pattern this `!` follows a `/` or sits in
+    // a brace alternative and is literal — escape it so the matcher reads it
+    // that way too.
     if part.starts_with('!') {
         return Ok(Seg::Glob(format!("\\{part}")));
     }
@@ -217,16 +303,33 @@ mod tests {
         Seg::Glob(text.to_owned())
     }
 
-    fn positive(pattern: &str) -> Pattern {
-        let (negated, compiled) = compile(pattern).unwrap().unwrap();
+    fn positives(pattern: &str) -> Vec<Pattern> {
+        let (negated, compiled) = compile(pattern).unwrap();
         assert!(!negated, "{pattern}");
         compiled
     }
 
-    fn negation(pattern: &str) -> Pattern {
-        let (negated, compiled) = compile(pattern).unwrap().unwrap();
+    fn negations(pattern: &str) -> Vec<Pattern> {
+        let (negated, compiled) = compile(pattern).unwrap();
         assert!(negated, "{pattern}");
         compiled
+    }
+
+    fn single(mut compiled: Vec<Pattern>, pattern: &str) -> Pattern {
+        assert_eq!(compiled.len(), 1, "{pattern}");
+        compiled.pop().unwrap()
+    }
+
+    fn positive(pattern: &str) -> Pattern {
+        single(positives(pattern), pattern)
+    }
+
+    fn negation(pattern: &str) -> Pattern {
+        single(negations(pattern), pattern)
+    }
+
+    fn segs_of(compiled: &[Pattern]) -> Vec<&[Seg]> {
+        compiled.iter().map(Pattern::segs).collect()
     }
 
     fn error(pattern: &str) -> String {
@@ -246,9 +349,10 @@ mod tests {
 
     #[test]
     fn skips_an_empty_pattern() {
-        for pattern in ["", "!", "!!"] {
-            assert!(compile(pattern).unwrap().is_none(), "{pattern}");
+        for pattern in ["", "!", "!!", "{}", "{,}", "!{}"] {
+            assert!(compile(pattern).unwrap().1.is_empty(), "{pattern}");
         }
+        assert_eq!(segs_of(&positives("{,a}")), [&[seg("a")][..]]);
     }
 
     #[test]
@@ -281,7 +385,7 @@ mod tests {
     #[test]
     fn a_backslash_spelled_prefix_form_compiles() {
         for pattern in [r"\\server\share", r"\\?\C:\x"] {
-            assert!(compile(pattern).unwrap().is_some(), "{pattern}");
+            assert!(!compile(pattern).unwrap().1.is_empty(), "{pattern}");
             assert!(!has_drive_prefix(pattern), "{pattern}");
         }
     }
@@ -380,16 +484,148 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_slash_inside_braces() {
-        for pattern in ["{a,b/c}", "{a,b\\/c}", "x/{a,b/c}", "{a,{b/c,d}}"] {
-            assert!(error(pattern).contains("braces"), "{pattern}");
-        }
+    fn expands_braces_before_the_split() {
         assert_eq!(
-            positive("x/{a,b}/y").segs(),
-            [seg("x"), seg("{a,b}"), seg("y")]
+            segs_of(&positives("{a,b/c}")),
+            [&[seg("a")][..], &[seg("b"), seg("c")]]
+        );
+        assert_eq!(
+            segs_of(&positives("{a,b\\/c}")),
+            [&[seg("a")][..], &[seg("b"), seg("c")]]
+        );
+        assert_eq!(
+            segs_of(&positives("x/{a,b}/y")),
+            [
+                &[seg("x"), seg("a"), seg("y")][..],
+                &[seg("x"), seg("b"), seg("y")]
+            ]
+        );
+        assert_eq!(
+            segs_of(&positives("a{,/x}")),
+            [&[seg("a")][..], &[seg("a"), seg("x")]]
+        );
+        assert_eq!(
+            segs_of(&positives("{a,b}{c,d}")),
+            [&[seg("ac")][..], &[seg("ad")], &[seg("bc")], &[seg("bd")]]
+        );
+        assert_eq!(
+            segs_of(&positives("{a,{b,c}}")),
+            [&[seg("a")][..], &[seg("b")], &[seg("c")]]
+        );
+        assert_eq!(
+            segs_of(&positives("{a,{b/c,d}}")),
+            [&[seg("a")][..], &[seg("b"), seg("c")], &[seg("d")]]
+        );
+        assert_eq!(
+            segs_of(&positives("{**/a,b}")),
+            [&[Seg::Globstar, seg("a")][..], &[seg("b")]]
+        );
+        assert_eq!(segs_of(&positives("{1..3}")), [&[seg("1..3")][..]]);
+    }
+
+    #[test]
+    fn brace_syntax_inside_a_class_or_after_an_escape_is_literal() {
+        assert_eq!(
+            segs_of(&positives("{a,[}]}")),
+            [&[seg("a")][..], &[seg("[}]")]]
+        );
+        assert_eq!(
+            segs_of(&positives("{[,],a}")),
+            [&[seg("[,]")][..], &[seg("a")]]
         );
         assert_eq!(positive("\\{a,b\\}/c").segs(), [seg("\\{a,b\\}"), seg("c")]);
+        assert_eq!(positive("\\{a,b}").segs(), [seg("\\{a,b}")]);
+        assert_eq!(positive("{a\\,b}").segs(), [seg("a\\,b")]);
+        assert_eq!(
+            segs_of(&positives("{a,b\\}c}")),
+            [&[seg("a")][..], &[seg("b\\}c")]]
+        );
+        assert_eq!(positive("[{]/a").segs(), [seg("[{]"), seg("a")]);
+    }
+
+    #[test]
+    fn an_unmatched_closing_brace_or_comma_is_literal() {
         assert_eq!(positive("a}b/c").segs(), [seg("a}b"), seg("c")]);
+        assert_eq!(positive("a,b/c").segs(), [seg("a,b"), seg("c")]);
+        assert_eq!(
+            segs_of(&positives("{a,b}}")),
+            [&[seg("a}")][..], &[seg("b}")]]
+        );
+    }
+
+    #[test]
+    fn expands_around_multi_byte_characters() {
+        assert_eq!(
+            segs_of(&positives("あ{い,う/え}お")),
+            [&[seg("あいお")][..], &[seg("あう"), seg("えお")]]
+        );
+        assert_eq!(
+            segs_of(&positives("{\\あ,[い]}")),
+            [&[seg("\\あ")][..], &[seg("[い]")]]
+        );
+    }
+
+    #[test]
+    fn a_trailing_backslash_after_a_brace_is_an_error() {
+        assert!(compile("{a,b}\\").is_err());
+    }
+
+    #[test]
+    fn an_unclosed_brace_is_an_error() {
+        for pattern in ["{a,b", "{a,b/c", "{a,{b}", "src/{a,b", "{a,[b}"] {
+            assert!(error(pattern).contains("unclosed"), "{pattern}");
+        }
+    }
+
+    #[test]
+    fn applies_the_polarity_to_every_alternative() {
+        assert_eq!(
+            segs_of(&negations("!{a,b/c}")),
+            [&[seg("a")][..], &[seg("b"), seg("c")]]
+        );
+        assert_eq!(
+            segs_of(&positives("{!a,b}")),
+            [&[seg("\\!a")][..], &[seg("b")]]
+        );
+    }
+
+    #[test]
+    fn normalizes_each_alternative_on_its_own() {
+        let compiled = positives("{../x,y}");
+        assert_eq!(compiled[0].ascend(), 1);
+        assert_eq!(compiled[0].segs(), [seg("x")]);
+        assert_eq!(compiled[1].ascend(), 0);
+        assert_eq!(compiled[1].segs(), [seg("y")]);
+        assert!(error("a/{..,b}").contains("only supported at the start"));
+        for pattern in ["{,a}/b", "{/a,b}", "{a,/b}"] {
+            assert!(error(pattern).contains("absolute"), "{pattern}");
+        }
+        assert_eq!(
+            segs_of(&positives("{./a,b/}")),
+            [&[seg("a")][..], &[seg("b")]]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_a_drive_prefix_in_an_alternative() {
+        assert!(error("{C:/x,y}").contains("drive"));
+    }
+
+    #[test]
+    fn limits_the_number_of_expansions() {
+        assert_eq!(positives(&"{a,b}".repeat(16)).len(), 65536);
+        assert!(error(&"{a,b}".repeat(17)).contains("more than 100000 patterns"));
+        assert!(
+            error(&format!("{{{}}}", "a,".repeat(100_000))).contains("more than 100000 patterns")
+        );
+    }
+
+    #[test]
+    fn limits_brace_nesting_like_the_matcher() {
+        let nested = |n: usize| format!("{}k{}", "{".repeat(n), "}".repeat(n));
+        assert_eq!(positive(&nested(10)).segs(), [seg("k")]);
+        assert!(error(&nested(11)).contains("nested deeper than 10 levels"));
     }
 
     #[test]
@@ -419,19 +655,12 @@ mod tests {
     }
 
     #[test]
-    fn expands_braces_within_a_segment() {
-        assert!(seg_matches(&seg("{a,b}"), "a", false));
-        assert!(seg_matches(&seg("{a,b}"), "b", false));
-        assert!(!seg_matches(&seg("{a,b}"), "{a,b}", false));
-    }
-
-    #[test]
-    fn expands_nested_braces() {
-        for name in ["a", "b", "c"] {
-            assert!(seg_matches(&seg("{a,{b,c}}"), name, false), "{name}");
-        }
-        assert!(!seg_matches(&seg("{a,{b,c}}"), "d", false));
-        assert!(!seg_matches(&seg("{a,{b,c}}"), "{b,c}", false));
+    fn a_brace_within_a_segment_is_expanded_too() {
+        assert_eq!(segs_of(&positives("{a,b}")), [&[seg("a")][..], &[seg("b")]]);
+        assert_eq!(
+            segs_of(&positives("x{a,b}y")),
+            [&[seg("xay")][..], &[seg("xby")]]
+        );
     }
 
     #[test]
@@ -466,10 +695,22 @@ mod tests {
     }
 
     #[test]
-    fn a_full_match_expands_braces() {
-        let pattern = positive("packages/{a,b}");
-        assert!(pattern.matches("packages/a", true));
-        assert!(!pattern.matches("packages/c", true));
-        assert!(!pattern.matches("packages/{a,b}", true));
+    fn a_full_match_uses_the_expanded_alternatives() {
+        let compiled = negations("!packages/{a,b/c}");
+        let matches = |rel_dir: &str| compiled.iter().any(|p| p.matches(rel_dir, true));
+        assert!(matches("packages/a"));
+        assert!(matches("packages/b/c"));
+        assert!(!matches("packages/b"));
+        assert!(!matches("packages/c"));
+        assert!(!matches("packages/{a,b/c}"));
+    }
+
+    #[test]
+    fn a_class_holding_only_a_slash_matches_nothing() {
+        let pattern = positive("{a/.b/*/[/]}");
+        assert_eq!(pattern.segs(), [seg("a"), seg(".b"), seg("*"), seg("[/]")]);
+        for rel_dir in ["a/.b/x", "a/.b/x/y", "a/.b/x/[/]", "a/.b/x//"] {
+            assert!(!pattern.matches(rel_dir, true), "{rel_dir}");
+        }
     }
 }

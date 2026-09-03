@@ -266,11 +266,11 @@ mod tests {
         let mut positives = Vec::new();
         let mut negations = Vec::new();
         for original in patterns {
-            let (negated, compiled) = pattern::compile(original).unwrap().unwrap();
+            let (negated, compiled) = pattern::compile(original).unwrap();
             if negated {
-                negations.push(compiled);
+                negations.extend(compiled);
             } else {
-                positives.push(compiled);
+                positives.extend(compiled);
             }
         }
         (positives, negations)
