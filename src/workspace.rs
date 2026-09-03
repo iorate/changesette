@@ -61,13 +61,20 @@ impl PackageManager {
     }
 }
 
-pub(crate) struct NpmReroot(Vec<Package>);
+pub(crate) enum RootMarker {
+    PnpmWorkspaceYaml,
+    YarnLock,
+    NpmReroot(Vec<Package>),
+    PackageJson,
+}
 
-pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<NpmReroot>)> {
+pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, RootMarker)> {
     for dir in cwd.ancestors() {
-        if probe_is_file(&dir.join("pnpm-workspace.yaml")) || probe_is_file(&dir.join("yarn.lock"))
-        {
-            return Ok((dir.to_path_buf(), None));
+        if probe_is_file(&dir.join("pnpm-workspace.yaml")) {
+            return Ok((dir.to_path_buf(), RootMarker::PnpmWorkspaceYaml));
+        }
+        if probe_is_file(&dir.join("yarn.lock")) {
+            return Ok((dir.to_path_buf(), RootMarker::YarnLock));
         }
     }
 
@@ -78,9 +85,7 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<NpmReroot>)> {
             continue;
         }
         let Some(prefix_dir) = &prefix else {
-            if read_manifest(&path)?.is_some() {
-                prefix = Some(dir.to_path_buf());
-            }
+            prefix = Some(dir.to_path_buf());
             continue;
         };
         let value = match read_manifest(&path) {
@@ -103,7 +108,7 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<NpmReroot>)> {
             .iter()
             .any(|package| is_same_file(&package.dir, prefix_dir).unwrap_or(false))
         {
-            return Ok((dir.to_path_buf(), Some(NpmReroot(packages))));
+            return Ok((dir.to_path_buf(), RootMarker::NpmReroot(packages)));
         }
     }
 
@@ -113,7 +118,7 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, Option<NpmReroot>)> {
             cwd.display()
         )
     };
-    Ok((dir, None))
+    Ok((dir, RootMarker::PackageJson))
 }
 
 pub(crate) fn validate_root(dir: &Path) -> Result<()> {
@@ -129,7 +134,7 @@ impl Workspace {
     pub(crate) fn load(
         root: &Path,
         rel_dirs: Option<&[String]>,
-        reroot: Option<NpmReroot>,
+        marker: Option<RootMarker>,
     ) -> Result<Workspace> {
         if let Some(rel_dirs) = rel_dirs {
             let mut packages = Vec::new();
@@ -159,69 +164,77 @@ impl Workspace {
                 qualify_packages(packages),
             ));
         }
-        if let Some(NpmReroot(packages)) = reroot {
-            return Ok(Workspace::new(
+        let marker = match marker {
+            Some(marker) => marker,
+            None if probe_is_file(&root.join("pnpm-workspace.yaml")) => {
+                RootMarker::PnpmWorkspaceYaml
+            }
+            None if probe_is_file(&root.join("yarn.lock")) => RootMarker::YarnLock,
+            None => RootMarker::PackageJson,
+        };
+        let path = root.join("package.json");
+        match marker {
+            RootMarker::NpmReroot(packages) => Ok(Workspace::new(
                 root.to_path_buf(),
                 PackageManager::Npm.name(),
                 qualify_packages(packages),
-            ));
-        }
-
-        let manifest = root.join("pnpm-workspace.yaml");
-        if probe_is_file(&manifest) {
-            let patterns = pnpm_patterns(&manifest)?;
-            let pm = PackageManager::Pnpm;
-            return Ok(Workspace::new(
-                root.to_path_buf(),
-                pm.name(),
-                collect_members(root, &manifest, &patterns, pm)?,
-            ));
-        }
-        let path = root.join("package.json");
-        if probe_is_file(&root.join("yarn.lock")) {
-            let pm = PackageManager::Yarn;
-            let mut patterns = Vec::new();
-            if probe_is_file(&path)
-                && let Some(value) = read_manifest(&path)?
-                && let Some(declared) = workspaces_patterns(&value, &path, pm)?
-            {
-                patterns = declared;
+            )),
+            RootMarker::PnpmWorkspaceYaml => {
+                let manifest = root.join("pnpm-workspace.yaml");
+                let patterns = pnpm_patterns(&manifest)?;
+                let pm = PackageManager::Pnpm;
+                Ok(Workspace::new(
+                    root.to_path_buf(),
+                    pm.name(),
+                    collect_members(root, &manifest, &patterns, pm)?,
+                ))
             }
-            return Ok(Workspace::new(
-                root.to_path_buf(),
-                pm.name(),
-                collect_members(root, &path, &patterns, pm)?,
-            ));
+            RootMarker::YarnLock => {
+                let pm = PackageManager::Yarn;
+                let mut patterns = Vec::new();
+                if probe_is_file(&path)
+                    && let Some(value) = read_manifest(&path)?
+                    && let Some(declared) = workspaces_patterns(&value, &path, pm)?
+                {
+                    patterns = declared;
+                }
+                Ok(Workspace::new(
+                    root.to_path_buf(),
+                    pm.name(),
+                    collect_members(root, &path, &patterns, pm)?,
+                ))
+            }
+            RootMarker::PackageJson => {
+                let Some(value) = read_manifest(&path)? else {
+                    bail!(
+                        "no package.json in {}; --root must name a workspace root or a package",
+                        root.display()
+                    )
+                };
+                let pm = PackageManager::Npm;
+                if let Some(patterns) = workspaces_patterns(&value, &path, pm)? {
+                    return Ok(Workspace::new(
+                        root.to_path_buf(),
+                        pm.name(),
+                        collect_members(root, &path, &patterns, pm)?,
+                    ));
+                }
+                // A single package takes the same qualification as any member;
+                // failing it leaves a workspace with zero members rather than an
+                // error.
+                let packages = vec![Package {
+                    dir: root.to_path_buf(),
+                    rel_dir: ".".to_owned(),
+                    manifest: path,
+                    value,
+                }];
+                Ok(Workspace::new(
+                    root.to_path_buf(),
+                    "single package",
+                    qualify_packages(packages),
+                ))
+            }
         }
-
-        let Some(value) = read_manifest(&path)? else {
-            bail!(
-                "no package.json in {}; --root must name a workspace root or a package",
-                root.display()
-            )
-        };
-        let pm = PackageManager::Npm;
-        if let Some(patterns) = workspaces_patterns(&value, &path, pm)? {
-            return Ok(Workspace::new(
-                root.to_path_buf(),
-                pm.name(),
-                collect_members(root, &path, &patterns, pm)?,
-            ));
-        }
-        // A single package takes the same qualification as any member;
-        // failing it leaves a workspace with zero members rather than an
-        // error.
-        let packages = vec![Package {
-            dir: root.to_path_buf(),
-            rel_dir: ".".to_owned(),
-            manifest: path,
-            value,
-        }];
-        Ok(Workspace::new(
-            root.to_path_buf(),
-            "single package",
-            qualify_packages(packages),
-        ))
     }
 
     // The one construction point, so that every loading path reports the
@@ -443,7 +456,7 @@ fn collect_members(
     )?))
 }
 
-struct Package {
+pub(crate) struct Package {
     dir: PathBuf,
     rel_dir: String,
     manifest: PathBuf,
@@ -692,8 +705,8 @@ mod tests {
     }
 
     fn discover(cwd: &Path) -> Result<Workspace> {
-        let (root, reroot) = find_root(cwd)?;
-        Workspace::load(&root, None, reroot)
+        let (root, marker) = find_root(cwd)?;
+        Workspace::load(&root, None, Some(marker))
     }
 
     fn discover_ok(case: &str) -> Workspace {
@@ -2590,6 +2603,15 @@ mod tests {
     }
 
     #[test]
+    fn a_broken_nearest_manifest_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "a/package.json", "{ broken");
+        let err = format!("{:#}", discover(&dir.path().join("a")).unwrap_err());
+        let manifest = dir.path().join("a").join("package.json");
+        assert!(err.starts_with(&manifest.display().to_string()), "{err}");
+    }
+
+    #[test]
     fn a_broken_manifest_below_a_pnpm_root_is_never_read() {
         let dir = tempfile::tempdir().unwrap();
         write(
@@ -3548,11 +3570,11 @@ mod tests {
             "packages/b/package.json",
             "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
         );
-        let (root, reroot) = find_root(&dir.path().join("packages/a")).unwrap();
+        let (root, marker) = find_root(&dir.path().join("packages/a")).unwrap();
         assert_eq!(root, dir.path());
-        assert!(reroot.is_some());
+        assert!(matches!(marker, RootMarker::NpmReroot(_)));
         let packages = vec!["packages/b".to_owned()];
-        let workspace = Workspace::load(&root, Some(&packages), reroot).unwrap();
+        let workspace = Workspace::load(&root, Some(&packages), Some(marker)).unwrap();
         assert_eq!(names_and_rel_dirs(&workspace), [("pkg-b", "packages/b")]);
     }
 
