@@ -3601,7 +3601,8 @@ mod tests {
             err.contains(&format!(
                 "{}: not found (listed in \"changesette.packages\")",
                 dir.path()
-                    .join("packages/missing")
+                    .join("packages")
+                    .join("missing")
                     .join("package.json")
                     .display()
             )),
@@ -3617,7 +3618,8 @@ mod tests {
         assert!(
             err.starts_with(
                 &dir.path()
-                    .join("packages/a")
+                    .join("packages")
+                    .join("a")
                     .join("package.json")
                     .display()
                     .to_string()
@@ -3634,7 +3636,8 @@ mod tests {
         assert!(
             err.starts_with(
                 &dir.path()
-                    .join("packages/a")
+                    .join("packages")
+                    .join("a")
                     .join("package.json")
                     .display()
                     .to_string()
