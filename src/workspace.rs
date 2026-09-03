@@ -2028,6 +2028,43 @@ mod tests {
     }
 
     #[test]
+    fn a_negation_matches_the_spelling_relative_to_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a", "b"] {
+            write(
+                dir.path(),
+                &format!("root/packages/{name}/package.json"),
+                &format!("{{ \"name\": \"{name}\", \"version\": \"1.0.0\" }}\n"),
+            );
+        }
+        for (patterns, expected) in [
+            (
+                "packages/*, !packages/b, ../root/packages/*",
+                vec![("a", "packages/a")],
+            ),
+            ("../root/packages/*, !packages/b", vec![("a", "packages/a")]),
+            (
+                "../root/packages/*, !../root/packages/b",
+                vec![("a", "packages/a"), ("b", "packages/b")],
+            ),
+            ("../root/packages/*, !packages/*", vec![]),
+            ("../*/packages/*, !packages/b", vec![("a", "packages/a")]),
+        ] {
+            let list: Vec<String> = patterns
+                .split(", ")
+                .map(|pattern| format!("\"{pattern}\""))
+                .collect();
+            write(
+                dir.path(),
+                "root/pnpm-workspace.yaml",
+                &format!("packages: [{}]\n", list.join(", ")),
+            );
+            let workspace = discover(&dir.path().join("root")).unwrap();
+            assert_eq!(names_and_rel_dirs(&workspace), expected, "{patterns}");
+        }
+    }
+
+    #[test]
     fn a_bare_parent_pattern_makes_the_parent_a_member() {
         let dir = tempfile::tempdir().unwrap();
         write(

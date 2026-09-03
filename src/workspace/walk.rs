@@ -140,19 +140,20 @@ impl Walker<'_> {
             .iter()
             .any(|&(pattern, seg)| seg == patterns[pattern].segs().len())
         {
-            // The negations see the spelling the walk arrived by, while the
-            // key is the lexical path from the root, so that a detour through
-            // `..` back into the root collapses into the direct spelling.
-            let rel_dir = if rel.is_empty() { "." } else { rel };
+            // The lexical path from the root rather than the spelling the
+            // walk arrived by: a detour through `..` back into the root
+            // collapses into the direct spelling, and the negations see the
+            // same spelling that `dir` reports.
+            let rel_dir = rel_dir_between(self.root, dir);
             if probe_is_file(&dir.join("package.json")) {
-                if !excluded(rel_dir, self.negations) {
+                if !excluded(&rel_dir, self.negations) {
                     self.candidates
-                        .entry(rel_dir_between(self.root, dir))
+                        .entry(rel_dir)
                         .or_insert_with(|| dir.to_path_buf());
                 }
             } else if self.reject_pnpm_manifests
                 && let Some(path) = pnpm_only_manifest(dir)
-                && !excluded(rel_dir, self.negations)
+                && !excluded(&rel_dir, self.negations)
             {
                 return Err(unsupported_manifest(&path));
             }
