@@ -47,18 +47,6 @@ impl PackageManager {
             PackageManager::Pnpm => "pnpm",
         }
     }
-
-    fn excluded_names(self) -> &'static [&'static str] {
-        match self {
-            PackageManager::Npm => &["node_modules"],
-            PackageManager::Yarn => &["node_modules", ".git", ".yarn"],
-            PackageManager::Pnpm => &["node_modules", "bower_components"],
-        }
-    }
-
-    fn root_always(self) -> bool {
-        self != PackageManager::Npm
-    }
 }
 
 pub(crate) enum RootMarker {
@@ -620,15 +608,10 @@ fn enumerate(
         }
     }
 
-    let reject_pnpm_manifests = pm == PackageManager::Pnpm;
-    let mut candidates = walk::collect(
-        root,
-        &positives,
-        &negations,
-        pm.excluded_names(),
-        reject_pnpm_manifests,
-    )?;
-    if pm.root_always() && walk::has_manifest(root, reject_pnpm_manifests)? {
+    let mut candidates = walk::collect(root, &positives, &negations);
+    if matches!(pm, PackageManager::Yarn | PackageManager::Pnpm)
+        && probe_is_file(&root.join("package.json"))
+    {
         candidates.insert(".".to_owned(), root.to_path_buf());
     }
     Ok(candidates)
@@ -1203,45 +1186,12 @@ mod tests {
             [
                 ("deep", dir.path().join("packages/nested/deep").as_path()),
                 ("direct", dir.path().join("packages").as_path()),
+                (
+                    "old",
+                    dir.path().join("packages/bower_components/old").as_path()
+                ),
             ]
         );
-    }
-
-    #[test]
-    fn the_excluded_directory_names_follow_the_package_manager() {
-        let literals = "\"bower_components/a\", \".yarn/b\", \".git/c\"";
-        let yaml = format!("packages: [{literals}]\n");
-        let json = format!("{{ \"workspaces\": [{literals}] }}\n");
-        for (files, expected) in [
-            (vec![("pnpm-workspace.yaml", &yaml)], vec!["pkg-b", "pkg-c"]),
-            (
-                vec![("package.json", &json)],
-                vec!["pkg-a", "pkg-b", "pkg-c"],
-            ),
-            (
-                vec![("yarn.lock", &String::new()), ("package.json", &json)],
-                vec!["pkg-a"],
-            ),
-        ] {
-            let dir = tempfile::tempdir().unwrap();
-            for (rel, text) in &files {
-                write(dir.path(), rel, text);
-            }
-            for (rel, name) in [
-                ("bower_components/a", "pkg-a"),
-                (".yarn/b", "pkg-b"),
-                (".git/c", "pkg-c"),
-            ] {
-                write(
-                    dir.path(),
-                    &format!("{rel}/package.json"),
-                    &format!("{{ \"name\": \"{name}\", \"version\": \"1.0.0\" }}\n"),
-                );
-            }
-            let workspace = discover(dir.path()).unwrap();
-            let names: Vec<_> = workspace.members().iter().map(Member::name).collect();
-            assert_eq!(names, expected, "{files:?}");
-        }
     }
 
     #[test]
@@ -2146,30 +2096,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_pnpm_only_manifest_outside_the_root() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            "ws/pnpm-workspace.yaml",
-            "packages:\n  - \"../shared\"\n",
-        );
-        write(
-            dir.path(),
-            "shared/package.yaml",
-            "name: shared\nversion: 1.0.0\n",
-        );
-        let err = format!("{:#}", discover(&dir.path().join("ws")).unwrap_err());
-        let manifest = dir.path().join("shared").join("package.yaml");
-        assert!(
-            err.contains(&format!(
-                "{}: only package.json manifests are supported",
-                manifest.display()
-            )),
-            "{err}"
-        );
-    }
-
-    #[test]
     fn tolerates_a_pattern_whose_base_directory_is_missing() {
         let dir = tempfile::tempdir().unwrap();
         write(
@@ -2987,6 +2913,32 @@ mod tests {
     }
 
     #[test]
+    fn a_yarn_member_with_a_nohoist_only_workspaces_declares_no_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "yarn.lock", "");
+        write(
+            dir.path(),
+            "package.json",
+            "{ \"workspaces\": [\"packages/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": { \"nohoist\": [\"**/react-native\"] } }\n",
+        );
+        write(
+            dir.path(),
+            "packages/a/nested/x/package.json",
+            "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = discover(dir.path()).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
+    }
+
+    #[test]
     fn a_pnpm_manifest_wins_over_a_yarn_lock_in_the_same_directory() {
         let dir = tempfile::tempdir().unwrap();
         write(
@@ -3369,30 +3321,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_pnpm_only_manifest() {
-        for rel in ["packages/a/package.yaml", "package.json5"] {
-            let dir = tempfile::tempdir().unwrap();
-            write(
-                dir.path(),
-                "pnpm-workspace.yaml",
-                "packages:\n  - \"packages/*\"\n",
-            );
-            write(dir.path(), rel, "name: pkg\nversion: 1.0.0\n");
-            let err = format!("{:#}", discover(dir.path()).unwrap_err());
-            let mut manifest = dir.path().to_path_buf();
-            manifest.extend(rel.split('/'));
-            assert!(
-                err.contains(&format!(
-                    "{}: only package.json manifests are supported",
-                    manifest.display()
-                )),
-                "{rel}: {err}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_package_json_beside_a_pnpm_only_manifest_is_read_as_usual() {
+    fn a_pnpm_only_manifest_is_never_a_member() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -3407,37 +3336,24 @@ mod tests {
         );
         write(
             dir.path(),
-            "packages/a/package.json5",
-            "{ name: 'pkg-a' }\n",
+            "packages/a/package.yaml",
+            "name: pkg-a\nversion: 1.0.0\n",
         );
         write(
             dir.path(),
-            "packages/a/package.json",
-            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+            "packages/b/package.json5",
+            "{ name: 'pkg-b' }\n",
         );
-        let workspace = discover(dir.path()).unwrap();
-        assert_eq!(
-            names_and_rel_dirs(&workspace),
-            [("pkg-a", "packages/a"), ("root", ".")]
-        );
-    }
-
-    #[test]
-    fn a_pnpm_only_manifest_is_ignored_outside_pnpm() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            "package.json",
-            "{ \"workspaces\": [\"packages/*\"] }\n",
-        );
-        write(dir.path(), "packages/a/package.yaml", "name: pkg-a\n");
         write(
             dir.path(),
             "packages/b/package.json",
             "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(dir.path()).unwrap();
-        assert_eq!(names_and_rel_dirs(&workspace), [("pkg-b", "packages/b")]);
+        assert_eq!(
+            names_and_rel_dirs(&workspace),
+            [("pkg-b", "packages/b"), ("root", ".")]
+        );
     }
 
     #[test]
