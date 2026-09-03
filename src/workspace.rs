@@ -4,7 +4,7 @@ mod walk;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     fs, io,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use anyhow::{Context, Result, bail};
@@ -121,13 +121,14 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, RootMarker)> {
     Ok((dir, RootMarker::PackageJson))
 }
 
-pub(crate) fn validate_root(dir: &Path) -> Result<()> {
-    let metadata =
-        fs::metadata(dir).with_context(|| format!("invalid --root {}", dir.display()))?;
-    if !metadata.is_dir() {
-        bail!("invalid --root {}: not a directory", dir.display())
+// The root is always the physical path: `find_root` and `Workspace::load`
+// rely on it holding no `.` or `..` component, as they climb by `parent()`.
+pub(crate) fn resolve_root(dir: &Path) -> Result<PathBuf> {
+    let root = dunce::canonicalize(dir)?;
+    if !fs::metadata(&root)?.is_dir() {
+        bail!("not a directory")
     }
-    Ok(())
+    Ok(root)
 }
 
 impl Workspace {
@@ -138,12 +139,8 @@ impl Workspace {
     ) -> Result<Workspace> {
         if let Some(rel_dirs) = rel_dirs {
             let mut packages = Vec::new();
-            for rel_dir in rel_dirs {
-                let dir = if rel_dir == "." {
-                    root.to_path_buf()
-                } else {
-                    root.join(rel_dir)
-                };
+            for entry in rel_dirs {
+                let (dir, rel_dir) = resolve_rel_dir(root, entry)?;
                 let manifest = dir.join("package.json");
                 let Some(value) = read_manifest(&manifest)? else {
                     bail!(
@@ -153,7 +150,7 @@ impl Workspace {
                 };
                 packages.push(Package {
                     dir,
-                    rel_dir: rel_dir.clone(),
+                    rel_dir,
                     manifest,
                     value,
                 });
@@ -329,6 +326,63 @@ pub(crate) fn report_fs_error(path: &Path, err: &io::Error) {
     }
 }
 
+// A segment is pushed only when it parses as exactly one `Normal` component:
+// `PathBuf::push` re-parses the segment, and a prefix in it (`C:` or `C:x` on
+// Windows) would silently replace the directory built so far.
+fn resolve_rel_dir(root: &Path, entry: &str) -> Result<(PathBuf, String)> {
+    let mut dir = root.to_path_buf();
+    for seg in entry.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                let Some(parent) = dir.parent() else {
+                    bail!(
+                        "invalid \"changesette.packages\" entry {entry:?}: escapes the filesystem root"
+                    )
+                };
+                dir = parent.to_path_buf();
+            }
+            _ => {
+                let mut components = Path::new(seg).components();
+                if !matches!(
+                    (components.next(), components.next()),
+                    (Some(Component::Normal(_)), None)
+                ) {
+                    bail!(
+                        "invalid \"changesette.packages\" entry {entry:?}: {seg:?} is not a directory name"
+                    )
+                }
+                dir.push(seg);
+            }
+        }
+    }
+    let rel_dir = rel_dir_between(root, &dir);
+    Ok((dir, rel_dir))
+}
+
+// Purely lexical: `dir` is built from `root` by `parent()` and `push` only,
+// so the two share every component up to where `dir` climbed away.
+pub(crate) fn rel_dir_between(root: &Path, dir: &Path) -> String {
+    let mut root_components = root.components().peekable();
+    let mut dir_components = dir.components().peekable();
+    while let (Some(a), Some(b)) = (root_components.peek(), dir_components.peek()) {
+        if a != b {
+            break;
+        }
+        root_components.next();
+        dir_components.next();
+    }
+    let mut parts: Vec<String> = root_components.map(|_| "..".to_owned()).collect();
+    parts.extend(
+        dir_components.map(|component| component.as_os_str().to_string_lossy().into_owned()),
+    );
+    if parts.is_empty() {
+        ".".to_owned()
+    } else {
+        parts.join("/")
+    }
+}
+
 // BOM'd manifests exist in the wild, so the BOM is stripped before parsing.
 fn read_manifest(path: &Path) -> Result<Option<Value>> {
     let text = match fs::read_to_string(path) {
@@ -474,7 +528,6 @@ fn collect_packages(
     // worktrees), a declaration's negations reaching only its own directory.
     let mut queue = VecDeque::from([(
         root.to_path_buf(),
-        String::new(),
         manifest.to_path_buf(),
         patterns.to_vec(),
     )]);
@@ -486,13 +539,9 @@ fn collect_packages(
     if pm == PackageManager::Yarn {
         visited.insert(physical_key(root));
     }
-    while let Some((dir, rel_prefix, manifest, patterns)) = queue.pop_front() {
-        for (rel, child_dir) in enumerate(&dir, &manifest, &patterns, pm)? {
-            let rel_dir = match (rel_prefix.as_str(), rel.as_str()) {
-                ("", rel) => rel.to_owned(),
-                (prefix, ".") => prefix.to_owned(),
-                (prefix, rel) => format!("{prefix}/{rel}"),
-            };
+    while let Some((dir, manifest, patterns)) = queue.pop_front() {
+        for child_dir in enumerate(&dir, &manifest, &patterns, pm)?.into_values() {
+            let rel_dir = rel_dir_between(root, &child_dir);
             let path = child_dir.join("package.json");
             let Some(value) = read_manifest(&path)? else {
                 continue;
@@ -502,7 +551,7 @@ fn collect_packages(
                 && let Some(declared) = workspaces_patterns(&value, &path, pm)?
                 && visited.insert(physical_key(&child_dir))
             {
-                queue.push_back((child_dir.clone(), rel_dir.clone(), path.clone(), declared));
+                queue.push_back((child_dir.clone(), path.clone(), declared));
             }
             packages.push(Package {
                 dir: child_dir,
@@ -537,13 +586,7 @@ fn qualify_packages(packages: Vec<Package>) -> Vec<Member> {
             )
         })
         .collect();
-    members.sort_by(|a, b| {
-        (&a.name, a.dir.components().count(), &a.dir).cmp(&(
-            &b.name,
-            b.dir.components().count(),
-            &b.dir,
-        ))
-    });
+    members.sort_by(|a, b| (&a.name, &a.dir).cmp(&(&b.name, &b.dir)));
     exclude_duplicate_names(&mut members);
     members
 }
@@ -667,8 +710,9 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<
 // Qualification runs first, so a disqualified candidate sharing a real
 // package's name does not evict it. Aliases of one physical directory are
 // one package and collapse into the first; an `is_same_file` error counts as
-// a distinct directory. Expects `members` sorted by (name, component count,
-// dir): the count keeps a `..` detour behind the direct path.
+// a distinct directory. Expects `members` sorted by (name, dir) with a stable
+// sort: aliases collapse into the smallest dir, and one directory spelled
+// twice keeps its first listing.
 fn exclude_duplicate_names(members: &mut Vec<Member>) {
     let mut iter = std::mem::take(members).into_iter().peekable();
     while let Some(first) = iter.next() {
@@ -1852,8 +1896,25 @@ mod tests {
         );
         assert_eq!(
             workspace.member("shared").unwrap().dir(),
-            dir.path().join("ws").join("..").join("shared")
+            dir.path().join("shared")
         );
+    }
+
+    #[test]
+    fn a_parent_run_climbing_past_the_filesystem_root_matches_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "ws/pnpm-workspace.yaml",
+            &format!("packages:\n  - \"{}*\"\n", "../".repeat(64)),
+        );
+        write(
+            dir.path(),
+            "ws/package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = discover(&dir.path().join("ws")).unwrap();
+        assert_eq!(names_and_rel_dirs(&workspace), [("root", ".")]);
     }
 
     #[test]
@@ -1967,6 +2028,43 @@ mod tests {
     }
 
     #[test]
+    fn a_negation_matches_the_spelling_relative_to_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a", "b"] {
+            write(
+                dir.path(),
+                &format!("root/packages/{name}/package.json"),
+                &format!("{{ \"name\": \"{name}\", \"version\": \"1.0.0\" }}\n"),
+            );
+        }
+        for (patterns, expected) in [
+            (
+                "packages/*, !packages/b, ../root/packages/*",
+                vec![("a", "packages/a")],
+            ),
+            ("../root/packages/*, !packages/b", vec![("a", "packages/a")]),
+            (
+                "../root/packages/*, !../root/packages/b",
+                vec![("a", "packages/a"), ("b", "packages/b")],
+            ),
+            ("../root/packages/*, !packages/*", vec![]),
+            ("../*/packages/*, !packages/b", vec![("a", "packages/a")]),
+        ] {
+            let list: Vec<String> = patterns
+                .split(", ")
+                .map(|pattern| format!("\"{pattern}\""))
+                .collect();
+            write(
+                dir.path(),
+                "root/pnpm-workspace.yaml",
+                &format!("packages: [{}]\n", list.join(", ")),
+            );
+            let workspace = discover(&dir.path().join("root")).unwrap();
+            assert_eq!(names_and_rel_dirs(&workspace), expected, "{patterns}");
+        }
+    }
+
+    #[test]
     fn a_bare_parent_pattern_makes_the_parent_a_member() {
         let dir = tempfile::tempdir().unwrap();
         write(
@@ -2061,12 +2159,7 @@ mod tests {
             "name: shared\nversion: 1.0.0\n",
         );
         let err = format!("{:#}", discover(&dir.path().join("ws")).unwrap_err());
-        let manifest = dir
-            .path()
-            .join("ws")
-            .join("..")
-            .join("shared")
-            .join("package.yaml");
+        let manifest = dir.path().join("shared").join("package.yaml");
         assert!(
             err.contains(&format!(
                 "{}: only package.json manifests are supported",
@@ -3126,7 +3219,7 @@ mod tests {
             [
                 ("pkg-a", "packages/a"),
                 ("pkg-b", "packages/b"),
-                ("pkg-o", "packages/a/../../../ext/o"),
+                ("pkg-o", "../ext/o"),
             ]
         );
         write(
@@ -3139,13 +3232,80 @@ mod tests {
             names_and_rel_dirs(&workspace),
             [
                 ("pkg-a", "packages/a"),
-                ("pkg-b", "packages/a/../b"),
-                ("pkg-o", "packages/a/../../../ext/o"),
+                ("pkg-b", "packages/b"),
+                ("pkg-o", "../ext/o"),
             ]
         );
         assert_eq!(
             workspace.member("pkg-b").unwrap().dir(),
-            dir.path().join("root/packages/a").join("..").join("b")
+            dir.path().join("root/packages/b")
+        );
+        assert_eq!(
+            workspace.member("pkg-o").unwrap().dir(),
+            dir.path().join("ext/o")
+        );
+    }
+
+    #[test]
+    fn a_yarn_member_declaration_climbing_back_into_the_root_is_spelled_from_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "root/yarn.lock", "");
+        write(
+            dir.path(),
+            "root/package.json",
+            "{ \"workspaces\": [\"packages/a\"] }\n",
+        );
+        write(
+            dir.path(),
+            "root/packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": [\"../../other/c\"] }\n",
+        );
+        write(
+            dir.path(),
+            "root/other/c/package.json",
+            "{ \"name\": \"pkg-c\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = discover(&dir.path().join("root")).unwrap();
+        assert_eq!(
+            names_and_rel_dirs(&workspace),
+            [("pkg-a", "packages/a"), ("pkg-c", "other/c")]
+        );
+        assert_eq!(
+            workspace.member("pkg-c").unwrap().dir(),
+            dir.path().join("root/other/c")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_yarn_member_declaration_climbs_the_lexical_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "root/yarn.lock", "");
+        write(
+            dir.path(),
+            "root/package.json",
+            "{ \"workspaces\": [\"packages/*\"] }\n",
+        );
+        write(
+            dir.path(),
+            "real/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": [\"../b\"] }\n",
+        );
+        write(
+            dir.path(),
+            "real/b/package.json",
+            "{ \"name\": \"physical-b\", \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "root/packages/b/package.json",
+            "{ \"name\": \"lexical-b\", \"version\": \"1.0.0\" }\n",
+        );
+        std::os::unix::fs::symlink("../../real/a", dir.path().join("root/packages/link")).unwrap();
+        let workspace = discover(&dir.path().join("root")).unwrap();
+        assert_eq!(
+            names_and_rel_dirs(&workspace),
+            [("lexical-b", "packages/b"), ("pkg-a", "packages/link")]
         );
     }
 
@@ -3479,7 +3639,8 @@ mod tests {
             err.contains(&format!(
                 "{}: not found (listed in \"changesette.packages\")",
                 dir.path()
-                    .join("packages/missing")
+                    .join("packages")
+                    .join("missing")
                     .join("package.json")
                     .display()
             )),
@@ -3495,7 +3656,8 @@ mod tests {
         assert!(
             err.starts_with(
                 &dir.path()
-                    .join("packages/a")
+                    .join("packages")
+                    .join("a")
                     .join("package.json")
                     .display()
                     .to_string()
@@ -3512,7 +3674,8 @@ mod tests {
         assert!(
             err.starts_with(
                 &dir.path()
-                    .join("packages/a")
+                    .join("packages")
+                    .join("a")
                     .join("package.json")
                     .display()
                     .to_string()
@@ -3611,20 +3774,104 @@ mod tests {
     }
 
     #[test]
+    fn listed_packages_are_spelled_in_the_normal_form() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "root/packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "root/b/package.json",
+            "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
+        );
+        write(
+            dir.path(),
+            "root/package.json",
+            "{ \"name\": \"root\", \"version\": \"1.0.0\" }\n",
+        );
+        let root = dir.path().join("root");
+        let workspace = load_listed(
+            &root,
+            &["./../root/packages/./a", "a/../b", "./", "packages//a/"],
+        )
+        .unwrap();
+        assert_eq!(
+            names_and_rel_dirs(&workspace),
+            [("pkg-a", "packages/a"), ("pkg-b", "b"), ("root", ".")]
+        );
+        assert_eq!(
+            workspace.member("pkg-a").unwrap().dir(),
+            root.join("packages/a")
+        );
+        assert_eq!(workspace.member("pkg-b").unwrap().dir(), root.join("b"));
+        assert_eq!(workspace.member("root").unwrap().dir(), root);
+    }
+
+    #[test]
+    fn a_listed_package_climbing_past_the_filesystem_root_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = format!("{}x", "../".repeat(64));
+        let err = load_listed_err(dir.path(), &[&entry]);
+        assert_eq!(
+            err,
+            format!(
+                "invalid \"changesette.packages\" entry {entry:?}: escapes the filesystem root"
+            )
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_listed_package_with_a_drive_prefixed_segment_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        for entry in ["../C:/x", "C:/x", "C:x", "packages/C:x"] {
+            let err = load_listed_err(dir.path(), &[entry]);
+            assert!(
+                err.contains(&format!("entry {entry:?}: "))
+                    && err.ends_with("is not a directory name"),
+                "{err}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_listed_drive_like_segment_is_an_ordinary_name_on_unix() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "C:/x/package.json",
+            "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = load_listed(&dir.path().join("root"), &["../C:/x"]).unwrap();
+        assert_eq!(names_and_rel_dirs(&workspace), [("pkg-x", "../C:/x")]);
+    }
+
+    #[test]
     fn rejects_a_root_that_is_missing_or_a_file() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "file", "");
-        let missing = dir.path().join("missing");
-        let err = format!("{:#}", validate_root(&missing).unwrap_err());
-        assert!(
-            err.starts_with(&format!("invalid --root {}: ", missing.display())),
-            "{err}"
-        );
-        let file = dir.path().join("file");
-        let err = format!("{:#}", validate_root(&file).unwrap_err());
+        let err = resolve_root(&dir.path().join("missing")).unwrap_err();
         assert_eq!(
-            err,
-            format!("invalid --root {}: not a directory", file.display())
+            err.downcast_ref::<io::Error>().map(io::Error::kind),
+            Some(io::ErrorKind::NotFound),
+            "{err:#}"
+        );
+        let err = format!("{:#}", resolve_root(&dir.path().join("file")).unwrap_err());
+        assert_eq!(err, "not a directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolves_a_symlinked_root_to_its_physical_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("real")).unwrap();
+        std::os::unix::fs::symlink("real", dir.path().join("link")).unwrap();
+        assert_eq!(
+            resolve_root(&dir.path().join("link")).unwrap(),
+            dir.path().canonicalize().unwrap().join("real")
         );
     }
 }

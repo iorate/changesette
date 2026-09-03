@@ -1,5 +1,4 @@
 use std::iter::Peekable;
-use std::path::{Component, Path, Prefix};
 use std::str::CharIndices;
 
 use anyhow::{Result, bail};
@@ -133,7 +132,7 @@ fn compile_alternative(body: &str) -> Result<Option<Pattern>> {
     let parts = split(body);
     let mut ascend = 0;
     let mut segs = Vec::new();
-    for (index, part) in parts.into_iter().enumerate() {
+    for part in parts {
         if part.is_empty() || part == "." {
             continue;
         }
@@ -143,15 +142,6 @@ fn compile_alternative(body: &str) -> Result<Option<Pattern>> {
             }
             ascend += 1;
             continue;
-        }
-        // A leading Windows drive prefix (`C:/x`, or the drive-relative
-        // `C:x`) addresses a location outside the root, so it is the same
-        // loud error. The `\`-spelled prefix forms (UNC, verbatim, device)
-        // are left to the matcher, where `\` is an escape and they match
-        // nothing; on Unix nothing parses as a prefix and `C:` stays an
-        // ordinary name.
-        if index == 0 && has_drive_prefix(part) {
-            bail!("drive-prefixed patterns are not supported")
         }
         segs.push(classify(part)?);
     }
@@ -209,15 +199,6 @@ fn skip_class(chars: &mut Peekable<CharIndices<'_>>) {
         }
         first = false;
     }
-}
-
-// Only the first component is looked at: a `\` in the part is a separator
-// to the std parser on Windows but a glob escape here.
-fn has_drive_prefix(part: &str) -> bool {
-    matches!(
-        Path::new(part).components().next(),
-        Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_))
-    )
 }
 
 fn classify(part: &str) -> Result<Seg> {
@@ -368,45 +349,22 @@ mod tests {
         }
     }
 
-    #[cfg(windows)]
     #[test]
-    fn rejects_a_leading_drive_prefix() {
-        for pattern in ["C:/packages/*", "C:x", "c:/x", "C:", "!C:/x", r"C:\x"] {
-            assert!(error(pattern).contains("drive"), "{pattern}");
-        }
-        assert!(has_drive_prefix("C:"));
-        assert!(has_drive_prefix("C:x"));
-        assert!(has_drive_prefix("C:*"));
-        assert!(!has_drive_prefix("x"));
-        assert!(!has_drive_prefix("a\\b"));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_backslash_spelled_prefix_form_compiles() {
-        for pattern in [r"\\server\share", r"\\?\C:\x"] {
-            assert!(!compile(pattern).unwrap().1.is_empty(), "{pattern}");
-            assert!(!has_drive_prefix(pattern), "{pattern}");
-        }
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_drive_prefix_after_the_first_raw_segment_compiles() {
+    fn a_drive_like_segment_is_an_ordinary_glob() {
+        assert_eq!(positive("C:/x").segs(), [seg("C:"), seg("x")]);
+        assert_eq!(positive("C:x").segs(), [seg("C:x")]);
+        assert_eq!(positive("C:*").segs(), [seg("C:*")]);
+        assert_eq!(positive("C:").segs(), [seg("C:")]);
+        assert_eq!(negation("!C:/x").segs(), [seg("C:"), seg("x")]);
         assert_eq!(
             positive("packages/C:/x").segs(),
             [seg("packages"), seg("C:"), seg("x")]
         );
-        assert_eq!(positive("./C:/x").segs(), [seg("C:"), seg("x")]);
         assert_eq!(positive("../C:/x").segs(), [seg("C:"), seg("x")]);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_drive_like_segment_is_an_ordinary_name_on_unix() {
-        assert_eq!(positive("C:/x").segs(), [seg("C:"), seg("x")]);
-        assert_eq!(positive("C:x").segs(), [seg("C:x")]);
-        assert!(!has_drive_prefix("C:"));
+        assert_eq!(
+            segs_of(&positives("{C:/x,y}")),
+            [&[seg("C:"), seg("x")][..], &[seg("y")]]
+        );
     }
 
     #[test]
@@ -604,12 +562,6 @@ mod tests {
             segs_of(&positives("{./a,b/}")),
             [&[seg("a")][..], &[seg("b")]]
         );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn rejects_a_drive_prefix_in_an_alternative() {
-        assert!(error("{C:/x,y}").contains("drive"));
     }
 
     #[test]

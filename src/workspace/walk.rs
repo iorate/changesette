@@ -8,7 +8,7 @@ use anyhow::{Result, anyhow};
 use tracing::{debug, warn};
 
 use super::pattern::{Pattern, Seg, seg_matches};
-use super::{probe_is_file, report_fs_error};
+use super::{probe_is_file, rel_dir_between, report_fs_error};
 
 pub(crate) fn collect(
     root: &Path,
@@ -18,29 +18,38 @@ pub(crate) fn collect(
     reject_pnpm_manifests: bool,
 ) -> Result<BTreeMap<String, PathBuf>> {
     let mut walker = Walker {
+        root,
         patterns: positives,
         negations,
         excluded_names,
         reject_pnpm_manifests,
         candidates: BTreeMap::new(),
     };
-    // `..` is pushed rather than taken from `Path::ancestors()`: the OS
-    // resolves it, and a relative root has no ancestors.
     let mut groups: BTreeMap<usize, Vec<State>> = BTreeMap::new();
     for (index, pattern) in positives.iter().enumerate() {
         groups.entry(pattern.ascend()).or_default().push((index, 0));
     }
     for (ascend, states) in groups {
-        let mut dir = root.to_path_buf();
-        let mut rel = String::new();
-        for _ in 0..ascend {
-            dir.push("..");
-            rel = child_rel(&rel, "..");
-        }
+        let Some(dir) = ancestor(root, ascend) else {
+            debug!(
+                "{}: {ascend} leading `..` climb past the filesystem root",
+                root.display()
+            );
+            continue;
+        };
+        let rel = vec![".."; ascend].join("/");
         let states = closure(positives, states);
-        walker.walk(&dir, &rel, &states)?;
+        walker.walk(dir, &rel, &states)?;
     }
     Ok(walker.candidates)
+}
+
+fn ancestor(root: &Path, ascend: usize) -> Option<&Path> {
+    let mut dir = root;
+    for _ in 0..ascend {
+        dir = dir.parent()?;
+    }
+    Some(dir)
 }
 
 pub(crate) fn has_manifest(dir: &Path, reject_pnpm_manifests: bool) -> Result<bool> {
@@ -114,6 +123,7 @@ fn child_rel(rel: &str, name: &str) -> String {
 }
 
 struct Walker<'a> {
+    root: &'a Path,
     patterns: &'a [Pattern],
     negations: &'a [Pattern],
     excluded_names: &'a [&'a str],
@@ -130,16 +140,20 @@ impl Walker<'_> {
             .iter()
             .any(|&(pattern, seg)| seg == patterns[pattern].segs().len())
         {
-            let rel_dir = if rel.is_empty() { "." } else { rel };
+            // The lexical path from the root rather than the spelling the
+            // walk arrived by: a detour through `..` back into the root
+            // collapses into the direct spelling, and the negations see the
+            // same spelling that `dir` reports.
+            let rel_dir = rel_dir_between(self.root, dir);
             if probe_is_file(&dir.join("package.json")) {
-                if !excluded(rel_dir, self.negations) {
+                if !excluded(&rel_dir, self.negations) {
                     self.candidates
-                        .entry(rel_dir.to_owned())
+                        .entry(rel_dir)
                         .or_insert_with(|| dir.to_path_buf());
                 }
             } else if self.reject_pnpm_manifests
                 && let Some(path) = pnpm_only_manifest(dir)
-                && !excluded(rel_dir, self.negations)
+                && !excluded(&rel_dir, self.negations)
             {
                 return Err(unsupported_manifest(&path));
             }
@@ -471,7 +485,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         touch(dir.path(), "packages/a/package.json");
         assert_eq!(
-            rel_dirs(dir.path(), &["packages/a", "packages/C:/x", "./C:/x"]),
+            rel_dirs(
+                dir.path(),
+                &["packages/a", "packages/C:/x", "./C:/x", "C:/x", "C:*"]
+            ),
             ["packages/a"]
         );
         assert_eq!(
