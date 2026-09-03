@@ -1,7 +1,4 @@
-use std::{
-    collections::BTreeSet,
-    path::{Component, Path, Prefix},
-};
+use std::{collections::BTreeSet, path::Path};
 
 use anyhow::{Context, Result, bail};
 use fast_glob::{glob_match, validate};
@@ -269,17 +266,7 @@ fn validate_rel_dir(text: &str) -> Result<()> {
     if text.starts_with('/') {
         bail!("absolute paths are not supported")
     }
-    if has_drive_prefix(text.split('/').next().unwrap_or_default()) {
-        bail!("drive-prefixed paths are not supported")
-    }
     Ok(())
-}
-
-fn has_drive_prefix(part: &str) -> bool {
-    matches!(
-        Path::new(part).components().next(),
-        Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_))
-    )
 }
 
 #[cfg(test)]
@@ -696,9 +683,10 @@ mod tests {
     }
 
     #[test]
-    fn accepts_non_canonical_spellings() {
+    fn checks_only_the_syntax() {
         for text in [
-            "a", "a/b", "a/!b", ".", "../a", "a/../b", "..", "./a", "a//b", "a/", "./",
+            "a", "a/b", "a/!b", ".", "../a", "a/../b", "a/./b", "..", "./a", "a//b", "a/", "./",
+            "C:/x", "C:x",
         ] {
             validate_rel_dir(text).unwrap();
         }
@@ -737,28 +725,5 @@ mod tests {
         for text in ["packages/*", "a?", "[a]", "a]", "{a,b}", "a}", "!a", "**"] {
             validate_rel_dir(text).unwrap();
         }
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn rejects_a_leading_drive_prefix() {
-        for text in ["C:/x", "C:x", "C:"] {
-            assert!(rel_dir_err(text).contains("drive"), "{text}");
-        }
-        for text in ["packages/C:/x", "a/C:x", "../C:/x"] {
-            validate_rel_dir(text).unwrap();
-        }
-        assert!(has_drive_prefix("C:"));
-        assert!(has_drive_prefix("C:x"));
-        assert!(!has_drive_prefix("a"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_drive_like_segment_is_an_ordinary_name_on_unix() {
-        for text in ["C:/x", "C:x"] {
-            validate_rel_dir(text).unwrap();
-        }
-        assert!(!has_drive_prefix("C:"));
     }
 }

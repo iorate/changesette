@@ -1,5 +1,11 @@
-use std::{env, ffi::OsString, path::PathBuf, process::ExitCode};
+use std::{
+    env,
+    ffi::OsString,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
+use anyhow::Context;
 use clap::Parser;
 
 use crate::workspace::Workspace;
@@ -29,7 +35,7 @@ struct Cli {
     /// The lowest level of messages to print to stderr
     #[arg(long, value_name = "LEVEL", global = true, default_value = "info")]
     log_level: LogLevel,
-    /// Use DIR as the workspace root instead of finding it from the working directory; only the markers in DIR decide the members
+    /// Use DIR as the workspace root instead of finding it from the working directory; symlinks in DIR are resolved, and only the markers in DIR decide the members
     #[arg(long, value_name = "DIR", global = true, env = "CHANGESETTE_ROOT")]
     root: Option<OsString>,
 }
@@ -175,11 +181,15 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> anyhow::Result<()> {
     let (root, marker) = if let Some(dir) = cli.root.filter(|dir| !dir.is_empty()) {
-        let root = PathBuf::from(dir);
-        workspace::validate_root(&root)?;
+        let dir = Path::new(&dir);
+        let root = workspace::resolve_root(dir)
+            .with_context(|| format!("invalid --root {}", dir.display()))?;
         (root, None)
     } else {
-        let (root, marker) = workspace::find_root(&env::current_dir()?)?;
+        let cwd = env::current_dir()?;
+        let cwd = workspace::resolve_root(&cwd)
+            .with_context(|| format!("invalid working directory {}", cwd.display()))?;
+        let (root, marker) = workspace::find_root(&cwd)?;
         (root, Some(marker))
     };
     let config = config::load(&root.join(".changeset"))?;

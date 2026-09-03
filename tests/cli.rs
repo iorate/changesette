@@ -33,11 +33,7 @@ fn stderr(output: &Output) -> String {
 }
 
 fn expected_path(dir: &Path, rel: &str) -> String {
-    let mut path = if cfg!(windows) {
-        dir.to_path_buf()
-    } else {
-        dir.canonicalize().unwrap()
-    };
+    let mut path = dunce::canonicalize(dir).unwrap();
     path.extend(rel.split('/').filter(|part| !part.is_empty()));
     path.display().to_string()
 }
@@ -3890,12 +3886,28 @@ fn root_option_takes_a_relative_directory() {
     let err = stderr(&output);
     let path = added_path(&err);
     assert!(
-        Path::new(path).starts_with(Path::new("../..").join(".changeset")),
+        Path::new(path).starts_with(expected_path(dir.path(), ".changeset")),
         "{path}"
     );
-    let file = cwd.join(path);
-    assert_changeset_path(file.to_str().unwrap());
-    assert!(file.is_file());
+    assert_changeset_path(path);
+    assert!(Path::new(path).is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn root_option_resolves_a_symlink_to_the_physical_directory() {
+    let dir = workspace_dir();
+    std::os::unix::fs::symlink("packages/a", dir.path().join("link")).unwrap();
+    let output = changesette(dir.path(), &["init", "--root", "link"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "Created {}\nCreated {}\n",
+            expected_path(dir.path(), "packages/a/.changeset/README.md"),
+            expected_path(dir.path(), "packages/a/.changeset/config.json")
+        )
+    );
 }
 
 #[test]
@@ -3964,13 +3976,12 @@ fn init_with_root_creates_the_directory_there() {
     let dir = workspace_dir();
     let output = changesette(dir.path(), &["init", "--root", "packages/a"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    let changeset_dir = Path::new("packages/a").join(".changeset");
     assert_eq!(
         stderr(&output),
         format!(
             "Created {}\nCreated {}\n",
-            changeset_dir.join("README.md").display(),
-            changeset_dir.join("config.json").display()
+            expected_path(dir.path(), "packages/a/.changeset/README.md"),
+            expected_path(dir.path(), "packages/a/.changeset/config.json")
         )
     );
     assert!(
@@ -4009,7 +4020,10 @@ fn root_option_rejects_a_directory_without_a_manifest() {
     assert!(!output.status.success());
     assert_eq!(
         stderr(&output),
-        "error: no package.json in empty; --root must name a workspace root or a package\n"
+        format!(
+            "error: no package.json in {}; --root must name a workspace root or a package\n",
+            expected_path(dir.path(), "empty")
+        )
     );
 }
 
@@ -4019,13 +4033,12 @@ fn root_option_accepts_a_backslash_separator() {
     let dir = workspace_dir();
     let output = changesette(dir.path(), &["init", "--root", "packages\\a"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    let changeset_dir = Path::new("packages\\a").join(".changeset");
     assert_eq!(
         stderr(&output),
         format!(
             "Created {}\nCreated {}\n",
-            changeset_dir.join("README.md").display(),
-            changeset_dir.join("config.json").display()
+            expected_path(dir.path(), "packages/a/.changeset/README.md"),
+            expected_path(dir.path(), "packages/a/.changeset/config.json")
         )
     );
 }
@@ -4144,19 +4157,18 @@ fn config_packages_missing_directory_is_an_error() {
 }
 
 #[test]
-fn config_packages_aliases_collapse_into_the_first_listed_spelling() {
+fn config_packages_aliases_collapse_into_the_normal_spelling() {
     let dir = workspace_dir();
     write_config_packages(dir.path(), &["packages/a", "./packages/a"]);
     let output = changesette(dir.path(), &["get-packages"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), PKG_A_JSON);
-    write_config_packages(dir.path(), &["./packages/a"]);
-    let output = changesette(dir.path(), &["get-packages"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"./packages/a\"}]\n"
-    );
+    for entry in ["./packages/a", "packages//a/", "packages/b/../a"] {
+        write_config_packages(dir.path(), &[entry]);
+        let output = changesette(dir.path(), &["get-packages"]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_eq!(stdout(&output), PKG_A_JSON, "{entry}");
+    }
 }
 
 fn sibling_workspace_dir() -> TempDir {
@@ -4193,46 +4205,49 @@ fn config_packages_reach_outside_a_relative_root() {
 }
 
 #[test]
-fn config_packages_keep_the_spelling_of_the_root() {
+fn config_packages_spell_the_root_as_a_dot() {
     let dir = workspace_dir();
     fs::write(
         dir.path().join("package.json"),
         "{\n  \"name\": \"root\",\n  \"version\": \"1.0.0\"\n}\n",
     )
     .unwrap();
-    for rel_dir in [".", "./"] {
-        write_config_packages(dir.path(), &[rel_dir]);
+    for entry in [".", "./", "packages/.."] {
+        write_config_packages(dir.path(), &[entry]);
         let output = changesette(dir.path(), &["get-packages"]);
         assert!(output.status.success(), "{}", stderr(&output));
         assert_eq!(
             stdout(&output),
-            format!(
-                "[{{\"name\":\"root\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"{rel_dir}\"}}]\n"
-            )
+            "[{\"name\":\"root\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\".\"}]\n",
+            "{entry}"
         );
     }
     fs::remove_file(dir.path().join("package.json")).unwrap();
-    let root = expected_path(dir.path(), "");
-    let output = changesette(dir.path(), &["get-packages", "--root", &root]);
+    let output = changesette(dir.path(), &["get-packages", "--root", "."]);
     assert!(!output.status.success());
-    let manifest = Path::new(&root).join("./package.json");
     assert_eq!(
         stderr(&output),
         format!(
             "error: {}: not found (listed in \"changesette.packages\")\n",
-            manifest.display()
+            expected_path(dir.path(), "package.json")
         )
     );
 }
 
 #[cfg(windows)]
 #[test]
-fn config_packages_mid_path_drive_prefix_fails_at_the_filesystem() {
+fn config_packages_reject_a_drive_prefixed_segment() {
     let dir = workspace_dir();
-    write_config_packages(dir.path(), &["packages/C:x"]);
-    let output = changesette(dir.path(), &["get-packages"]);
-    assert!(!output.status.success());
-    let err = stderr(&output);
-    assert!(err.starts_with("error: "), "{err}");
-    assert!(err.contains("C:x"), "{err}");
+    for entry in ["packages/C:x", "../C:/x", "C:/x"] {
+        write_config_packages(dir.path(), &[entry]);
+        let output = changesette(dir.path(), &["get-packages"]);
+        assert!(!output.status.success());
+        let err = stderr(&output);
+        assert!(
+            err.starts_with(&format!(
+                "error: invalid \"changesette.packages\" entry {entry:?}: "
+            )) && err.ends_with("is not a directory name\n"),
+            "{err}"
+        );
+    }
 }
