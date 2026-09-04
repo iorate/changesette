@@ -15,13 +15,13 @@ anyhow = "1.0.104"
 clap = { version = "4.6.4", features = ["derive", "env"] }
 dunce = "1.0.5"
 fast-glob = "1.1.0"
+file-id = "0.2.3"
 inquire = "0.9.4"
 jsonc-parser = { version = "0.33.1", features = ["cst"] }
 petname = { version = "3.2.0", default-features = false, features = ["default-words"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }
 rand = "0.10.2"
 regex = "1.13.1"
-same-file = "1.0.6"
 saphyr = "0.0.12"
 semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
