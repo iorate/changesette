@@ -1,5 +1,31 @@
 # changesette
 
+## 6.3.0
+
+### Minor Changes
+
+- **Semi-breaking:** workspace discovery now follows each package manager more closely, so the workspace root and the members found for an existing repository can differ from those of the previous release.
+
+  - A `yarn.lock` marks a Yarn workspace root. The nearest `pnpm-workspace.yaml` or `yarn.lock` above the working directory is the root (within one directory the former wins). Without either, npm's own rule applies: the nearest `package.json` is the root unless the `workspaces` of an ancestor lists it as a member, in which case that ancestor is. So a `workspaces` field below one of those markers, such as in a Yarn worktree child or a leftover `{"nohoist": [...]}` in a pnpm member, no longer becomes a root of its own; a leftover `workspaces` in an npm member no longer does either, as npm re-roots to the workspace root; and a package the npm root above does not list, such as an example, is a single package, as it is for npm.
+  - While looking for an npm workspace root, a `package.json` above the nearest one that fails to parse is passed over with a warning, as npm reads it as `{}`; the nearest one still has to parse unless `changesette.packages` replaces the enumeration.
+  - A falsy `workspaces` field (`false`, `0`, `""`) is now passed over like `null`.
+  - Under Yarn, a `workspaces` field that is neither an array nor `{"packages": [...]}` is ignored with a warning, and a non-string pattern in it is skipped with a warning, as Yarn ignores both; under npm they remain errors, as npm rejects them.
+  - The Yarn root package is always a member candidate, and the `workspaces` field of every Yarn member is expanded in turn, as Yarn does for its worktrees.
+  - An empty pattern matches nothing instead of being an error, and a `/` inside a character class is accepted as a class member. A leading Windows drive prefix is no longer an error: `C:/x` is read like `C:\x` and `C:*`, with `C:` compared with the directory entries as a name, so it silently matches nothing. A `\` remains an escape in every dialect; npm's rewriting of `\` to `/` is not reproduced.
+  - A literal segment is now compared with the directory entries like a wildcard, so on a case-insensitive filesystem an all-literal pattern such as `A/lib` no longer matches `a/lib` and a matched path is always spelled as on disk; only the `package.json` name itself is still found however it is spelled, as it is under npm and Yarn.
+  - A symlinked directory matched by a wildcard segment is now entered one level and listed, as one matched by a literal segment already was; `**` still never enters a symlinked directory.
+
+- A brace alternative in a workspace pattern may now contain a `/`, so `packages/{a,b/c}` lists `packages/a` and `packages/b/c`: braces are expanded before the pattern is split into segments, as npm, Yarn, and pnpm do. As a consequence each alternative is read on its own: `{.a,b}` now matches the dot directory `.a`, which the dot rule used to skip, and a `**` alternative such as `{**,a}` now reaches any depth, where it used to match a single directory name. A pattern whose braces expand into more than 100,000 alternatives is an error.
+
+- Add two ways around the workspace detection:
+
+  - `--root <DIR>` names the workspace root directly, so no ancestor of the working directory is looked at: only the `pnpm-workspace.yaml`, `yarn.lock`, or `workspaces` field in that directory decides how its members are enumerated, and a directory with none of them is a single package. A relative `DIR` is taken relative to the working directory; symlinks in `DIR` are resolved, so the root is the physical directory and paths in messages are spelled that way. The option is also read from `CHANGESETTE_ROOT`; it wins over the variable, and an empty value counts as unset.
+  - The `changesette.packages` setting of `.changeset/config.json` — `{"changesette": {"packages": ["packages/a", "."]}}` — replaces the member enumeration entirely with the listed directories, each of which must hold a `package.json`. Each entry is a `/`-separated path relative to the root, taken literally: a `*` is a directory named `*`, not a wildcard. `.` and empty segments are dropped and `..` climbs lexically from the root, so an entry may name a directory outside the root, and the package is reported with the resulting relative path: `./packages/a` as `packages/a`, `./` as `.`, `../root/packages/a` as `packages/a`. On Windows, a segment holding a drive prefix, such as `C:` or `C:x`, is an error; elsewhere such a segment is an ordinary directory name. Neither the markers nor the workspace patterns are read, and the root `package.json` is read only when listed, so a pattern the built-in dialect rejects can be worked around by listing the directories. The listed packages still take the usual member qualification and the `ignore` / `privatePackages` settings.
+
+- A workspace pattern may now start with `..` to reach outside the root, as it does under npm, Yarn, and pnpm, including in the `workspaces` field of a Yarn member; a `..` after the first segment remains an error. `get-packages` reports such a member with a `dir` starting with `..`. The `dir` is always the path relative to the root: a member found through the `workspaces` field of a Yarn member is reported from the root rather than from the declaring member, and a pattern that climbs back into the root, such as `../root/packages/*`, lists its members with the direct spelling, `packages/a`. A negation is matched against that same `dir`, so `!packages/b` excludes `packages/b` however it was reached, and `!../ext/o` excludes only a member that stays outside the root.
+
+- Paths in messages are now printed as the operating system spells them: `\` is no longer rewritten to `/` on Windows, and paths are no longer shortened relative to the working directory.
+
 ## 6.2.1
 
 ### Patch Changes

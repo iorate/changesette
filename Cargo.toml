@@ -1,6 +1,6 @@
 [package]
 name = "changesette"
-version = "6.2.1"
+version = "6.3.0"
 edition = "2024"
 rust-version = "1.88"
 description = "A version and changelog manager using the changesets file format"
