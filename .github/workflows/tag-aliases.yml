@@ -30,14 +30,9 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - name: Install changesette
         id: install
-        uses: ./setup
+        uses: $/setup
 
       - name: Verify install and output
         env:
@@ -51,7 +46,7 @@ jobs:
           fi
 
       - name: Re-run to exercise cache hit
-        uses: ./setup
+        uses: $/setup
 
   tag-aliases:
     needs: test-setup
