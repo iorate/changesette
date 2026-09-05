@@ -8,4 +8,7 @@ paths:
   # actionlint does not know the self-repository syntax ("$/...") yet.
   .github/workflows/tag-aliases.yml:
     ignore:
+      - 'reusable workflow call "\$/[^"]*" at "uses" is not following the format'
+  .github/workflows/test-setup.yml:
+    ignore:
       - 'specifying action "\$/[^"]*" in invalid format because ref is missing'

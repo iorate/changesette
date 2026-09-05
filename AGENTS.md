@@ -10,7 +10,7 @@ Pure bin crate: there is no library target, and items crossing module boundaries
 
 ## Changesets
 
-When a change affects the published binary, add a changeset with `cargo run -- add --<bump> changesette -m <message>`. Write the message as full sentences ending with a period; it becomes a changelog entry as is.
+When a change affects the published binary or the setup action, add a changeset with `cargo run -- add --<bump> changesette -m <message>`. Write the message as full sentences ending with a period; it becomes a changelog entry as is.
 
 ## Verifying Changes
 
