@@ -1,5 +1,11 @@
 # changesette
 
+## 6.3.1
+
+### Patch Changes
+
+- The setup action now verifies that the installed binary reports the expected version.
+
 ## 6.3.0
 
 ### Minor Changes
