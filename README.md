@@ -114,7 +114,10 @@ jobs:
           fi
           if ! gh release view "v$version" > /dev/null 2>&1; then
             if notes="$(changesette get-changelog-entry my-package "$version")"; then
-              gh release create "v$version" --target "$GITHUB_SHA" --notes "$notes"
+              gh release create "v$version" \
+                --target "$GITHUB_SHA" \
+                --title "v$version" \
+                --notes "$notes"
             fi
           fi
         env:
@@ -191,7 +194,10 @@ jobs:
             version="$(jq -re .version <<< "$package")"
             if ! gh release view "$name@$version" > /dev/null 2>&1; then
               if notes="$(changesette get-changelog-entry "$name" "$version")"; then
-                gh release create "$name@$version" --target "$GITHUB_SHA" --notes "$notes"
+                gh release create "$name@$version" \
+                  --target "$GITHUB_SHA" \
+                  --title "$name@$version" \
+                  --notes "$notes"
               fi
             fi
           done
