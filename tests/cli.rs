@@ -1138,7 +1138,7 @@ fn get_packages_debug_reports_an_empty_member_list() {
     let err = stderr(&output);
     assert!(
         err.contains(&format!(
-            "debug: workspace {} (single package): no members",
+            "debug: workspace {} (npm): no members",
             expected_path(dir.path(), "")
         )),
         "{err}"
@@ -3868,6 +3868,34 @@ fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
             "warning: {}: \"workspaces\" must be an array of strings or an object whose \"packages\" is an array of strings: ignored\n",
             expected_path(dir.path(), "package.json")
         )
+    );
+}
+
+#[test]
+fn get_packages_skips_a_private_npm_root_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{ \"name\": \"root\", \"version\": \"1.0.0\", \"private\": true, \"workspaces\": [\"packages/*\"] }\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("packages/a")).unwrap();
+    fs::write(
+        dir.path().join("packages/a/package.json"),
+        "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"packages/a\"}]\n"
+    );
+    let output = changesette(dir.path(), &["get-packages", "--all"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"pkg-a\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"root\",\"version\":\"1.0.0\",\"private\":true,\"dir\":\".\"}]\n"
     );
 }
 
