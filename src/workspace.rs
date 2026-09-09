@@ -84,10 +84,10 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, RootMarker)> {
                 continue;
             }
         };
-        let pm = PackageManager::Npm;
-        let Some(patterns) = workspaces_patterns(&value, &path, pm)? else {
+        let Some(patterns) = workspaces_patterns(&value, &path) else {
             continue;
         };
+        let pm = PackageManager::Npm;
         // The candidate prefix is looked for among every matched directory
         // holding a package.json, so the member qualification (and the
         // duplicate-name exclusion) must not run first.
@@ -163,7 +163,9 @@ impl Workspace {
             )),
             RootMarker::PnpmWorkspaceYaml => {
                 let manifest = root.join("pnpm-workspace.yaml");
-                let patterns = pnpm_patterns(&manifest)?;
+                let patterns = read_pnpm_manifest(&manifest)?
+                    .and_then(|doc| pnpm_patterns(&doc, &manifest))
+                    .unwrap_or_default();
                 let pm = PackageManager::Pnpm;
                 Ok(Workspace::new(
                     root.to_path_buf(),
@@ -176,7 +178,7 @@ impl Workspace {
                 let mut patterns = Vec::new();
                 if probe_is_file(&path)
                     && let Some(value) = read_manifest(&path)?
-                    && let Some(declared) = workspaces_patterns(&value, &path, pm)?
+                    && let Some(declared) = workspaces_patterns(&value, &path)
                 {
                     patterns = declared;
                 }
@@ -194,7 +196,7 @@ impl Workspace {
                     )
                 };
                 let pm = PackageManager::Npm;
-                if let Some(patterns) = workspaces_patterns(&value, &path, pm)? {
+                if let Some(patterns) = workspaces_patterns(&value, &path) {
                     return Ok(Workspace::new(
                         root.to_path_buf(),
                         pm.as_str(),
@@ -391,97 +393,56 @@ pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
     Ok(Some(value))
 }
 
-// A null `packages` is the plain YAML spelling of an empty list and reads as
-// absent.
-fn pnpm_patterns(path: &Path) -> Result<Vec<String>> {
+fn all_strings<'a>(items: impl IntoIterator<Item = Option<&'a str>>) -> Option<Vec<String>> {
+    items
+        .into_iter()
+        .map(|item| item.map(str::to_owned))
+        .collect()
+}
+
+// An empty or comment-only file holds no document, making it a settings-only
+// root.
+fn read_pnpm_manifest(path: &Path) -> Result<Option<Yaml<'static>>> {
     let text = fs::read_to_string(path).with_context(|| path.display().to_string())?;
     let docs = match Yaml::load_from_str(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
         Ok(docs) => docs,
         Err(err) => bail!("{}: invalid YAML: {err}", path.display()),
     };
-    // A missing or null document keeps an empty or comment-only file a
-    // valid settings-only root.
-    let Some(doc) = docs.into_iter().next() else {
-        return Ok(Vec::new());
-    };
-    if doc.is_null() {
-        return Ok(Vec::new());
-    }
-    let Yaml::Mapping(mapping) = doc else {
-        bail!("{}: not a YAML mapping", path.display())
-    };
-    let packages = mapping
-        .iter()
-        .find_map(|(key, value)| (key.as_str() == Some("packages")).then_some(value));
-    let Some(packages) = packages else {
-        return Ok(Vec::new());
-    };
-    let items = match packages {
-        Yaml::Sequence(items) => items,
-        _ if packages.is_null() => return Ok(Vec::new()),
-        _ => bail!("{}: \"packages\" must be a list of strings", path.display()),
-    };
-    let mut patterns = Vec::new();
-    for item in items {
-        let Some(pattern) = item.as_str() else {
-            bail!("{}: \"packages\" must be a list of strings", path.display())
-        };
-        patterns.push(pattern.to_owned());
-    }
-    Ok(patterns)
+    Ok(docs.into_iter().next())
 }
 
-fn workspaces_patterns(
-    value: &Value,
-    path: &Path,
-    pm: PackageManager,
-) -> Result<Option<Vec<String>>> {
-    let Some(workspaces) = value.get("workspaces") else {
-        return Ok(None);
-    };
-    let items = match workspaces {
-        Value::Array(items) => Some(items),
-        // The Yarn 1 object form `{packages: [...], nohoist: [...]}`; every
-        // key but `packages` is ignored.
-        Value::Object(object) => match object.get("packages") {
-            Some(Value::Array(items)) => Some(items),
-            _ => None,
-        },
-        Value::Null | Value::Bool(false) => return Ok(None),
-        Value::Number(number) if number.as_f64() == Some(0.0) => return Ok(None),
-        Value::String(text) if text.is_empty() => return Ok(None),
-        _ => None,
-    };
-    let Some(items) = items else {
-        let what = if workspaces.is_object() {
-            "\"packages\" in \"workspaces\" must be a list of strings"
-        } else {
-            "\"workspaces\" must be an array or an object"
-        };
-        if pm == PackageManager::Yarn {
-            warn!("{}: {what}: ignored", path.display());
-            return Ok(None);
-        }
-        bail!("{}: {what}", path.display())
-    };
-    let mut patterns = Vec::new();
-    for item in items {
-        let Some(pattern) = item.as_str() else {
-            if pm == PackageManager::Yarn {
-                warn!(
-                    "{}: a non-string \"workspaces\" pattern is skipped",
-                    path.display()
-                );
-                continue;
-            }
-            bail!(
-                "{}: \"workspaces\" patterns must be strings",
-                path.display()
-            )
-        };
-        patterns.push(pattern.to_owned());
+fn pnpm_patterns(doc: &Yaml, path: &Path) -> Option<Vec<String>> {
+    let packages = doc.as_mapping_get("packages");
+    if packages.is_none() && doc.is_mapping() {
+        return None;
     }
-    Ok(Some(patterns))
+    packages
+        .and_then(Yaml::as_vec)
+        .and_then(|items| all_strings(items.iter().map(Yaml::as_str)))
+        .or_else(|| {
+            warn!(
+                "{}: must be a mapping whose \"packages\" is a list of strings: ignored",
+                path.display()
+            );
+            None
+        })
+}
+
+fn workspaces_patterns(value: &Value, path: &Path) -> Option<Vec<String>> {
+    let workspaces = value.get("workspaces")?;
+    let items = match workspaces {
+        Value::Object(object) => object.get("packages").and_then(Value::as_array),
+        _ => workspaces.as_array(),
+    };
+    items
+        .and_then(|items| all_strings(items.iter().map(Value::as_str)))
+        .or_else(|| {
+            warn!(
+                "{}: \"workspaces\" must be an array of strings or an object whose \"packages\" is an array of strings: ignored",
+                path.display()
+            );
+            None
+        })
 }
 
 fn collect_members(
@@ -531,7 +492,7 @@ fn collect_packages(
             };
             if pm == PackageManager::Yarn
                 && rel_dir != "."
-                && let Some(declared) = workspaces_patterns(&value, &path, pm)?
+                && let Some(declared) = workspaces_patterns(&value, &path)
                 && visited.insert(dir_id(&child_dir)?)
             {
                 queue.push_back((child_dir.clone(), path.clone(), declared));
@@ -791,15 +752,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_non_list_pnpm_packages() {
-        let err = discover_err("pnpm-bad-packages");
-        assert!(
-            err.contains("\"packages\" must be a list of strings"),
-            "{err}"
-        );
-    }
-
-    #[test]
     fn rejects_an_invalid_glob() {
         insta::assert_snapshot!(discover_err("bad-glob"));
     }
@@ -973,24 +925,61 @@ mod tests {
 
     #[test]
     fn an_empty_pnpm_manifest_is_a_workspace_root() {
-        let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "pnpm-workspace.yaml", "");
-        write(
-            dir.path(),
-            "package.json",
-            "{ \"name\": \"root\", \"version\": \"1.0.0\" }\n",
-        );
-        let workspace = discover(dir.path()).unwrap();
-        assert_eq!(workspace.root, dir.path());
-        assert_eq!(names_and_dirs(&workspace), [("root", dir.path())]);
+        for text in ["", "# packages:\n"] {
+            let dir = tempfile::tempdir().unwrap();
+            write(dir.path(), "pnpm-workspace.yaml", text);
+            write(
+                dir.path(),
+                "package.json",
+                "{ \"name\": \"root\", \"version\": \"1.0.0\" }\n",
+            );
+            let workspace = discover(dir.path()).unwrap();
+            assert_eq!(workspace.root, dir.path(), "{text:?}");
+            assert_eq!(
+                names_and_dirs(&workspace),
+                [("root", dir.path())],
+                "{text:?}"
+            );
+        }
     }
 
     #[test]
-    fn rejects_a_non_mapping_pnpm_manifest() {
+    fn ignores_an_invalid_pnpm_manifest() {
+        for text in [
+            "---\n",
+            "null\n",
+            "- packages/*\n",
+            "packages:\n",
+            "packages: \"packages/*\"\n",
+            "packages:\n  - \"packages/*\"\n  - 42\n",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            write(dir.path(), "pnpm-workspace.yaml", text);
+            write(
+                dir.path(),
+                "package.json",
+                "{ \"name\": \"root\", \"version\": \"1.0.0\" }\n",
+            );
+            write(
+                dir.path(),
+                "packages/a/package.json",
+                "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+            );
+            let workspace = discover(dir.path()).unwrap();
+            assert_eq!(
+                names_and_dirs(&workspace),
+                [("root", dir.path())],
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_an_unparsable_pnpm_manifest() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "pnpm-workspace.yaml", "- packages/*\n");
+        write(dir.path(), "pnpm-workspace.yaml", "packages: [\n");
         let err = format!("{:#}", discover(dir.path()).unwrap_err());
-        assert!(err.contains("not a YAML mapping"), "{err}");
+        assert!(err.contains("invalid YAML"), "{err}");
     }
 
     #[test]
@@ -2471,8 +2460,22 @@ mod tests {
     }
 
     #[test]
-    fn passes_over_a_falsy_workspaces() {
-        for workspaces in ["null", "false", "0", "0.0", "\"\""] {
+    fn ignores_an_invalid_workspaces() {
+        for workspaces in [
+            "null",
+            "false",
+            "0",
+            "\"\"",
+            "\"packages/*\"",
+            "42",
+            "true",
+            "[42, \"packages/*\"]",
+            "[\"packages/*\", null]",
+            "{}",
+            "{ \"packages\": null }",
+            "{ \"packages\": \"packages/*\" }",
+            "{ \"packages\": [\"packages/*\", 42] }",
+        ] {
             let dir = tempfile::tempdir().unwrap();
             write(
                 dir.path(),
@@ -2480,6 +2483,11 @@ mod tests {
                 &format!(
                     "{{ \"name\": \"app\", \"version\": \"1.0.0\", \"workspaces\": {workspaces} }}\n"
                 ),
+            );
+            write(
+                dir.path(),
+                "packages/a/package.json",
+                "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
             );
             let workspace = discover(dir.path()).unwrap();
             assert_eq!(
@@ -2491,26 +2499,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_an_invalid_workspaces_type() {
-        for workspaces in ["\"packages/*\"", "42", "true", "0.5"] {
-            let dir = tempfile::tempdir().unwrap();
-            write(
-                dir.path(),
-                "package.json",
-                &format!(
-                    "{{ \"name\": \"app\", \"version\": \"1.0.0\", \"workspaces\": {workspaces} }}\n"
-                ),
-            );
-            let err = format!("{:#}", discover(dir.path()).unwrap_err());
-            assert!(
-                err.contains("\"workspaces\" must be an array or an object"),
-                "{workspaces}: {err}"
-            );
-        }
-    }
-
-    #[test]
-    fn rejects_an_invalid_workspaces_type_during_the_walk() {
+    fn passes_over_an_invalid_workspaces_while_looking_for_an_npm_root() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "package.json", "{ \"workspaces\": 42 }\n");
         write(
@@ -2518,60 +2507,11 @@ mod tests {
             "pkg/package.json",
             "{ \"name\": \"leaf\", \"version\": \"1.0.0\" }\n",
         );
-        let err = format!("{:#}", discover(&dir.path().join("pkg")).unwrap_err());
-        assert!(
-            err.contains("\"workspaces\" must be an array or an object"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn rejects_a_workspaces_object_without_a_packages_list() {
-        for workspaces in [
-            "{}",
-            "{ \"packages\": null }",
-            "{ \"packages\": \"packages/*\" }",
-        ] {
-            let dir = tempfile::tempdir().unwrap();
-            write(
-                dir.path(),
-                "package.json",
-                &format!(
-                    "{{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": {workspaces} }}\n"
-                ),
-            );
-            let err = format!("{:#}", discover(dir.path()).unwrap_err());
-            assert!(
-                err.contains("\"packages\" in \"workspaces\" must be a list of strings"),
-                "{workspaces}: {err}"
-            );
-        }
-    }
-
-    #[test]
-    fn rejects_non_string_pattern_entries() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            "pnpm-workspace.yaml",
-            "packages:\n  - \"packages/*\"\n  - 42\n",
-        );
-        let err = format!("{:#}", discover(dir.path()).unwrap_err());
-        assert!(
-            err.contains("\"packages\" must be a list of strings"),
-            "{err}"
-        );
-
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            "package.json",
-            "{ \"workspaces\": [42, \"packages/*\"] }\n",
-        );
-        let err = format!("{:#}", discover(dir.path()).unwrap_err());
-        assert!(
-            err.contains("\"workspaces\" patterns must be strings"),
-            "{err}"
+        let workspace = discover(&dir.path().join("pkg")).unwrap();
+        assert_eq!(workspace.root, dir.path().join("pkg"));
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("leaf", dir.path().join("pkg").as_path())]
         );
     }
 
@@ -2889,7 +2829,7 @@ mod tests {
     }
 
     #[test]
-    fn a_yarn_root_skips_a_non_string_workspaces_pattern() {
+    fn a_yarn_root_with_a_non_string_workspaces_pattern_declares_nothing() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "yarn.lock", "");
         write(
@@ -2903,36 +2843,38 @@ mod tests {
             "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
         );
         let workspace = discover(dir.path()).unwrap();
-        assert_eq!(
-            names_and_dirs(&workspace),
-            [("pkg-a", dir.path().join("packages/a").as_path())]
-        );
+        assert_eq!(names_and_dirs(&workspace), []);
     }
 
     #[test]
-    fn a_yarn_member_with_an_invalid_workspaces_type_declares_no_worktree() {
-        let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "yarn.lock", "");
-        write(
-            dir.path(),
-            "package.json",
-            "{ \"workspaces\": [\"packages/*\"] }\n",
-        );
-        write(
-            dir.path(),
-            "packages/a/package.json",
-            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": \"nested/*\" }\n",
-        );
-        write(
-            dir.path(),
-            "packages/a/nested/x/package.json",
-            "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
-        );
-        let workspace = discover(dir.path()).unwrap();
-        assert_eq!(
-            names_and_dirs(&workspace),
-            [("pkg-a", dir.path().join("packages/a").as_path())]
-        );
+    fn a_yarn_member_with_an_invalid_workspaces_declares_no_worktree() {
+        for workspaces in ["\"nested/*\"", "[\"nested/*\", 42]"] {
+            let dir = tempfile::tempdir().unwrap();
+            write(dir.path(), "yarn.lock", "");
+            write(
+                dir.path(),
+                "package.json",
+                "{ \"workspaces\": [\"packages/*\"] }\n",
+            );
+            write(
+                dir.path(),
+                "packages/a/package.json",
+                &format!(
+                    "{{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"workspaces\": {workspaces} }}\n"
+                ),
+            );
+            write(
+                dir.path(),
+                "packages/a/nested/x/package.json",
+                "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
+            );
+            let workspace = discover(dir.path()).unwrap();
+            assert_eq!(
+                names_and_dirs(&workspace),
+                [("pkg-a", dir.path().join("packages/a").as_path())],
+                "{workspaces}"
+            );
+        }
     }
 
     #[test]
@@ -3532,25 +3474,22 @@ mod tests {
 
     #[test]
     fn listed_packages_are_read_without_the_markers() {
-        for case in ["bad-glob", "pnpm-bad-packages"] {
-            let dir = tempfile::tempdir().unwrap();
-            for entry in fs::read_dir(fixture(case)).unwrap() {
-                let entry = entry.unwrap();
-                fs::copy(entry.path(), dir.path().join(entry.file_name())).unwrap();
-            }
-            write(
-                dir.path(),
-                "packages/a/package.json",
-                "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
-            );
-            assert!(discover(dir.path()).is_err(), "{case}");
-            let workspace = load_listed(dir.path(), &["packages/a"]).unwrap();
-            assert_eq!(
-                names_and_dirs(&workspace),
-                [("pkg-a", dir.path().join("packages/a").as_path())],
-                "{case}"
-            );
+        let dir = tempfile::tempdir().unwrap();
+        for entry in fs::read_dir(fixture("bad-glob")).unwrap() {
+            let entry = entry.unwrap();
+            fs::copy(entry.path(), dir.path().join(entry.file_name())).unwrap();
         }
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        assert!(discover(dir.path()).is_err());
+        let workspace = load_listed(dir.path(), &["packages/a"]).unwrap();
+        assert_eq!(
+            names_and_dirs(&workspace),
+            [("pkg-a", dir.path().join("packages/a").as_path())]
+        );
     }
 
     #[test]
