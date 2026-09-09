@@ -3865,7 +3865,7 @@ fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
     assert_eq!(
         stderr(&output),
         format!(
-            "warning: {}: \"workspaces\" must be an array or an object: ignored, as Yarn ignores it\n",
+            "warning: {}: \"workspaces\" must be an array or an object: ignored\n",
             expected_path(dir.path(), "package.json")
         )
     );
