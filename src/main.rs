@@ -183,7 +183,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let (root, marker) = if let Some(dir) = cli.root.filter(|dir| !dir.is_empty()) {
         let dir = Path::new(&dir);
         let root = workspace::resolve_root(dir)
-            .with_context(|| format!("invalid --root {}", dir.display()))?;
+            .with_context(|| format!("invalid root directory {}", dir.display()))?;
         (root, None)
     } else {
         let cwd = env::current_dir()?;
