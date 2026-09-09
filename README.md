@@ -405,7 +405,7 @@ Ranges are a mechanical job, and the `workspace:` protocol of yarn and pnpm make
 
 Dependent releases are a judgment, not bookkeeping. Already-published dependents keep working after an internal dependency's major release: their published ranges still resolve to the old, compatible versions. So release a dependent when it has changes of its own; the one other reason is a consumer who cannot run two copies of the dependency side by side (a peer dependency conflict, a shared singleton) and so needs a published range that accepts the new major. Either way, name the dependent in a changeset like any other change.
 
-`changesette` resolves the workspace with its own implementation of the npm / yarn / pnpm rules, which can disagree with the package manager in corner cases. When it does, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
+`changesette` resolves the workspace by rules of its own, which can differ from the package manager's. When they do, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
 
 ## Pre-release mode
 
