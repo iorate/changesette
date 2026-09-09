@@ -459,7 +459,7 @@ fn workspaces_patterns(
             "\"workspaces\" must be an array or an object"
         };
         if pm == PackageManager::Yarn {
-            warn!("{}: {what}: ignored, as Yarn ignores it", path.display());
+            warn!("{}: {what}: ignored", path.display());
             return Ok(None);
         }
         bail!("{}: {what}", path.display())
@@ -469,7 +469,7 @@ fn workspaces_patterns(
         let Some(pattern) = item.as_str() else {
             if pm == PackageManager::Yarn {
                 warn!(
-                    "{}: a non-string \"workspaces\" pattern is skipped, as Yarn skips it",
+                    "{}: a non-string \"workspaces\" pattern is skipped",
                     path.display()
                 );
                 continue;
