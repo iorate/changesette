@@ -1340,10 +1340,12 @@ fn get_packages_prints_an_empty_array_for_a_memberless_workspace() {
 }
 
 #[test]
-fn get_packages_fails_without_package_json() {
+fn get_packages_lists_nothing_without_package_json() {
     let dir = tempfile::tempdir().unwrap();
     let output = changesette(dir.path(), &["get-packages"]);
-    assert!(!output.status.success());
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "[]\n");
+    assert_eq!(stderr(&output), "");
 }
 
 #[test]
@@ -4068,7 +4070,10 @@ fn root_option_rejects_a_missing_directory() {
     let output = changesette(dir.path(), &["get-packages", "--root", "missing"]);
     assert!(!output.status.success());
     let err = stderr(&output);
-    assert!(err.starts_with("error: invalid --root missing: "), "{err}");
+    assert!(
+        err.starts_with("error: invalid root directory missing: "),
+        "{err}"
+    );
 }
 
 #[test]
@@ -4078,23 +4083,27 @@ fn root_option_rejects_a_file() {
     assert!(!output.status.success());
     assert_eq!(
         stderr(&output),
-        "error: invalid --root package.json: not a directory\n"
+        "error: invalid root directory package.json: not a directory\n"
     );
 }
 
 #[test]
-fn root_option_rejects_a_directory_without_a_manifest() {
+fn root_option_accepts_a_directory_without_a_manifest() {
     let dir = workspace_dir();
     fs::create_dir(dir.path().join("empty")).unwrap();
     let output = changesette(dir.path(), &["get-packages", "--root", "empty"]);
-    assert!(!output.status.success());
-    assert_eq!(
-        stderr(&output),
-        format!(
-            "error: no package.json in {}; --root must name a workspace root or a package\n",
-            expected_path(dir.path(), "empty")
-        )
-    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "[]\n");
+    assert_eq!(stderr(&output), "");
+}
+
+#[test]
+fn init_runs_without_a_package_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = changesette(dir.path(), &["init"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(dir.path().join(".changeset/README.md").is_file());
+    assert!(dir.path().join(".changeset/config.json").is_file());
 }
 
 #[cfg(windows)]

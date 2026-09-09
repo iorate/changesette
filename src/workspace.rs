@@ -29,9 +29,6 @@ pub(crate) struct Member {
     private: bool,
 }
 
-// The package manager whose workspace rules a root is enumerated with,
-// chosen from the marker that made it a root; not the package manager the
-// repository actually uses, as a `package.json` alone reads as npm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageManager {
     Npm,
@@ -97,13 +94,10 @@ pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, RootMarker)> {
         }
     }
 
-    let Some(dir) = prefix else {
-        bail!(
-            "no package.json found in {} or any parent directory",
-            cwd.display()
-        )
-    };
-    Ok((dir, RootMarker::PackageJson))
+    Ok((
+        prefix.unwrap_or_else(|| cwd.to_path_buf()),
+        RootMarker::PackageJson,
+    ))
 }
 
 // The root is always the physical path: `find_root` and `Workspace::load`
@@ -154,56 +148,24 @@ impl Workspace {
             None if probe_is_file(&root.join("yarn.lock")) => RootMarker::YarnLock,
             None => RootMarker::PackageJson,
         };
-        let path = root.join("package.json");
-        match marker {
-            RootMarker::NpmReroot(packages) => Ok(Workspace::new(
-                root.to_path_buf(),
-                PackageManager::Npm.as_str(),
-                qualify_packages(packages)?,
-            )),
-            RootMarker::PnpmWorkspaceYaml => {
-                let manifest = root.join("pnpm-workspace.yaml");
-                let patterns = read_pnpm_manifest(&manifest)?
-                    .and_then(|doc| pnpm_patterns(&doc, &manifest))
-                    .unwrap_or_default();
-                let pm = PackageManager::Pnpm;
-                Ok(Workspace::new(
+        let pm = match marker {
+            RootMarker::NpmReroot(packages) => {
+                return Ok(Workspace::new(
                     root.to_path_buf(),
-                    pm.as_str(),
-                    collect_members(root, &manifest, &patterns, pm)?,
-                ))
+                    PackageManager::Npm.as_str(),
+                    qualify_packages(packages)?,
+                ));
             }
-            RootMarker::YarnLock => {
-                let pm = PackageManager::Yarn;
-                let mut patterns = Vec::new();
-                if probe_is_file(&path)
-                    && let Some(value) = read_manifest(&path)?
-                    && let Some(declared) = workspaces_patterns(&value, &path)
-                {
-                    patterns = declared;
-                }
-                Ok(Workspace::new(
-                    root.to_path_buf(),
-                    pm.as_str(),
-                    collect_members(root, &path, &patterns, pm)?,
-                ))
-            }
-            RootMarker::PackageJson => {
-                let Some(value) = read_manifest(&path)? else {
-                    bail!(
-                        "no package.json in {}; --root must name a workspace root or a package",
-                        root.display()
-                    )
-                };
-                let pm = PackageManager::Npm;
-                let patterns = workspaces_patterns(&value, &path).unwrap_or_default();
-                Ok(Workspace::new(
-                    root.to_path_buf(),
-                    pm.as_str(),
-                    collect_members(root, &path, &patterns, pm)?,
-                ))
-            }
-        }
+            RootMarker::PnpmWorkspaceYaml => PackageManager::Pnpm,
+            RootMarker::YarnLock => PackageManager::Yarn,
+            RootMarker::PackageJson => PackageManager::Npm,
+        };
+        let (manifest, patterns) = read_patterns(root, pm)?;
+        Ok(Workspace::new(
+            root.to_path_buf(),
+            pm.as_str(),
+            collect_members(root, &manifest, &patterns, pm)?,
+        ))
     }
 
     // The one construction point, so that every loading path reports the
@@ -275,29 +237,6 @@ impl Member {
     }
 }
 
-pub(crate) fn probe_is_file(path: &Path) -> bool {
-    match fs::metadata(path) {
-        Ok(metadata) => metadata.is_file(),
-        Err(err) => {
-            report_fs_error(path, &err);
-            false
-        }
-    }
-}
-
-pub(crate) fn report_fs_error(path: &Path, err: &io::Error) {
-    // Plain absence — NotFound from a missing or dangling path, NotADirectory
-    // from a path crossing a regular file — is an ordinary no-match for every
-    // caller; any other error (permissions, a symlink loop) can silently drop
-    // a package and is worth a warning, though never worth aborting over.
-    if !matches!(
-        err.kind(),
-        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-    ) {
-        warn!("{}: {err}", path.display());
-    }
-}
-
 // A segment is pushed only when it parses as exactly one `Normal` component:
 // `PathBuf::push` re-parses the segment, and a prefix in it (`C:` or `C:x` on
 // Windows) would silently replace the directory built so far.
@@ -355,34 +294,23 @@ pub(crate) fn rel_dir_between(root: &Path, dir: &Path) -> String {
     }
 }
 
-// BOM'd manifests exist in the wild, so the BOM is stripped before parsing.
-fn read_manifest(path: &Path) -> Result<Option<Value>> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err).context(path.display().to_string()),
-    };
-    let value = serde_json::from_str(text.strip_prefix('\u{feff}').unwrap_or(&text))
-        .with_context(|| path.display().to_string())?;
-    Ok(Some(value))
-}
-
-// Unlike `read_manifest`, a BOM is deliberately not accepted.
-pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err).context(path.display().to_string()),
-    };
-    let value = serde_json::from_str(&text).with_context(|| path.display().to_string())?;
-    Ok(Some(value))
-}
-
-fn all_strings<'a>(items: impl IntoIterator<Item = Option<&'a str>>) -> Option<Vec<String>> {
-    items
-        .into_iter()
-        .map(|item| item.map(str::to_owned))
-        .collect()
+fn read_patterns(root: &Path, pm: PackageManager) -> Result<(PathBuf, Vec<String>)> {
+    match pm {
+        PackageManager::Pnpm => {
+            let manifest = root.join("pnpm-workspace.yaml");
+            let patterns = read_pnpm_manifest(&manifest)?
+                .and_then(|doc| pnpm_patterns(&doc, &manifest))
+                .unwrap_or_default();
+            Ok((manifest, patterns))
+        }
+        PackageManager::Npm | PackageManager::Yarn => {
+            let manifest = root.join("package.json");
+            let patterns = read_manifest(&manifest)?
+                .and_then(|value| workspaces_patterns(&value, &manifest))
+                .unwrap_or_default();
+            Ok((manifest, patterns))
+        }
+    }
 }
 
 // An empty or comment-only file holds no document, making it a settings-only
@@ -413,6 +341,29 @@ fn pnpm_patterns(doc: &Yaml, path: &Path) -> Option<Vec<String>> {
         })
 }
 
+// BOM'd manifests exist in the wild, so the BOM is stripped before parsing.
+fn read_manifest(path: &Path) -> Result<Option<Value>> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).context(path.display().to_string()),
+    };
+    let value = serde_json::from_str(text.strip_prefix('\u{feff}').unwrap_or(&text))
+        .with_context(|| path.display().to_string())?;
+    Ok(Some(value))
+}
+
+// Unlike `read_manifest`, a BOM is deliberately not accepted.
+pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).context(path.display().to_string()),
+    };
+    let value = serde_json::from_str(&text).with_context(|| path.display().to_string())?;
+    Ok(Some(value))
+}
+
 fn workspaces_patterns(value: &Value, path: &Path) -> Option<Vec<String>> {
     let workspaces = value.get("workspaces")?;
     let items = match workspaces {
@@ -428,6 +379,13 @@ fn workspaces_patterns(value: &Value, path: &Path) -> Option<Vec<String>> {
             );
             None
         })
+}
+
+fn all_strings<'a>(items: impl IntoIterator<Item = Option<&'a str>>) -> Option<Vec<String>> {
+    items
+        .into_iter()
+        .map(|item| item.map(str::to_owned))
+        .collect()
 }
 
 fn collect_members(
@@ -493,37 +451,6 @@ fn collect_packages(
     Ok(packages)
 }
 
-fn dir_id(dir: &Path) -> Result<FileId> {
-    get_file_id(dir).with_context(|| dir.display().to_string())
-}
-
-fn lists_dir(packages: &[Package], dir: &Path) -> Result<bool> {
-    let id = dir_id(dir)?;
-    for package in packages {
-        if dir_id(&package.dir)? == id {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn qualify_packages(packages: Vec<Package>) -> Result<Vec<Member>> {
-    let mut members: Vec<Member> = packages
-        .into_iter()
-        .filter_map(|package| {
-            qualify(
-                &package.value,
-                package.dir,
-                package.rel_dir,
-                &package.manifest,
-            )
-        })
-        .collect();
-    members.sort_by(|a, b| (&a.name, &a.dir).cmp(&(&b.name, &b.dir)));
-    exclude_duplicate_names(&mut members)?;
-    Ok(members)
-}
-
 fn enumerate(
     root: &Path,
     manifest: &Path,
@@ -557,6 +484,23 @@ fn enumerate(
         candidates.insert(".".to_owned(), root.to_path_buf());
     }
     Ok(candidates)
+}
+
+fn qualify_packages(packages: Vec<Package>) -> Result<Vec<Member>> {
+    let mut members: Vec<Member> = packages
+        .into_iter()
+        .filter_map(|package| {
+            qualify(
+                &package.value,
+                package.dir,
+                package.rel_dir,
+                &package.manifest,
+            )
+        })
+        .collect();
+    members.sort_by(|a, b| (&a.name, &a.dir).cmp(&(&b.name, &b.dir)));
+    exclude_duplicate_names(&mut members)?;
+    Ok(members)
 }
 
 // A missing `name` or `version` key is only reported at debug level —
@@ -664,6 +608,43 @@ fn exclude_duplicate_names(members: &mut Vec<Member>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn lists_dir(packages: &[Package], dir: &Path) -> Result<bool> {
+    let id = dir_id(dir)?;
+    for package in packages {
+        if dir_id(&package.dir)? == id {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn dir_id(dir: &Path) -> Result<FileId> {
+    get_file_id(dir).with_context(|| dir.display().to_string())
+}
+
+pub(crate) fn probe_is_file(path: &Path) -> bool {
+    match fs::metadata(path) {
+        Ok(metadata) => metadata.is_file(),
+        Err(err) => {
+            report_fs_error(path, &err);
+            false
+        }
+    }
+}
+
+pub(crate) fn report_fs_error(path: &Path, err: &io::Error) {
+    // Plain absence — NotFound from a missing or dangling path, NotADirectory
+    // from a path crossing a regular file — is an ordinary no-match for every
+    // caller; any other error (permissions, a symlink loop) can silently drop
+    // a package and is worth a warning, though never worth aborting over.
+    if !matches!(
+        err.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+    ) {
+        warn!("{}: {err}", path.display());
+    }
 }
 
 #[cfg(test)]
@@ -1068,10 +1049,12 @@ mod tests {
     }
 
     #[test]
-    fn errors_without_any_package_json() {
+    fn the_working_directory_is_the_root_without_any_package_json() {
         let dir = tempfile::tempdir().unwrap();
-        let err = format!("{:#}", discover(dir.path()).unwrap_err());
-        assert!(err.contains("no package.json found"), "{err}");
+        fs::create_dir_all(dir.path().join("a/b")).unwrap();
+        let workspace = discover(&dir.path().join("a/b")).unwrap();
+        assert_eq!(workspace.root, dir.path().join("a/b"));
+        assert_eq!(names_and_dirs(&workspace), []);
     }
 
     #[test]
@@ -3494,11 +3477,16 @@ mod tests {
     }
 
     #[test]
-    fn a_forced_root_without_a_manifest_is_an_error() {
+    fn a_forced_root_without_a_manifest_has_no_members() {
         let dir = tempfile::tempdir().unwrap();
-        let err = format!("{:#}", Workspace::load(dir.path(), None, None).unwrap_err());
-        assert!(err.contains("no package.json in"), "{err}");
-        assert!(err.contains("--root"), "{err}");
+        write(
+            dir.path(),
+            "packages/a/package.json",
+            "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
+        );
+        let workspace = Workspace::load(dir.path(), None, None).unwrap();
+        assert_eq!(workspace.root, dir.path());
+        assert_eq!(names_and_dirs(&workspace), []);
     }
 
     #[test]
