@@ -3865,10 +3865,52 @@ fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
     assert_eq!(
         stderr(&output),
         format!(
-            "warning: {}: \"workspaces\" must be an array or an object: ignored\n",
+            "warning: {}: \"workspaces\" must be an array of strings or an object whose \"packages\" is an array of strings: ignored\n",
             expected_path(dir.path(), "package.json")
         )
     );
+}
+
+#[test]
+fn get_packages_warns_about_an_invalid_workspaces_type_under_npm() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{ \"name\": \"root\", \"version\": \"1.0.0\", \"workspaces\": \"packages/*\" }\n",
+    )
+    .unwrap();
+    let output = changesette(dir.path(), &["get-packages"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "[{\"name\":\"root\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\".\"}]\n"
+    );
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "warning: {}: \"workspaces\" must be an array of strings or an object whose \"packages\" is an array of strings: ignored\n",
+            expected_path(dir.path(), "package.json")
+        )
+    );
+}
+
+#[test]
+fn get_packages_warns_about_an_invalid_pnpm_manifest() {
+    for text in ["packages: \"packages/*\"\n", "packages:\n", "---\n"] {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("pnpm-workspace.yaml"), text).unwrap();
+        let output = changesette(dir.path(), &["get-packages"]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_eq!(stdout(&output), "[]\n", "{text:?}");
+        assert_eq!(
+            stderr(&output),
+            format!(
+                "warning: {}: must be a mapping whose \"packages\" is a list of strings: ignored\n",
+                expected_path(dir.path(), "pnpm-workspace.yaml")
+            ),
+            "{text:?}"
+        );
+    }
 }
 
 const PKG_A_JSON: &str =
