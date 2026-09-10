@@ -21,28 +21,28 @@ use crate::{
 };
 
 #[derive(clap::Args)]
-pub(crate) struct AddArgs {
+pub struct AddArgs {
     /// Create a changeset that names no packages
     #[arg(long, conflicts_with_all = ["major", "minor", "patch"])]
-    pub(crate) empty: bool,
+    pub empty: bool,
     /// Open the created changeset in your editor
     #[arg(long)]
-    pub(crate) open: bool,
+    pub open: bool,
     /// The summary text of the change
     #[arg(short, long)]
-    pub(crate) message: Option<String>,
+    pub message: Option<String>,
     /// The packages to record a major bump for (comma-separated, repeatable)
     #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    pub(crate) major: Vec<String>,
+    pub major: Vec<String>,
     /// The packages to record a minor bump for (comma-separated, repeatable)
     #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    pub(crate) minor: Vec<String>,
+    pub minor: Vec<String>,
     /// The packages to record a patch bump for (comma-separated, repeatable)
     #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    pub(crate) patch: Vec<String>,
+    pub patch: Vec<String>,
 }
 
-pub(crate) fn run(workspace: &Workspace, config: &Config, args: AddArgs) -> Result<()> {
+pub fn run(workspace: &Workspace, config: &Config, args: AddArgs) -> Result<()> {
     ensure!(
         !args.open || (io::stdin().is_terminal() && io::stderr().is_terminal()),
         "cannot use --open in non-interactive mode"

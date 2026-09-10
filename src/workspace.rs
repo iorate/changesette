@@ -15,7 +15,7 @@ use serde_json::Value;
 use tracing::{debug, warn};
 
 #[derive(Debug)]
-pub(crate) struct Workspace {
+pub struct Workspace {
     root: PathBuf,
     members: Vec<Member>,
 }

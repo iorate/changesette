@@ -11,7 +11,7 @@ struct Package<'a> {
     dir: &'a str,
 }
 
-pub(crate) fn run(workspace: &Workspace, config: &Config, all: bool) -> Result<()> {
+pub fn run(workspace: &Workspace, config: &Config, all: bool) -> Result<()> {
     let skip = SkipSet::load(workspace, config, &[])?;
     let mut packages = Vec::new();
     for member in workspace.members() {

@@ -5,28 +5,11 @@ use std::{
     process::ExitCode,
 };
 
-use anyhow::Context;
-use clap::Parser;
-
-use crate::{
-    commands::{add::AddArgs, version::VersionArgs},
-    workspace::{Root, Workspace},
+use changesette::{
+    commands::{self, add::AddArgs, version::VersionArgs},
+    output,
 };
-
-mod bump;
-mod changelog;
-mod changeset;
-mod commands;
-mod config;
-mod jsonc;
-mod output;
-mod package_json;
-mod plan;
-mod pre;
-mod release_plan;
-mod skip;
-mod snapshot;
-mod workspace;
+use clap::Parser;
 
 #[derive(Parser)]
 #[command(version, args_conflicts_with_subcommands = true)]
@@ -131,19 +114,9 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
-    let root = if let Some(dir) = cli.root.filter(|dir| !dir.is_empty()) {
-        let dir = Path::new(&dir);
-        let dir = workspace::resolve_root(dir)
-            .with_context(|| format!("invalid root directory {}", dir.display()))?;
-        Root::new(dir)
-    } else {
-        let cwd = env::current_dir()?;
-        let cwd = workspace::resolve_root(&cwd)
-            .with_context(|| format!("invalid working directory {}", cwd.display()))?;
-        Root::find(&cwd)?
-    };
-    let config = config::load(&root.dir().join(".changeset"))?;
-    let workspace = Workspace::load(root, config.packages.as_deref())?;
+    let root = cli.root.filter(|dir| !dir.is_empty());
+    let cwd = env::current_dir()?;
+    let (workspace, config) = changesette::load(&cwd, root.as_deref().map(Path::new))?;
     match cli.command.unwrap_or(Command::Add(cli.add)) {
         Command::Init => commands::init::run(&workspace),
         Command::Add(args) => commands::add::run(&workspace, &config, args),

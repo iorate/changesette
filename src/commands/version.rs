@@ -6,10 +6,10 @@ use tracing::info;
 use crate::{config::Config, plan, release_plan, snapshot::Snapshot, workspace::Workspace};
 
 #[derive(clap::Args)]
-pub(crate) struct VersionArgs {
+pub struct VersionArgs {
     /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
     #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    pub(crate) ignore: Vec<String>,
+    pub ignore: Vec<String>,
     /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
     #[arg(
         long,
@@ -17,8 +17,7 @@ pub(crate) struct VersionArgs {
         num_args = 0..=1,
         value_parser = clap::builder::NonEmptyStringValueParser::new()
     )]
-    #[expect(clippy::option_option)]
-    pub(crate) snapshot: Option<Option<String>>,
+    pub snapshot: Option<Option<String>>,
     /// The snapshot suffix template; the placeholders are {tag}, {timestamp}, and {datetime}
     #[arg(
         long,
@@ -26,16 +25,16 @@ pub(crate) struct VersionArgs {
         requires = "snapshot",
         value_parser = clap::builder::NonEmptyStringValueParser::new()
     )]
-    pub(crate) snapshot_prerelease_template: Option<String>,
+    pub snapshot_prerelease_template: Option<String>,
     /// Succeed even when there are no unreleased changesets
     #[arg(short, long)]
-    pub(crate) allow_no_changesets: bool,
+    pub allow_no_changesets: bool,
     /// Write the release plan to the file (or stdout with `-`) as JSON
     #[arg(short, long, value_name = "FILE")]
-    pub(crate) output: Option<PathBuf>,
+    pub output: Option<PathBuf>,
 }
 
-pub(crate) fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<()> {
+pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<()> {
     let snapshot = args.snapshot.map(|tag| Snapshot {
         tag,
         template: args.snapshot_prerelease_template,
