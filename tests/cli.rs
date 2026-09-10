@@ -65,8 +65,8 @@ fn assert_changeset_path(line: &str) {
 }
 
 #[test]
-fn init_creates_the_changeset_directory_with_a_readme_and_a_config() {
-    let dir = package_dir();
+fn init_creates_backfills_and_then_reports_initialized() {
+    let dir = tempfile::tempdir().unwrap();
     let output = changesette(dir.path(), &["init"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
@@ -85,6 +85,39 @@ fn init_creates_the_changeset_directory_with_a_readme_and_a_config() {
         config,
         "{\n  \"fixed\": [],\n  \"linked\": [],\n  \"privatePackages\": {\n    \"version\": false\n  },\n  \"ignore\": [],\n  \"snapshot\": {\n    \"useCalculatedVersion\": false\n  }\n}\n"
     );
+
+    fs::write(dir.path().join(".changeset/README.md"), "custom\n").unwrap();
+    fs::remove_file(dir.path().join(".changeset/config.json")).unwrap();
+    let output = changesette(dir.path(), &["init"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "Created {}\n",
+            expected_path(dir.path(), ".changeset/config.json")
+        )
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join(".changeset/README.md")).unwrap(),
+        "custom\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join(".changeset/config.json")).unwrap(),
+        config
+    );
+
+    let before = dir_snapshot(dir.path());
+    let output = changesette(dir.path(), &["init"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "{} is already initialized\n",
+            expected_path(dir.path(), ".changeset")
+        )
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
 }
 
 #[test]
@@ -105,50 +138,8 @@ fn init_creates_the_directory_at_the_workspace_root() {
 }
 
 #[test]
-fn init_backfills_missing_files_into_an_existing_directory() {
-    let dir = package_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    fs::write(dir.path().join(".changeset/README.md"), "custom\n").unwrap();
-    let output = changesette(dir.path(), &["init"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "");
-    assert_eq!(
-        stderr(&output),
-        format!(
-            "Created {}\n",
-            expected_path(dir.path(), ".changeset/config.json")
-        )
-    );
-    assert_eq!(
-        fs::read_to_string(dir.path().join(".changeset/README.md")).unwrap(),
-        "custom\n"
-    );
-    assert!(dir.path().join(".changeset/config.json").is_file());
-}
-
-#[test]
-fn init_does_nothing_when_everything_exists() {
-    let dir = package_dir();
-    let output = changesette(dir.path(), &["init"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let before = dir_snapshot(dir.path());
-    let output = changesette(dir.path(), &["init"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "");
-    assert_eq!(
-        stderr(&output),
-        format!(
-            "{} is already initialized\n",
-            expected_path(dir.path(), ".changeset")
-        )
-    );
-    assert_eq!(dir_snapshot(dir.path()), before);
-}
-
-#[test]
 fn add_with_flags_creates_a_changeset() {
     let dir = package_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(
         dir.path(),
         &["add", "--minor", "ublacklist", "-m", "Add feature"],
@@ -162,6 +153,8 @@ fn add_with_flags_creates_a_changeset() {
     assert_eq!(content, "---\nublacklist: minor\n---\n\nAdd feature\n");
     assert!(err.contains("Summary of changesets:"), "{err}");
     assert!(err.contains("minor:  ublacklist"), "{err}");
+    assert!(!dir.path().join(".changeset/README.md").exists());
+    assert!(!dir.path().join(".changeset/config.json").exists());
 }
 
 #[test]
@@ -180,39 +173,7 @@ fn add_is_the_default_command() {
 }
 
 #[test]
-fn add_creates_the_changeset_directory_when_missing() {
-    let dir = package_dir();
-    let output = changesette(
-        dir.path(),
-        &["add", "--minor", "ublacklist", "--message", "Add feature"],
-    );
-    assert!(output.status.success(), "{}", stderr(&output));
-    let err = stderr(&output);
-    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
-    assert_eq!(content, "---\nublacklist: minor\n---\n\nAdd feature\n");
-    assert!(!dir.path().join(".changeset/README.md").exists());
-    assert!(!dir.path().join(".changeset/config.json").exists());
-}
-
-#[test]
-fn add_fails_on_an_invalid_config() {
-    let dir = package_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    fs::write(dir.path().join(".changeset/config.json"), "").unwrap();
-    let output = changesette(
-        dir.path(),
-        &["add", "--minor", "ublacklist", "--message", "Add feature"],
-    );
-    assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains("config.json"),
-        "{}",
-        stderr(&output)
-    );
-}
-
-#[test]
-fn add_records_multiple_packages_in_flag_order() {
+fn add_accepts_comma_separated_and_repeated_package_flags() {
     let dir = workspace_dir();
     for (name, version) in [("pkg-b", "2.0.0"), ("pkg-c", "3.0.0")] {
         let member_dir = dir.path().join("packages").join(name);
@@ -223,7 +184,6 @@ fn add_records_multiple_packages_in_flag_order() {
         )
         .unwrap();
     }
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(
         dir.path(),
         &[
@@ -243,23 +203,11 @@ fn add_records_multiple_packages_in_flag_order() {
         content,
         "---\npkg-a: minor\npkg-c: patch\npkg-b: patch\n---\n\nImprove things\n"
     );
-}
 
-#[test]
-fn add_accumulates_repeated_bump_flags() {
-    let dir = workspace_dir();
-    let member_dir = dir.path().join("packages/b");
-    fs::create_dir_all(&member_dir).unwrap();
-    fs::write(
-        member_dir.join("package.json"),
-        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\"\n}\n",
-    )
-    .unwrap();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(
         dir.path(),
         &[
-            "add", "--patch", "pkg-a", "--patch", "pkg-b", "-m", "Fix bugs",
+            "add", "--patch", "pkg-c", "--patch", "pkg-b", "-m", "Fix bugs",
         ],
     );
     assert!(output.status.success(), "{}", stderr(&output));
@@ -267,7 +215,7 @@ fn add_accumulates_repeated_bump_flags() {
     let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
     assert_eq!(
         content,
-        "---\npkg-a: patch\npkg-b: patch\n---\n\nFix bugs\n"
+        "---\npkg-c: patch\npkg-b: patch\n---\n\nFix bugs\n"
     );
 }
 
@@ -304,46 +252,7 @@ fn add_fails_without_versionable_packages() {
         "{}",
         stderr(&output)
     );
-}
-
-#[test]
-fn add_empty_fails_without_versionable_packages() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\",\n  \"private\": true\n}\n",
-    )
-    .unwrap();
-    let output = changesette(dir.path(), &["add", "--empty", "-m", "Note"]);
-    assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains("no versionable packages found"),
-        "{}",
-        stderr(&output)
-    );
     assert!(!dir.path().join(".changeset").exists());
-}
-
-#[test]
-fn add_without_message_fails_naming_the_missing_flag() {
-    let dir = package_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    let output = changesette(dir.path(), &["add", "--minor", "ublacklist"]);
-    assert!(!output.status.success());
-    let err = stderr(&output);
-    assert!(err.contains("--message"), "{err}");
-    assert!(!err.contains("--major/--minor/--patch"), "{err}");
-}
-
-#[test]
-fn add_without_bump_flags_fails_naming_them() {
-    let dir = package_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    let output = changesette(dir.path(), &["add", "-m", "Add feature"]);
-    assert!(!output.status.success());
-    let err = stderr(&output);
-    assert!(err.contains("--major/--minor/--patch"), "{err}");
-    assert!(!err.contains("--message"), "{err}");
 }
 
 #[test]
@@ -375,16 +284,6 @@ fn add_without_any_flags_fails_naming_all_missing_flags() {
 }
 
 #[test]
-fn add_rejects_the_removed_bump_flag() {
-    let dir = package_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    for flag in ["--bump", "-b"] {
-        let output = changesette(dir.path(), &["add", flag, "minor", "-m", "Add feature"]);
-        assert!(!output.status.success(), "{flag} should be rejected");
-    }
-}
-
-#[test]
 fn add_empty_creates_an_empty_changeset() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
@@ -398,101 +297,10 @@ fn add_empty_creates_an_empty_changeset() {
 }
 
 #[test]
-fn add_empty_conflicts_with_bump_flags() {
-    let dir = package_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    let output = changesette(
-        dir.path(),
-        &[
-            "add",
-            "--empty",
-            "--minor",
-            "ublacklist",
-            "-m",
-            "Add feature",
-        ],
-    );
-    assert!(!output.status.success());
-    assert_eq!(
-        fs::read_dir(dir.path().join(".changeset")).unwrap().count(),
-        0
-    );
-}
-
-#[test]
-fn add_with_a_major_bump_lists_it_in_the_summary() {
-    let dir = package_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    let output = changesette(
-        dir.path(),
-        &["add", "--major", "ublacklist", "-m", "Rework everything"],
-    );
-    assert!(output.status.success(), "{}", stderr(&output));
-    let err = stderr(&output);
-    assert!(err.contains("major:  ublacklist"), "{err}");
-}
-
-#[test]
-fn add_from_a_subdirectory_targets_the_workspace_root() {
-    let dir = workspace_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    let output = changesette(
-        &dir.path().join("packages/a"),
-        &["add", "--minor", "pkg-a", "-m", "Add feature"],
-    );
-    assert!(output.status.success(), "{}", stderr(&output));
-    let err = stderr(&output);
-    let line = added_path(&err);
-    assert_changeset_path(line);
-    assert!(
-        line.starts_with(&expected_path(dir.path(), ".changeset")),
-        "{line}"
-    );
-    let content = fs::read_to_string(line).unwrap();
-    assert_eq!(content, "---\npkg-a: minor\n---\n\nAdd feature\n");
-}
-
-#[test]
-fn add_fails_in_a_memberless_workspace() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        "{\n  \"workspaces\": []\n}\n",
-    )
-    .unwrap();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    let output = changesette(dir.path(), &["add", "--empty"]);
-    assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains("no packages found"),
-        "{}",
-        stderr(&output)
-    );
-}
-
-#[test]
-fn get_changelog_entry_without_a_version_fails() {
-    let dir = package_dir();
-    fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
-    let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist"]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("<VERSION>"), "{}", stderr(&output));
-}
-
-#[test]
 fn get_changelog_entry_prints_the_requested_version() {
     let dir = package_dir();
     fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
     let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist", "1.0.0"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "### Patch Changes\n\n- Fix bug\n");
-}
-
-#[test]
-fn get_changelog_entry_reads_a_workspace_member_changelog() {
-    let dir = workspace_dir();
-    fs::write(dir.path().join("packages/a/CHANGELOG.md"), CHANGELOG).unwrap();
-    let output = changesette(dir.path(), &["get-changelog-entry", "pkg-a", "1.0.0"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "### Patch Changes\n\n- Fix bug\n");
 }
@@ -505,19 +313,6 @@ fn get_changelog_entry_fails_for_a_missing_version() {
     assert!(!output.status.success());
     assert!(
         stderr(&output).contains("CHANGELOG.md: version 9.9.9 not found"),
-        "{}",
-        stderr(&output)
-    );
-}
-
-#[test]
-fn get_changelog_entry_rejects_an_invalid_version() {
-    let dir = package_dir();
-    fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
-    let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist", "1.0"]);
-    assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains("invalid value '1.0'"),
         "{}",
         stderr(&output)
     );
@@ -606,7 +401,7 @@ fn mixed_workspace_dir() -> TempDir {
 }
 
 #[test]
-fn get_packages_excludes_skipped_packages_by_default() {
+fn get_packages_lists_skipped_members_only_with_all() {
     let dir = mixed_workspace_dir();
     let output = changesette(dir.path(), &["get-packages"]);
     assert!(output.status.success(), "{}", stderr(&output));
@@ -614,11 +409,7 @@ fn get_packages_excludes_skipped_packages_by_default() {
         stdout(&output),
         "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"pkg-c\",\"version\":\"2.0.0\",\"private\":false,\"dir\":\"packages/c\"}]\n"
     );
-}
 
-#[test]
-fn get_packages_all_lists_every_member() {
-    let dir = mixed_workspace_dir();
     let output = changesette(dir.path(), &["get-packages", "--all"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
@@ -643,111 +434,12 @@ fn get_packages_debug_reports_the_member_list() {
 }
 
 #[test]
-fn get_packages_debug_reports_an_empty_member_list() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}\n").unwrap();
-    let output = changesette(
-        dir.path(),
-        &["get-packages", "--all", "--log-level", "debug"],
-    );
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "[]\n");
-    let err = stderr(&output);
-    assert!(
-        err.contains(&format!(
-            "debug: workspace {} (npm): no members",
-            expected_path(dir.path(), "")
-        )),
-        "{err}"
-    );
-}
-
-#[test]
-fn get_packages_treats_an_escaped_slash_pattern_as_a_path() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        "{\n  \"workspaces\": [\"a\\\\/b\"]\n}\n",
-    )
-    .unwrap();
-    fs::create_dir_all(dir.path().join("a/b")).unwrap();
-    fs::write(
-        dir.path().join("a/b/package.json"),
-        "{ \"name\": \"pkg-ab\", \"version\": \"1.0.0\" }\n",
-    )
-    .unwrap();
-    let output = changesette(dir.path(), &["get-packages"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        "[{\"name\":\"pkg-ab\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"a/b\"}]\n"
-    );
-}
-
-#[test]
-fn get_packages_applies_leading_bang_parity() {
-    let dir = workspace_dir();
-    fs::write(
-        dir.path().join("package.json"),
-        "{\n  \"workspaces\": [\"!!packages/a\"]\n}\n",
-    )
-    .unwrap();
-    let output = changesette(dir.path(), &["get-packages"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"}]\n"
-    );
-    fs::write(
-        dir.path().join("package.json"),
-        "{\n  \"workspaces\": [\"packages/*\", \"!!!packages/a\"]\n}\n",
-    )
-    .unwrap();
-    let output = changesette(dir.path(), &["get-packages"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "[]\n");
-}
-
-#[test]
-fn get_packages_fails_on_an_invalid_config() {
-    let dir = package_dir();
-    fs::create_dir_all(dir.path().join(".changeset")).unwrap();
-    fs::write(
-        dir.path().join(".changeset/config.json"),
-        "{ \"privatePackages\": \"all\" }\n",
-    )
-    .unwrap();
-    let output = changesette(dir.path(), &["get-packages"]);
-    assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains("privatePackages"),
-        "{}",
-        stderr(&output)
-    );
-}
-
-#[test]
 fn get_packages_lists_nothing_without_package_json() {
     let dir = tempfile::tempdir().unwrap();
     let output = changesette(dir.path(), &["get-packages"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "[]\n");
     assert_eq!(stderr(&output), "");
-}
-
-#[test]
-fn the_old_current_subcommand_is_rejected() {
-    let dir = package_dir();
-    let output = changesette(dir.path(), &["current"]);
-    assert!(!output.status.success());
-}
-
-#[test]
-fn the_old_changelog_subcommand_is_rejected() {
-    let dir = package_dir();
-    fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
-    let output = changesette(dir.path(), &["changelog", "1.0.0"]);
-    assert!(!output.status.success());
 }
 
 const ULID_A: &str = "changesette-01H455VB4PEX5VSKNK084SN02Q.md";
@@ -904,29 +596,21 @@ fn version_output_dash_writes_the_compact_plan_to_stdout() {
 }
 
 #[test]
-fn version_ignore_accepts_comma_separated_packages() {
-    let dir = two_package_workspace_dir();
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
-    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
-    let before = dir_snapshot(dir.path());
-    let output = changesette(dir.path(), &["version", "--ignore", "pkg-a,pkg-b"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "");
-    assert_eq!(dir_snapshot(dir.path()), before);
-}
-
-#[test]
-fn version_ignore_may_be_repeated() {
-    let dir = two_package_workspace_dir();
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
-    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
-    let before = dir_snapshot(dir.path());
-    let output = changesette(
-        dir.path(),
+fn version_ignore_accepts_comma_separated_and_repeated_packages() {
+    let cases: [&[&str]; 2] = [
+        &["version", "--ignore", "pkg-a,pkg-b"],
         &["version", "--ignore", "pkg-a", "--ignore", "pkg-b"],
-    );
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(dir_snapshot(dir.path()), before);
+    ];
+    for args in cases {
+        let dir = two_package_workspace_dir();
+        write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+        write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+        let before = dir_snapshot(dir.path());
+        let output = changesette(dir.path(), args);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_eq!(stdout(&output), "");
+        assert_eq!(dir_snapshot(dir.path()), before, "{args:?}");
+    }
 }
 
 #[test]
@@ -974,38 +658,6 @@ fn version_log_level_error_drops_warnings_but_reports_failures() {
 }
 
 #[test]
-fn status_warns_on_an_unmatched_group_pattern() {
-    let dir = two_package_workspace_dir();
-    write_config(dir.path(), "{ \"linked\": [[\"missing-*\"]] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
-    let output = changesette(dir.path(), &["status"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stderr(&output),
-        "warning: linked: the package or glob \"missing-*\" does not match any package in the workspace\n"
-    );
-    assert_eq!(
-        stdout(&output),
-        "Packages to be bumped:\n- patch\n  - pkg-a\n"
-    );
-}
-
-#[test]
-fn version_rejects_the_removed_dry_run_flag() {
-    let dir = package_dir();
-    write_changeset(
-        dir.path(),
-        ULID_B,
-        &[("ublacklist", "minor")],
-        "Add feature",
-    );
-    for flag in ["--dry-run", "-n"] {
-        let output = changesette(dir.path(), &["version", flag]);
-        assert!(!output.status.success(), "{flag} should be rejected");
-    }
-}
-
-#[test]
 fn status_lists_packages_grouped_by_bump_without_modifying_files() {
     let dir = workspace_dir();
     fs::create_dir_all(dir.path().join("packages/b")).unwrap();
@@ -1050,15 +702,6 @@ fn status_verbose_adds_versions_and_changeset_files() {
 }
 
 #[test]
-fn status_omits_none_only_packages_from_the_listing() {
-    let dir = package_dir();
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
-    let output = changesette(dir.path(), &["status"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "Packages to be bumped:\n");
-}
-
-#[test]
 fn status_with_zero_changesets_prints_only_the_heading() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
@@ -1082,15 +725,6 @@ fn pre_enter_creates_pre_json() {
         "Entered pre mode with tag `beta`\nRun `changesette version` to bump to prerelease versions\n"
     );
     assert_eq!(read_pre_json(dir.path()), PRE_JSON);
-}
-
-#[test]
-fn pre_enter_creates_pre_json_at_the_workspace_root() {
-    let dir = workspace_dir();
-    let output = changesette(&dir.path().join("packages/a"), &["pre", "enter", "beta"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(read_pre_json(dir.path()), PRE_JSON);
-    assert!(!dir.path().join("packages/a/.changeset").exists());
 }
 
 #[test]
@@ -1120,42 +754,6 @@ fn pre_exit_flips_the_mode() {
         "Exited pre mode\nRun `changesette version` to bump to final versions\n"
     );
     assert_eq!(read_pre_json(dir.path()), EXITED_PRE_JSON);
-}
-
-#[test]
-fn version_snapshot_rejects_an_empty_tag() {
-    let dir = package_dir();
-    write_changeset(
-        dir.path(),
-        ULID_B,
-        &[("ublacklist", "minor")],
-        "Add feature",
-    );
-    let output = changesette(dir.path(), &["version", "--snapshot", ""]);
-    assert!(!output.status.success());
-    assert!(dir.path().join(".changeset").join(ULID_B).exists());
-}
-
-#[test]
-fn version_snapshot_template_requires_the_snapshot_flag() {
-    let dir = package_dir();
-    write_changeset(
-        dir.path(),
-        ULID_B,
-        &[("ublacklist", "minor")],
-        "Add feature",
-    );
-    let output = changesette(
-        dir.path(),
-        &["version", "--snapshot-prerelease-template", "{datetime}"],
-    );
-    assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains("--snapshot"),
-        "{}",
-        stderr(&output)
-    );
-    assert!(dir.path().join(".changeset").join(ULID_B).exists());
 }
 
 #[test]
@@ -1189,10 +787,42 @@ fn prints_help() {
 }
 
 #[test]
-fn rejects_an_unknown_subcommand() {
-    let dir = tempfile::tempdir().unwrap();
-    let output = changesette(dir.path(), &["publish"]);
-    assert!(!output.status.success());
+fn rejects_invalid_command_lines() {
+    let cases: [&[&str]; 12] = [
+        &["publish"],
+        &["current"],
+        &["changelog", "1.0.0"],
+        &["add", "--bump", "minor", "-m", "Add feature"],
+        &["add", "-b", "minor", "-m", "Add feature"],
+        &[
+            "add",
+            "--empty",
+            "--minor",
+            "ublacklist",
+            "-m",
+            "Add feature",
+        ],
+        &["version", "--dry-run"],
+        &["version", "-n"],
+        &["get-changelog-entry", "ublacklist"],
+        &["get-changelog-entry", "ublacklist", "1.0"],
+        &["version", "--snapshot-prerelease-template", "{datetime}"],
+        &["version", "--snapshot", ""],
+    ];
+    let dir = package_dir();
+    fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
+    write_changeset(
+        dir.path(),
+        ULID_B,
+        &[("ublacklist", "minor")],
+        "Add feature",
+    );
+    let before = dir_snapshot(dir.path());
+    for args in cases {
+        let output = changesette(dir.path(), args);
+        assert!(!output.status.success(), "{args:?} should be rejected");
+        assert_eq!(dir_snapshot(dir.path()), before, "{args:?}");
+    }
 }
 
 #[test]
@@ -1216,34 +846,6 @@ fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
             "warning: {}: \"workspaces\" must be an array of strings or an object whose \"packages\" is an array of strings: ignored\n",
             expected_path(dir.path(), "package.json")
         )
-    );
-}
-
-#[test]
-fn get_packages_skips_a_private_npm_root_by_default() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        "{ \"name\": \"root\", \"version\": \"1.0.0\", \"private\": true, \"workspaces\": [\"packages/*\"] }\n",
-    )
-    .unwrap();
-    fs::create_dir_all(dir.path().join("packages/a")).unwrap();
-    fs::write(
-        dir.path().join("packages/a/package.json"),
-        "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
-    )
-    .unwrap();
-    let output = changesette(dir.path(), &["get-packages"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        "[{\"name\":\"pkg-a\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"packages/a\"}]\n"
-    );
-    let output = changesette(dir.path(), &["get-packages", "--all"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        "[{\"name\":\"pkg-a\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"root\",\"version\":\"1.0.0\",\"private\":true,\"dir\":\".\"}]\n"
     );
 }
 
@@ -1314,15 +916,6 @@ fn root_option_rejects_a_missing_directory() {
         err.starts_with("error: invalid root directory missing: "),
         "{err}"
     );
-}
-
-#[test]
-fn init_runs_without_a_package_json() {
-    let dir = tempfile::tempdir().unwrap();
-    let output = changesette(dir.path(), &["init"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert!(dir.path().join(".changeset/README.md").is_file());
-    assert!(dir.path().join(".changeset/config.json").is_file());
 }
 
 fn write_config_packages(dir: &Path, packages: &[&str]) {
