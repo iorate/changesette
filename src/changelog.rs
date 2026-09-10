@@ -6,7 +6,8 @@ use semver::Version;
 
 use crate::bump::Bump;
 
-pub(crate) fn render_entry(summaries: &[(Bump, &str)]) -> String {
+#[must_use]
+pub fn render_entry(summaries: &[(Bump, &str)]) -> String {
     let mut blocks = Vec::new();
     for (bump, heading) in [
         (Bump::Major, "### Major Changes"),
@@ -26,7 +27,8 @@ pub(crate) fn render_entry(summaries: &[(Bump, &str)]) -> String {
     blocks.join("\n\n")
 }
 
-pub(crate) fn render_section(version: &Version, entry: &str) -> String {
+#[must_use]
+pub fn render_section(version: &Version, entry: &str) -> String {
     if entry.is_empty() {
         format!("## {version}")
     } else {
@@ -48,12 +50,8 @@ fn render_release_line(body: &str) -> String {
     text
 }
 
-pub(crate) fn upsert_section(
-    text: &str,
-    package_name: &str,
-    version: &str,
-    section: &str,
-) -> String {
+#[must_use]
+pub fn upsert_section(text: &str, package_name: &str, version: &str, section: &str) -> String {
     // pulldown-cmark does not skip a UTF-8 BOM, which would hide a leading
     // `# <package_name>` title and prepend a second one; parse without the
     // BOM and restore it afterwards to keep the copy verbatim.
@@ -103,7 +101,7 @@ pub(crate) fn upsert_section(
     result
 }
 
-pub(crate) fn extract_section(text: &str, version: &str) -> Result<String> {
+pub fn extract_section(text: &str, version: &str) -> Result<String> {
     // A BOM only hides a `## <version>` heading on the very first line, but
     // strip it as upsert_section does.
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);

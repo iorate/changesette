@@ -9,16 +9,12 @@ use crate::{
     workspace::{Member, Workspace},
 };
 
-pub(crate) struct SkipSet {
+pub struct SkipSet {
     names: BTreeSet<String>,
 }
 
 impl SkipSet {
-    pub(crate) fn load(
-        workspace: &Workspace,
-        config: &Config,
-        cli_ignore: &[String],
-    ) -> Result<SkipSet> {
+    pub fn load(workspace: &Workspace, config: &Config, cli_ignore: &[String]) -> Result<SkipSet> {
         let ignore = if config.has_ignore() {
             if !cli_ignore.is_empty() {
                 bail!(
@@ -46,11 +42,12 @@ impl SkipSet {
         Ok(SkipSet { names })
     }
 
-    pub(crate) fn contains(&self, name: &str) -> bool {
+    #[must_use]
+    pub fn contains(&self, name: &str) -> bool {
         self.names.contains(name)
     }
 
-    pub(crate) fn filter_changes(
+    pub fn filter_changes(
         &self,
         workspace: &Workspace,
         changeset_dir: &Path,

@@ -1,5 +1,7 @@
 use std::{collections::BTreeMap, fmt::Write as _, fs, path::Path};
 
+use tempfile::TempDir;
+
 /// Writes a changeset naming the given packages under `dir/.changeset/`,
 /// creating the directory if needed. An empty `releases` produces an empty
 /// frontmatter.
@@ -62,4 +64,90 @@ pub(crate) fn dir_snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     let mut files = BTreeMap::new();
     walk(dir, dir, &mut files);
     files
+}
+
+pub(crate) fn expected_path(dir: &Path, rel: &str) -> String {
+    let mut path = dunce::canonicalize(dir).unwrap();
+    path.extend(rel.split('/').filter(|part| !part.is_empty()));
+    path.display().to_string()
+}
+
+pub(crate) fn package_dir() -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\"\n}\n",
+    )
+    .unwrap();
+    dir
+}
+
+pub(crate) fn workspace_dir() -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"workspaces\": [\"packages/*\"]\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("packages/a")).unwrap();
+    fs::write(
+        dir.path().join("packages/a/package.json"),
+        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.1.4\"\n}\n",
+    )
+    .unwrap();
+    dir
+}
+
+pub(crate) fn two_package_workspace_dir() -> TempDir {
+    let dir = workspace_dir();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\"\n}\n",
+    )
+    .unwrap();
+    dir
+}
+
+pub(crate) fn private_two_package_workspace_dir() -> TempDir {
+    let dir = workspace_dir();
+    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
+    fs::write(
+        dir.path().join("packages/b/package.json"),
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\",\n  \"private\": true\n}\n",
+    )
+    .unwrap();
+    dir
+}
+
+pub(crate) fn write_config(dir: &Path, text: &str) {
+    fs::create_dir_all(dir.join(".changeset")).unwrap();
+    fs::write(dir.join(".changeset/config.json"), text).unwrap();
+}
+
+pub(crate) fn write_pre_json(dir: &Path, text: &str) {
+    let changeset_dir = dir.join(".changeset");
+    fs::create_dir_all(&changeset_dir).unwrap();
+    fs::write(changeset_dir.join("pre.json"), text).unwrap();
+}
+
+pub(crate) fn read_pre_json(dir: &Path) -> String {
+    fs::read_to_string(dir.join(".changeset/pre.json")).unwrap()
+}
+
+pub(crate) fn prerelease_package_dir(version: &str) -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        format!("{{\n  \"name\": \"ublacklist\",\n  \"version\": \"{version}\"\n}}\n"),
+    )
+    .unwrap();
+    dir
+}
+
+pub(crate) fn manifest_version(dir: &Path, rel: &str) -> String {
+    let text = fs::read_to_string(dir.join(rel)).unwrap();
+    let start = text.find("\"version\": \"").unwrap() + "\"version\": \"".len();
+    let len = text[start..].find('"').unwrap();
+    text[start..start + len].to_owned()
 }

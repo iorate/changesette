@@ -12,25 +12,23 @@ pub struct Config {
     ignore: Vec<String>,
     fixed: Vec<Vec<String>>,
     linked: Vec<Vec<String>>,
-    pub(crate) private_packages_version: bool,
-    pub(crate) snapshot_use_calculated_version: bool,
-    pub(crate) snapshot_prerelease_template: Option<String>,
-    pub(crate) packages: Option<Vec<String>>,
+    pub private_packages_version: bool,
+    pub snapshot_use_calculated_version: bool,
+    pub snapshot_prerelease_template: Option<String>,
+    pub packages: Option<Vec<String>>,
 }
 
 impl Config {
-    pub(crate) fn has_ignore(&self) -> bool {
+    #[must_use]
+    pub fn has_ignore(&self) -> bool {
         !self.ignore.is_empty()
     }
 
-    pub(crate) fn resolve_ignore<'a>(
-        &self,
-        names: impl IntoIterator<Item = &'a str>,
-    ) -> Vec<String> {
+    pub fn resolve_ignore<'a>(&self, names: impl IntoIterator<Item = &'a str>) -> Vec<String> {
         expand_patterns(&self.ignore, names)
     }
 
-    pub(crate) fn resolve_groups(&self, names: &[&str]) -> Result<ResolvedGroups> {
+    pub fn resolve_groups(&self, names: &[&str]) -> Result<ResolvedGroups> {
         let expand = |groups: &[Vec<String>]| -> Vec<Vec<String>> {
             groups
                 .iter()
@@ -68,9 +66,9 @@ impl Config {
     }
 }
 
-pub(crate) struct ResolvedGroups {
-    pub(crate) fixed: Vec<Vec<String>>,
-    pub(crate) linked: Vec<Vec<String>>,
+pub struct ResolvedGroups {
+    pub fixed: Vec<Vec<String>>,
+    pub linked: Vec<Vec<String>>,
 }
 
 fn expand_patterns<'a>(
@@ -115,7 +113,7 @@ fn check_group_duplicates(key: &str, groups: &[Vec<String>]) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn load(changeset_dir: &Path) -> Result<Config> {
+pub fn load(changeset_dir: &Path) -> Result<Config> {
     let path = changeset_dir.join("config.json");
     let Some(value) = read_json(&path)? else {
         return Ok(Config::default());

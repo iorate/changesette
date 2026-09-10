@@ -24,7 +24,7 @@ pub fn init_subscriber(max_level: LevelFilter) {
         .init();
 }
 
-pub(crate) struct Formatter;
+pub struct Formatter;
 
 impl<S, N> FormatEvent<S, N> for Formatter
 where

@@ -9,18 +9,18 @@ use crate::{
     config::Config,
 };
 
-pub(crate) struct Snapshot {
-    pub(crate) tag: Option<String>,
-    pub(crate) template: Option<String>,
+pub struct Snapshot {
+    pub tag: Option<String>,
+    pub template: Option<String>,
 }
 
-pub(crate) struct SnapshotVersions {
+pub struct SnapshotVersions {
     suffix: Prerelease,
     use_calculated_version: bool,
 }
 
 impl SnapshotVersions {
-    pub(crate) fn resolve(snapshot: &Snapshot, config: &Config) -> Result<Self> {
+    pub fn resolve(snapshot: &Snapshot, config: &Config) -> Result<Self> {
         let template = snapshot
             .template
             .as_deref()
@@ -36,7 +36,8 @@ impl SnapshotVersions {
         })
     }
 
-    pub(crate) fn apply(&self, old_version: &Version, bump: Bump) -> Version {
+    #[must_use]
+    pub fn apply(&self, old_version: &Version, bump: Bump) -> Version {
         let mut version = if self.use_calculated_version {
             bump::next_version(old_version, bump)
         } else {
