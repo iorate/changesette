@@ -177,6 +177,19 @@ pub(crate) fn capture_output(f: impl FnOnce()) -> String {
         }
     }
 
+    // tracing-core caches each callsite's interest on its first hit, and with
+    // at most one registered dispatcher it computes that interest from the
+    // hitting thread's own dispatcher. A parallel test without a subscriber
+    // would thus cache `never` for a callsite and starve the capture here, so
+    // a global DEBUG-level sink keeps every callsite enabled while the
+    // thread-local `with_default` below decides where the events go.
+    let _ = tracing::subscriber::set_global_default(
+        tracing_subscriber::fmt()
+            .event_format(Formatter)
+            .with_max_level(LevelFilter::DEBUG)
+            .with_writer(io::sink)
+            .finish(),
+    );
     let buffer = Buffer::default();
     let writer = buffer.clone();
     let subscriber = tracing_subscriber::fmt()
