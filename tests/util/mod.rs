@@ -12,9 +12,6 @@ use changesette::{output::Formatter, workspace::Workspace};
 use tempfile::TempDir;
 use tracing::level_filters::LevelFilter;
 
-/// Writes a changeset naming the given packages under `dir/.changeset/`,
-/// creating the directory if needed. An empty `releases` produces an empty
-/// frontmatter.
 pub(crate) fn write_changeset(
     dir: &Path,
     file_name: &str,
@@ -51,8 +48,6 @@ fn write_changeset_in(
     .unwrap();
 }
 
-/// Captures every file under `dir` (recursively) as a relative-path-to-bytes
-/// map, for asserting that a command left the tree untouched.
 pub(crate) fn dir_snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     fn walk(root: &Path, dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) {
         for entry in fs::read_dir(dir).unwrap() {
