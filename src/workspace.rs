@@ -46,61 +46,96 @@ impl PackageManager {
     }
 }
 
-pub(crate) enum RootMarker {
-    PnpmWorkspaceYaml,
-    YarnLock,
-    NpmReroot(Vec<Package>),
-    PackageJson,
+pub(crate) struct Root {
+    dir: PathBuf,
+    pm: PackageManager,
+    // The packages `find` already enumerated to confirm an npm reroot, kept
+    // so that `load` does not walk the workspace (and warn) a second time.
+    reroot: Option<Vec<Package>>,
 }
 
-pub(crate) fn find_root(cwd: &Path) -> Result<(PathBuf, RootMarker)> {
-    for dir in cwd.ancestors() {
-        if probe_is_file(&dir.join("pnpm-workspace.yaml")) {
-            return Ok((dir.to_path_buf(), RootMarker::PnpmWorkspaceYaml));
-        }
-        if probe_is_file(&dir.join("yarn.lock")) {
-            return Ok((dir.to_path_buf(), RootMarker::YarnLock));
+impl Root {
+    pub(crate) fn new(dir: PathBuf) -> Root {
+        let pm = if probe_is_file(&dir.join("pnpm-workspace.yaml")) {
+            PackageManager::Pnpm
+        } else if probe_is_file(&dir.join("yarn.lock")) {
+            PackageManager::Yarn
+        } else {
+            PackageManager::Npm
+        };
+        Root {
+            dir,
+            pm,
+            reroot: None,
         }
     }
 
-    let mut prefix = None;
-    for dir in cwd.ancestors() {
-        let path = dir.join("package.json");
-        if !probe_is_file(&path) {
-            continue;
+    pub(crate) fn find(cwd: &Path) -> Result<Root> {
+        for dir in cwd.ancestors() {
+            if probe_is_file(&dir.join("pnpm-workspace.yaml")) {
+                return Ok(Root {
+                    dir: dir.to_path_buf(),
+                    pm: PackageManager::Pnpm,
+                    reroot: None,
+                });
+            }
+            if probe_is_file(&dir.join("yarn.lock")) {
+                return Ok(Root {
+                    dir: dir.to_path_buf(),
+                    pm: PackageManager::Yarn,
+                    reroot: None,
+                });
+            }
         }
-        let Some(prefix_dir) = &prefix else {
-            prefix = Some(dir.to_path_buf());
-            continue;
-        };
-        let value = match read_manifest(&path) {
-            Ok(Some(value)) => value,
-            Ok(None) => continue,
-            Err(err) => {
-                warn!("{err:#}: passed over while looking for an npm workspace root");
+
+        let pm = PackageManager::Npm;
+        let mut prefix = None;
+        for dir in cwd.ancestors() {
+            let path = dir.join("package.json");
+            if !probe_is_file(&path) {
                 continue;
             }
-        };
-        let Some(patterns) = workspaces_patterns(&value, &path) else {
-            continue;
-        };
-        let pm = PackageManager::Npm;
-        // The candidate prefix is looked for among every matched directory
-        // holding a package.json, so the member qualification (and the
-        // duplicate-name exclusion) must not run first.
-        let packages = collect_packages(dir, &path, &patterns, pm)?;
-        if lists_dir(&packages, prefix_dir)? {
-            return Ok((dir.to_path_buf(), RootMarker::NpmReroot(packages)));
+            let Some(prefix_dir) = &prefix else {
+                prefix = Some(dir.to_path_buf());
+                continue;
+            };
+            let value = match read_manifest(&path) {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(err) => {
+                    warn!("{err:#}: passed over while looking for an npm workspace root");
+                    continue;
+                }
+            };
+            let Some(patterns) = workspaces_patterns(&value, &path) else {
+                continue;
+            };
+            // The candidate prefix is looked for among every matched directory
+            // holding a package.json, so the member qualification (and the
+            // duplicate-name exclusion) must not run first.
+            let packages = collect_packages(dir, &path, &patterns, pm)?;
+            if lists_dir(&packages, prefix_dir)? {
+                return Ok(Root {
+                    dir: dir.to_path_buf(),
+                    pm,
+                    reroot: Some(packages),
+                });
+            }
         }
+
+        Ok(Root {
+            dir: prefix.unwrap_or_else(|| cwd.to_path_buf()),
+            pm,
+            reroot: None,
+        })
     }
 
-    Ok((
-        prefix.unwrap_or_else(|| cwd.to_path_buf()),
-        RootMarker::PackageJson,
-    ))
+    pub(crate) fn dir(&self) -> &Path {
+        &self.dir
+    }
 }
 
-// The root is always the physical path: `find_root` and `Workspace::load`
+// The root is always the physical path: `Root::find` and `Workspace::load`
 // rely on it holding no `.` or `..` component, as they climb by `parent()`.
 pub(crate) fn resolve_root(dir: &Path) -> Result<PathBuf> {
     let root = dunce::canonicalize(dir)?;
@@ -111,15 +146,16 @@ pub(crate) fn resolve_root(dir: &Path) -> Result<PathBuf> {
 }
 
 impl Workspace {
-    pub(crate) fn load(
-        root: &Path,
-        rel_dirs: Option<&[String]>,
-        marker: Option<RootMarker>,
-    ) -> Result<Workspace> {
+    pub(crate) fn load(root: Root, rel_dirs: Option<&[String]>) -> Result<Workspace> {
+        let Root {
+            dir: root,
+            pm,
+            reroot,
+        } = root;
         if let Some(rel_dirs) = rel_dirs {
             let mut packages = Vec::new();
             for entry in rel_dirs {
-                let (dir, rel_dir) = resolve_rel_dir(root, entry)?;
+                let (dir, rel_dir) = resolve_rel_dir(&root, entry)?;
                 let manifest = dir.join("package.json");
                 let Some(value) = read_manifest(&manifest)? else {
                     bail!(
@@ -135,37 +171,18 @@ impl Workspace {
                 });
             }
             return Ok(Workspace::new(
-                root.to_path_buf(),
+                root,
                 "packages from config",
                 qualify_packages(packages)?,
             ));
         }
-        let marker = match marker {
-            Some(marker) => marker,
-            None if probe_is_file(&root.join("pnpm-workspace.yaml")) => {
-                RootMarker::PnpmWorkspaceYaml
-            }
-            None if probe_is_file(&root.join("yarn.lock")) => RootMarker::YarnLock,
-            None => RootMarker::PackageJson,
+        let members = if let Some(packages) = reroot {
+            qualify_packages(packages)?
+        } else {
+            let (manifest, patterns) = read_patterns(&root, pm)?;
+            collect_members(&root, &manifest, &patterns, pm)?
         };
-        let pm = match marker {
-            RootMarker::NpmReroot(packages) => {
-                return Ok(Workspace::new(
-                    root.to_path_buf(),
-                    PackageManager::Npm.as_str(),
-                    qualify_packages(packages)?,
-                ));
-            }
-            RootMarker::PnpmWorkspaceYaml => PackageManager::Pnpm,
-            RootMarker::YarnLock => PackageManager::Yarn,
-            RootMarker::PackageJson => PackageManager::Npm,
-        };
-        let (manifest, patterns) = read_patterns(root, pm)?;
-        Ok(Workspace::new(
-            root.to_path_buf(),
-            pm.as_str(),
-            collect_members(root, &manifest, &patterns, pm)?,
-        ))
+        Ok(Workspace::new(root, pm.as_str(), members))
     }
 
     // The one construction point, so that every loading path reports the
@@ -656,8 +673,7 @@ mod tests {
     }
 
     fn discover(cwd: &Path) -> Result<Workspace> {
-        let (root, marker) = find_root(cwd)?;
-        Workspace::load(&root, None, Some(marker))
+        Workspace::load(Root::find(cwd)?, None)
     }
 
     fn discover_ok(case: &str) -> Workspace {
@@ -3418,7 +3434,7 @@ mod tests {
 
     fn load_listed(root: &Path, packages: &[&str]) -> Result<Workspace> {
         let packages: Vec<String> = packages.iter().map(|dir| (*dir).to_owned()).collect();
-        Workspace::load(root, Some(&packages), None)
+        Workspace::load(Root::new(root.to_path_buf()), Some(&packages))
     }
 
     fn load_listed_err(root: &Path, packages: &[&str]) -> String {
@@ -3444,7 +3460,7 @@ mod tests {
             "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
         );
         let root = dir.path().join("packages/a");
-        let workspace = Workspace::load(&root, None, None).unwrap();
+        let workspace = Workspace::load(Root::new(root.clone()), None).unwrap();
         assert_eq!(workspace.root, root);
         assert_eq!(names_and_rel_dirs(&workspace), [("pkg-a", ".")]);
     }
@@ -3468,7 +3484,7 @@ mod tests {
             "{ \"name\": \"pkg-x\", \"version\": \"1.0.0\" }\n",
         );
         let root = dir.path().join("packages/inner");
-        let workspace = Workspace::load(&root, None, None).unwrap();
+        let workspace = Workspace::load(Root::new(root.clone()), None).unwrap();
         assert_eq!(workspace.root, root);
         assert_eq!(
             names_and_rel_dirs(&workspace),
@@ -3484,7 +3500,7 @@ mod tests {
             "packages/a/package.json",
             "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n",
         );
-        let workspace = Workspace::load(dir.path(), None, None).unwrap();
+        let workspace = Workspace::load(Root::new(dir.path().to_path_buf()), None).unwrap();
         assert_eq!(workspace.root, dir.path());
         assert_eq!(names_and_dirs(&workspace), []);
     }
@@ -3493,7 +3509,7 @@ mod tests {
     fn a_forced_root_with_a_yarn_lock_alone_has_no_members() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "yarn.lock", "");
-        let workspace = Workspace::load(dir.path(), None, None).unwrap();
+        let workspace = Workspace::load(Root::new(dir.path().to_path_buf()), None).unwrap();
         assert_eq!(names_and_dirs(&workspace), []);
     }
 
@@ -3675,11 +3691,11 @@ mod tests {
             "packages/b/package.json",
             "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
         );
-        let (root, marker) = find_root(&dir.path().join("packages/a")).unwrap();
-        assert_eq!(root, dir.path());
-        assert!(matches!(marker, RootMarker::NpmReroot(_)));
+        let root = Root::find(&dir.path().join("packages/a")).unwrap();
+        assert_eq!(root.dir, dir.path());
+        assert!(root.reroot.is_some());
         let packages = vec!["packages/b".to_owned()];
-        let workspace = Workspace::load(&root, Some(&packages), Some(marker)).unwrap();
+        let workspace = Workspace::load(root, Some(&packages)).unwrap();
         assert_eq!(names_and_rel_dirs(&workspace), [("pkg-b", "packages/b")]);
     }
 
