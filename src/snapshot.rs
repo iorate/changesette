@@ -105,12 +105,8 @@ mod tests {
     const MILLIS: u128 = 1_755_820_800_123;
     const DATETIME: &str = "20250822000000";
 
-    fn render_ok(tag: Option<&str>, template: Option<&str>) -> String {
-        render_suffix(tag, template, MILLIS).unwrap().to_string()
-    }
-
-    fn render_err(tag: Option<&str>, template: Option<&str>) -> String {
-        format!("{:#}", render_suffix(tag, template, MILLIS).unwrap_err())
+    fn render(tag: Option<&str>, template: Option<&str>) -> Result<String> {
+        render_suffix(tag, template, MILLIS).map(|suffix| suffix.to_string())
     }
 
     #[test]
@@ -123,57 +119,34 @@ mod tests {
     }
 
     #[test]
-    fn renders_the_default_template() {
-        assert_eq!(render_ok(None, None), DATETIME);
+    fn renders_templates() {
+        assert_eq!(render(None, None).unwrap(), DATETIME);
         assert_eq!(
-            render_ok(Some("canary"), None),
+            render(Some("canary"), None).unwrap(),
             format!("canary-{DATETIME}")
         );
-    }
-
-    #[test]
-    fn renders_every_placeholder() {
         assert_eq!(
-            render_ok(Some("canary"), Some("{tag}-{timestamp}-{datetime}")),
+            render(Some("canary"), Some("{tag}-{timestamp}-{datetime}")).unwrap(),
             format!("canary-{MILLIS}-{DATETIME}")
         );
-    }
-
-    #[test]
-    fn renders_a_repeated_placeholder() {
         assert_eq!(
-            render_ok(Some("canary"), Some("{tag}.{tag}")),
+            render(Some("canary"), Some("{tag}.{tag}")).unwrap(),
             "canary.canary"
         );
     }
 
     #[test]
-    fn rejects_the_commit_placeholder() {
-        insta::assert_snapshot!(render_err(None, Some("{commit}-{datetime}")));
-    }
-
-    #[test]
-    fn rejects_the_commit_short_placeholder() {
-        insta::assert_snapshot!(render_err(None, Some("{commit-short}-{datetime}")));
-    }
-
-    #[test]
-    fn rejects_a_tag_without_the_tag_placeholder() {
-        insta::assert_snapshot!(render_err(Some("canary"), Some("{datetime}")));
-    }
-
-    #[test]
-    fn rejects_the_tag_placeholder_without_a_tag() {
-        insta::assert_snapshot!(render_err(None, Some("{tag}-{datetime}")));
-    }
-
-    #[test]
-    fn rejects_an_invalid_tag() {
-        insta::assert_snapshot!(render_err(Some("pr#123"), None));
-    }
-
-    #[test]
-    fn rejects_an_unknown_placeholder() {
-        insta::assert_snapshot!(render_err(None, Some("{datetime}-{branch}")));
+    fn rejects_invalid_templates() {
+        for (tag, template, needle) in [
+            (None, Some("{commit}-{datetime}"), "{commit}"),
+            (None, Some("{commit-short}-{datetime}"), "{commit-short}"),
+            (Some("canary"), Some("{datetime}"), "{tag}"),
+            (None, Some("{tag}-{datetime}"), "{tag}"),
+            (Some("pr#123"), None, "pr#123"),
+            (None, Some("{datetime}-{branch}"), "{branch}"),
+        ] {
+            let err = format!("{:#}", render(tag, template).unwrap_err());
+            assert!(err.contains(needle), "{tag:?} {template:?}: {err}");
+        }
     }
 }

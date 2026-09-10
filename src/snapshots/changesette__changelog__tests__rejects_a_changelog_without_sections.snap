@@ -1,5 +1,0 @@
----
-source: src/changelog.rs
-expression: "format!(\"{:#}\", extract(\"no-h2\", \"1.0.0\").unwrap_err())"
----
-version 1.0.0 not found

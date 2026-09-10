@@ -1,5 +1,0 @@
----
-source: src/package_json.rs
-expression: "load_err(\"name-missing\")"
----
-tests/fixtures/package-json/name-missing/package.json: missing top-level "name"

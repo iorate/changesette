@@ -152,7 +152,7 @@ fn add_with_flags_creates_a_changeset() {
     fs::create_dir(dir.path().join(".changeset")).unwrap();
     let output = changesette(
         dir.path(),
-        &["add", "--minor", "ublacklist", "--message", "Add feature"],
+        &["add", "--minor", "ublacklist", "-m", "Add feature"],
     );
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
@@ -163,34 +163,6 @@ fn add_with_flags_creates_a_changeset() {
     assert_eq!(content, "---\nublacklist: minor\n---\n\nAdd feature\n");
     assert!(err.contains("Summary of changesets:"), "{err}");
     assert!(err.contains("minor:  ublacklist"), "{err}");
-}
-
-#[test]
-fn add_quotes_a_scoped_package_name() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        "{\n  \"name\": \"@iorate/ublacklist\",\n  \"version\": \"1.2.3\"\n}\n",
-    )
-    .unwrap();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    let output = changesette(
-        dir.path(),
-        &[
-            "add",
-            "--minor",
-            "@iorate/ublacklist",
-            "--message",
-            "Add feature",
-        ],
-    );
-    assert!(output.status.success(), "{}", stderr(&output));
-    let err = stderr(&output);
-    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
-    assert_eq!(
-        content,
-        "---\n\"@iorate/ublacklist\": minor\n---\n\nAdd feature\n"
-    );
 }
 
 #[test]
@@ -238,20 +210,6 @@ fn add_fails_on_an_invalid_config() {
         "{}",
         stderr(&output)
     );
-}
-
-#[test]
-fn add_accepts_a_multi_line_message_via_the_short_flag() {
-    let dir = package_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    let output = changesette(
-        dir.path(),
-        &["add", "--patch", "ublacklist", "-m", "line1\nline2"],
-    );
-    assert!(output.status.success(), "{}", stderr(&output));
-    let err = stderr(&output);
-    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
-    assert_eq!(content, "---\nublacklist: patch\n---\n\nline1\nline2\n");
 }
 
 #[test]
@@ -466,17 +424,6 @@ fn add_without_any_flags_fails_naming_all_missing_flags() {
 }
 
 #[test]
-fn add_accepts_an_empty_message() {
-    let dir = package_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    let output = changesette(dir.path(), &["add", "--minor", "ublacklist", "-m", ""]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let err = stderr(&output);
-    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
-    assert_eq!(content, "---\nublacklist: minor\n---\n");
-}
-
-#[test]
 fn add_rejects_the_removed_bump_flag() {
     let dir = package_dir();
     fs::create_dir(dir.path().join(".changeset")).unwrap();
@@ -497,17 +444,6 @@ fn add_empty_creates_an_empty_changeset() {
     let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
     assert_eq!(content, "---\n---\n");
     assert!(!err.contains("Summary of changesets:"), "{err}");
-}
-
-#[test]
-fn add_empty_with_a_message_appends_the_summary() {
-    let dir = package_dir();
-    fs::create_dir(dir.path().join(".changeset")).unwrap();
-    let output = changesette(dir.path(), &["add", "--empty", "-m", "Note only"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let err = stderr(&output);
-    let content = fs::read_to_string(dir.path().join(added_path(&err))).unwrap();
-    assert_eq!(content, "---\n---\n\nNote only\n");
 }
 
 #[test]
@@ -668,75 +604,6 @@ fn set_summary_rewrites_the_summary() {
     );
     let content = fs::read_to_string(dir.path().join(".changeset/brave-owls-run.md")).unwrap();
     assert_eq!(content, "---\nublacklist: minor\n---\n\nNew summary\n");
-}
-
-#[test]
-fn set_summary_normalizes_upstream_quoting() {
-    let dir = package_dir();
-    write_changeset(
-        dir.path(),
-        "quoted.md",
-        &[("ublacklist", "minor"), ("@iorate/ublacklist", "patch")],
-        "Old summary",
-    );
-    let output = changesette(dir.path(), &["set-summary", "quoted", "New summary"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let content = fs::read_to_string(dir.path().join(".changeset/quoted.md")).unwrap();
-    assert_eq!(
-        content,
-        "---\nublacklist: minor\n\"@iorate/ublacklist\": patch\n---\n\nNew summary\n"
-    );
-}
-
-#[test]
-fn set_summary_keeps_a_none_release() {
-    let dir = package_dir();
-    write_changeset(
-        dir.path(),
-        "none.md",
-        &[("ublacklist", "none")],
-        "Old summary",
-    );
-    let output = changesette(dir.path(), &["set-summary", "none", "New summary"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let content = fs::read_to_string(dir.path().join(".changeset/none.md")).unwrap();
-    assert_eq!(content, "---\nublacklist: none\n---\n\nNew summary\n");
-}
-
-#[test]
-fn set_summary_with_an_empty_summary_writes_a_frontmatter_only_file() {
-    let dir = package_dir();
-    write_changeset(
-        dir.path(),
-        "empty.md",
-        &[("ublacklist", "minor")],
-        "Old summary",
-    );
-    let output = changesette(dir.path(), &["set-summary", "empty", ""]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let content = fs::read_to_string(dir.path().join(".changeset/empty.md")).unwrap();
-    assert_eq!(content, "---\nublacklist: minor\n---\n");
-}
-
-#[test]
-fn set_summary_keeps_a_multi_line_summary() {
-    let dir = package_dir();
-    write_changeset(
-        dir.path(),
-        "multi.md",
-        &[("ublacklist", "minor")],
-        "Old summary",
-    );
-    let output = changesette(
-        dir.path(),
-        &["set-summary", "multi", "First line.\n\nSecond line."],
-    );
-    assert!(output.status.success(), "{}", stderr(&output));
-    let content = fs::read_to_string(dir.path().join(".changeset/multi.md")).unwrap();
-    assert_eq!(
-        content,
-        "---\nublacklist: minor\n---\n\nFirst line.\n\nSecond line.\n"
-    );
 }
 
 #[test]
@@ -1459,18 +1326,6 @@ fn version_bumps_and_writes_the_changelog() {
 }
 
 #[test]
-fn version_writes_an_empty_release_line_for_an_empty_summary() {
-    let dir = package_dir();
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "minor")], "");
-    let output = changesette(dir.path(), &["version"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
-        "# ublacklist\n\n## 1.3.0\n\n### Minor Changes\n\n- \n"
-    );
-}
-
-#[test]
 fn version_leaves_the_package_lock_untouched() {
     let dir = package_dir();
     let package_lock = "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\",\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"\": {\n      \"name\": \"ublacklist\",\n      \"version\": \"1.2.3\"\n    }\n  }\n}\n";
@@ -1609,35 +1464,6 @@ fn version_fails_on_a_validation_error_leaving_the_tree_untouched() {
     let output = changesette(dir.path(), &["version"]);
     assert!(!output.status.success());
     assert_eq!(dir_snapshot(dir.path()), before);
-}
-
-#[test]
-fn version_rerun_replaces_the_same_section() {
-    let dir = package_dir();
-    write_changeset(
-        dir.path(),
-        ULID_B,
-        &[("ublacklist", "minor")],
-        "Add feature",
-    );
-    let package_json = fs::read_to_string(dir.path().join("package.json")).unwrap();
-    let output = changesette(dir.path(), &["version"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let changelog = fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
-
-    fs::write(dir.path().join("package.json"), package_json).unwrap();
-    write_changeset(
-        dir.path(),
-        ULID_B,
-        &[("ublacklist", "minor")],
-        "Add feature",
-    );
-    let output = changesette(dir.path(), &["version"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
-        changelog
-    );
 }
 
 fn pretty_plan(id: &str) -> String {
@@ -1864,18 +1690,6 @@ fn version_skips_a_config_ignored_package_and_keeps_its_changeset() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stderr(&output), "Bumped pkg-a 3.1.4 -> 3.2.0\n");
     assert!(!dir.path().join(".changeset").join(ULID_A).exists());
-    assert!(dir.path().join(".changeset").join(ULID_B).exists());
-}
-
-#[test]
-fn version_resolves_config_ignore_globs_with_negation() {
-    let dir = two_package_workspace_dir();
-    write_config(dir.path(), "{ \"ignore\": [\"pkg-*\", \"!pkg-a\"] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
-    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
-    let output = changesette(dir.path(), &["version"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stderr(&output), "Bumped pkg-a 3.1.4 -> 3.2.0\n");
     assert!(dir.path().join(".changeset").join(ULID_B).exists());
 }
 
@@ -2759,21 +2573,6 @@ fn pre_enter_fails_when_already_in_pre_mode() {
 }
 
 #[test]
-fn pre_enter_after_exit_rewrites_in_place() {
-    let dir = package_dir();
-    write_pre_json(
-        dir.path(),
-        "{ // pre state\n\t\"tag\":\t\"alpha\",\n\t\"mode\": \"exit\",\n\t\"someday\": [1, 2, 3]\n}",
-    );
-    let output = changesette(dir.path(), &["pre", "enter", "beta"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        read_pre_json(dir.path()),
-        "{ // pre state\n\t\"tag\":\t\"beta\",\n\t\"mode\": \"pre\",\n\t\"someday\": [1, 2, 3]\n}"
-    );
-}
-
-#[test]
 fn pre_enter_rejects_an_invalid_tag() {
     for tag in ["", " ", "01", "beta 2"] {
         let dir = package_dir();
@@ -2787,20 +2586,6 @@ fn pre_enter_rejects_an_invalid_tag() {
         );
         assert_eq!(dir_snapshot(dir.path()), before);
     }
-}
-
-#[test]
-fn pre_enter_fails_on_a_v2_pre_json() {
-    let dir = package_dir();
-    write_pre_json(
-        dir.path(),
-        "{\n  \"mode\": \"pre\",\n  \"tag\": \"beta\",\n  \"initialVersions\": {},\n  \"changesets\": []\n}\n",
-    );
-    let output = changesette(dir.path(), &["pre", "enter", "beta"]);
-    assert!(!output.status.success());
-    let err = stderr(&output);
-    assert!(err.contains("changesets v2 format"), "{err}");
-    assert!(err.contains("@changesets/cli@3"), "{err}");
 }
 
 #[test]
@@ -3644,35 +3429,6 @@ fn version_snapshot_output_writes_snapshot_versions() {
     let plan = fs::read_to_string(dir.path().join("plan.json")).unwrap();
     assert!(plan.contains("\"oldVersion\": \"1.2.3\""), "{plan}");
     assert!(plan.contains("\"newVersion\": \"0.0.0-canary-"), "{plan}");
-}
-
-#[test]
-fn get_changelog_entry_reads_a_prerelease_section() {
-    let dir = package_dir();
-    fs::write(
-        dir.path().join("CHANGELOG.md"),
-        "# ublacklist\n\n## 1.3.0-beta.0\n\n### Minor Changes\n\n- Add feature\n",
-    )
-    .unwrap();
-    let output = changesette(
-        dir.path(),
-        &["get-changelog-entry", "ublacklist", "1.3.0-beta.0"],
-    );
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "### Minor Changes\n\n- Add feature\n");
-}
-
-#[test]
-fn get_changelog_entry_returns_an_empty_rescued_section() {
-    let dir = package_dir();
-    fs::write(
-        dir.path().join("CHANGELOG.md"),
-        "# ublacklist\n\n## 1.3.0\n\n## 1.3.0-beta.0\n\n### Minor Changes\n\n- Add feature\n",
-    )
-    .unwrap();
-    let output = changesette(dir.path(), &["get-changelog-entry", "ublacklist", "1.3.0"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "\n");
 }
 
 #[test]

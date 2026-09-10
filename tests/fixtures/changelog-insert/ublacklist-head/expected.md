@@ -1,7 +1,3 @@
----
-source: src/changelog.rs
-expression: "upsert(\"ublacklist-head\", \"10.1.0\")"
----
 # ublacklist
 
 ## 10.1.0

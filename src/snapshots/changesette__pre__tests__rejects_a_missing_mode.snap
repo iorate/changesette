@@ -1,5 +1,0 @@
----
-source: src/pre.rs
-expression: "load_err(\"{\\n  \\\"tag\\\": \\\"beta\\\"\\n}\\n\")"
----
-.changeset/pre.json: missing "mode"

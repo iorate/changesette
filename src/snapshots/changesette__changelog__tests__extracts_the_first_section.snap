@@ -1,7 +1,0 @@
----
-source: src/changelog.rs
-expression: "extract(\"basic\", \"2.0.0\").unwrap()"
----
-### Major Changes
-
-- Break something

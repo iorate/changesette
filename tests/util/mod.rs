@@ -1,5 +1,14 @@
-use std::{collections::BTreeMap, fmt::Write as _, fs, path::Path};
+#![allow(dead_code)]
 
+use std::{
+    collections::BTreeMap,
+    fmt::Write as _,
+    fs, io,
+    path::Path,
+    sync::{Arc, Mutex},
+};
+
+use changesette::output::Formatter;
 use tempfile::TempDir;
 
 /// Writes a changeset naming the given packages under `dir/.changeset/`,
@@ -150,4 +159,30 @@ pub(crate) fn manifest_version(dir: &Path, rel: &str) -> String {
     let start = text.find("\"version\": \"").unwrap() + "\"version\": \"".len();
     let len = text[start..].find('"').unwrap();
     text[start..start + len].to_owned()
+}
+
+pub(crate) fn capture_output(f: impl FnOnce()) -> String {
+    #[derive(Clone, Default)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+    impl io::Write for Buffer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let buffer = Buffer::default();
+    let writer = buffer.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .event_format(Formatter)
+        .with_writer(move || writer.clone())
+        .finish();
+    tracing::subscriber::with_default(subscriber, f);
+    let bytes = buffer.0.lock().unwrap().clone();
+    String::from_utf8(bytes).unwrap()
 }
