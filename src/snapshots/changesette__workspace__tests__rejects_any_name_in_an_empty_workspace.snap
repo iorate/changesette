@@ -1,5 +1,0 @@
----
-source: src/workspace.rs
-expression: "format!(\"{:#}\", workspace.member(\"missing\").unwrap_err())"
----
-package `missing` not found: the workspace has no members

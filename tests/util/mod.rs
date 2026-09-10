@@ -8,8 +8,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use changesette::output::Formatter;
+use changesette::{output::Formatter, workspace::Workspace};
 use tempfile::TempDir;
+use tracing::level_filters::LevelFilter;
 
 /// Writes a changeset naming the given packages under `dir/.changeset/`,
 /// creating the directory if needed. An empty `releases` produces an empty
@@ -180,9 +181,24 @@ pub(crate) fn capture_output(f: impl FnOnce()) -> String {
     let writer = buffer.clone();
     let subscriber = tracing_subscriber::fmt()
         .event_format(Formatter)
+        .with_max_level(LevelFilter::DEBUG)
         .with_writer(move || writer.clone())
         .finish();
     tracing::subscriber::with_default(subscriber, f);
     let bytes = buffer.0.lock().unwrap().clone();
     String::from_utf8(bytes).unwrap()
+}
+
+pub(crate) fn write_file(root: &Path, rel: &str, text: &str) {
+    let path = root.join(rel);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, text).unwrap();
+}
+
+pub(crate) fn names_and_rel_dirs(workspace: &Workspace) -> Vec<(&str, &str)> {
+    workspace
+        .members()
+        .iter()
+        .map(|member| (member.name(), member.rel_dir()))
+        .collect()
 }
