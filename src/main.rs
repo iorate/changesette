@@ -8,7 +8,10 @@ use std::{
 use anyhow::Context;
 use clap::Parser;
 
-use crate::workspace::{Root, Workspace};
+use crate::{
+    commands::{add::AddArgs, version::VersionArgs},
+    workspace::{Root, Workspace},
+};
 
 mod bump;
 mod changelog;
@@ -58,58 +61,6 @@ impl LogLevel {
             LogLevel::Debug => LevelFilter::DEBUG,
         }
     }
-}
-
-#[derive(clap::Args)]
-struct AddArgs {
-    /// Create a changeset that names no packages
-    #[arg(long, conflicts_with_all = ["major", "minor", "patch"])]
-    empty: bool,
-    /// Open the created changeset in your editor
-    #[arg(long)]
-    open: bool,
-    /// The summary text of the change
-    #[arg(short, long)]
-    message: Option<String>,
-    /// The packages to record a major bump for (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    major: Vec<String>,
-    /// The packages to record a minor bump for (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    minor: Vec<String>,
-    /// The packages to record a patch bump for (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    patch: Vec<String>,
-}
-
-#[derive(clap::Args)]
-struct VersionArgs {
-    /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    ignore: Vec<String>,
-    /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
-    #[arg(
-        long,
-        value_name = "TAG",
-        num_args = 0..=1,
-        value_parser = clap::builder::NonEmptyStringValueParser::new()
-    )]
-    #[expect(clippy::option_option)]
-    snapshot: Option<Option<String>>,
-    /// The snapshot suffix template; the placeholders are {tag}, {timestamp}, and {datetime}
-    #[arg(
-        long,
-        value_name = "TEMPLATE",
-        requires = "snapshot",
-        value_parser = clap::builder::NonEmptyStringValueParser::new()
-    )]
-    snapshot_prerelease_template: Option<String>,
-    /// Succeed even when there are no unreleased changesets
-    #[arg(short, long)]
-    allow_no_changesets: bool,
-    /// Write the release plan to the file (or stdout with `-`) as JSON
-    #[arg(short, long, value_name = "FILE")]
-    output: Option<PathBuf>,
 }
 
 #[derive(clap::Subcommand)]
