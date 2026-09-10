@@ -70,7 +70,7 @@ impl Write for LenientStderr {
     }
 }
 
-pub(crate) fn print_json(value: &impl Serialize) -> Result<()> {
+pub fn print_json(value: &impl Serialize) -> Result<()> {
     let json = if io::stdout().is_terminal() {
         serde_json::to_string_pretty(value)?
     } else {
@@ -79,7 +79,7 @@ pub(crate) fn print_json(value: &impl Serialize) -> Result<()> {
     print_line(&json)
 }
 
-pub(crate) fn print_line(text: &str) -> Result<()> {
+pub fn print_line(text: &str) -> Result<()> {
     let mut stdout = io::stdout().lock();
     match writeln!(stdout, "{text}").and_then(|()| stdout.flush()) {
         // A consumer that stops reading early should end the output quietly,

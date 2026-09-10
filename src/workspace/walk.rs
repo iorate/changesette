@@ -9,7 +9,7 @@ use tracing::{debug, warn};
 use super::pattern::{Pattern, Seg, seg_matches};
 use super::{probe_is_file, rel_dir_between, report_fs_error};
 
-pub(crate) fn collect(
+pub fn collect(
     root: &Path,
     positives: &[Pattern],
     negations: &[Pattern],
