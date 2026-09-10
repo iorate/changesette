@@ -1,5 +1,17 @@
 # changesette
 
+## 6.4.0
+
+### Minor Changes
+
+- A directory without a `package.json` is now a workspace root with no members instead of an error, so `init` can run before the `package.json` exists. Such a directory becomes the root when `--root` names it, or when it is the working directory and no `package.json`, `pnpm-workspace.yaml`, or `yarn.lock` is found in it or any parent.
+
+- **Semi-breaking:** the root package is now always a workspace member candidate under npm, as it already was under Yarn and pnpm, so an npm root whose `package.json` has a `name` and a valid `version` becomes a member, and no negative pattern excludes it; a private root is still skipped unless `privatePackages.version` is set, and `ignore` excludes it.
+
+### Patch Changes
+
+- Ignore an invalid "workspaces" field in package.json or an invalid pnpm-workspace.yaml with a warning instead of failing. Under Yarn, a "workspaces" array containing a non-string is now ignored as a whole instead of having the non-string skipped.
+
 ## 6.3.1
 
 ### Patch Changes
