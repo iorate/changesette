@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents when working with code in this r
 
 ## Project Overview
 
-`changesette` is a CLI implementing a reduced, data-format-compatible subset of [changesets](https://github.com/changesets/changesets) for single packages and npm / pnpm workspaces.
+`changesette` is a version and changelog manager for single packages and npm / yarn / pnpm workspaces, using the same changeset file format as [changesets](https://github.com/changesets/changesets).
 
 ## Changesets
 
