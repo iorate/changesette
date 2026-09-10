@@ -12,13 +12,14 @@ use jsonc_parser::{
 use crate::jsonc::{set_string_value, string_prop};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PreMode {
+pub enum PreMode {
     Pre,
     Exit,
 }
 
 impl PreMode {
-    pub(crate) fn as_str(self) -> &'static str {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
         match self {
             PreMode::Pre => "pre",
             PreMode::Exit => "exit",
@@ -26,7 +27,7 @@ impl PreMode {
     }
 }
 
-pub(crate) struct PreJson {
+pub struct PreJson {
     path: PathBuf,
     root: CstRootNode,
     mode_lit: CstStringLit,
@@ -36,7 +37,7 @@ pub(crate) struct PreJson {
 }
 
 impl PreJson {
-    pub(crate) fn load(changeset_dir: &Path) -> Result<Option<Self>> {
+    pub fn load(changeset_dir: &Path) -> Result<Option<Self>> {
         let path = changeset_dir.join("pre.json");
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
@@ -84,35 +85,39 @@ impl PreJson {
         })
     }
 
-    pub(crate) fn mode(&self) -> PreMode {
+    #[must_use]
+    pub fn mode(&self) -> PreMode {
         self.mode
     }
 
-    pub(crate) fn tag(&self) -> &str {
+    #[must_use]
+    pub fn tag(&self) -> &str {
         &self.tag
     }
 
-    pub(crate) fn path(&self) -> &Path {
+    #[must_use]
+    pub fn path(&self) -> &Path {
         &self.path
     }
 
-    pub(crate) fn set_mode(&mut self, mode: PreMode) {
+    pub fn set_mode(&mut self, mode: PreMode) {
         set_string_value(&self.mode_lit, mode.as_str());
         self.mode = mode;
     }
 
     // `tag` must have passed `validate_tag`.
-    pub(crate) fn set_tag(&mut self, tag: &str) {
+    pub fn set_tag(&mut self, tag: &str) {
         set_string_value(&self.tag_lit, tag);
         tag.clone_into(&mut self.tag);
     }
 
-    pub(crate) fn text(&self) -> String {
+    #[must_use]
+    pub fn text(&self) -> String {
         self.root.to_string()
     }
 }
 
-pub(crate) fn validate_tag(tag: &str) -> Result<()> {
+pub fn validate_tag(tag: &str) -> Result<()> {
     // An empty pre-release parses, so the counter is appended before the
     // check to reject an empty tag along with the invalid ones.
     if let Err(err) = semver::Prerelease::new(&format!("{tag}.0")) {
@@ -121,7 +126,7 @@ pub(crate) fn validate_tag(tag: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn write_new(changeset_dir: &Path, tag: &str) -> Result<()> {
+pub fn write_new(changeset_dir: &Path, tag: &str) -> Result<()> {
     let path = changeset_dir.join("pre.json");
     let text = format!("{{\n  \"mode\": \"pre\",\n  \"tag\": \"{tag}\"\n}}\n");
     fs::write(&path, text).with_context(|| path.display().to_string())

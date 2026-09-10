@@ -11,14 +11,14 @@ use jsonc_parser::{
 
 use crate::jsonc::{set_string_value, string_prop};
 
-pub(crate) struct PackageJson {
+pub struct PackageJson {
     path: PathBuf,
     root: CstRootNode,
     version_lit: Option<CstStringLit>,
 }
 
 impl PackageJson {
-    pub(crate) fn load(dir: &Path) -> Result<Self> {
+    pub fn load(dir: &Path) -> Result<Self> {
         let path = dir.join("package.json");
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
@@ -61,7 +61,7 @@ impl PackageJson {
         })
     }
 
-    pub(crate) fn set_version(&mut self, version: &semver::Version) -> Result<()> {
+    pub fn set_version(&mut self, version: &semver::Version) -> Result<()> {
         let Some(version_lit) = &self.version_lit else {
             bail!("{}: missing top-level \"version\"", self.path.display())
         };
@@ -69,11 +69,13 @@ impl PackageJson {
         Ok(())
     }
 
-    pub(crate) fn path(&self) -> &Path {
+    #[must_use]
+    pub fn path(&self) -> &Path {
         &self.path
     }
 
-    pub(crate) fn text(&self) -> String {
+    #[must_use]
+    pub fn text(&self) -> String {
         self.root.to_string()
     }
 }

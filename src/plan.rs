@@ -20,16 +20,16 @@ use crate::{
     workspace::{Member, Workspace},
 };
 
-pub(crate) struct PlannedVersion {
-    pub(crate) workspace: Workspace,
-    pub(crate) changeset_dir: PathBuf,
-    pub(crate) pre: Option<PreJson>,
+pub struct PlannedVersion {
+    pub workspace: Workspace,
+    pub changeset_dir: PathBuf,
+    pub pre: Option<PreJson>,
     // The release plan reports every unreleased changeset, the ones naming
     // only skipped packages included, so `changes` stays unfiltered beside
     // the skip-filtered `consumed_changes`.
-    pub(crate) changes: Vec<LoadedChange>,
-    pub(crate) consumed_changes: Vec<LoadedChange>,
-    pub(crate) releases: Vec<PlannedRelease>,
+    pub changes: Vec<LoadedChange>,
+    pub consumed_changes: Vec<LoadedChange>,
+    pub releases: Vec<PlannedRelease>,
 }
 
 fn pre_state(pre: Option<&PreJson>) -> Option<&PreJson> {
@@ -37,16 +37,18 @@ fn pre_state(pre: Option<&PreJson>) -> Option<&PreJson> {
 }
 
 impl PlannedVersion {
-    pub(crate) fn in_pre(&self) -> Option<&PreJson> {
+    #[must_use]
+    pub fn in_pre(&self) -> Option<&PreJson> {
         pre_state(self.pre.as_ref())
     }
 
-    pub(crate) fn exiting_pre(&self) -> bool {
+    #[must_use]
+    pub fn exiting_pre(&self) -> bool {
         matches!(&self.pre, Some(pre) if pre.mode() == PreMode::Exit)
     }
 }
 
-pub(crate) fn plan_version(
+pub fn plan_version(
     workspace: Workspace,
     config: &Config,
     cli_ignore: &[String],
@@ -99,13 +101,13 @@ pub(crate) fn plan_version(
     })
 }
 
-pub(crate) struct PlannedRelease {
-    pub(crate) name: String,
-    pub(crate) bump: Option<Bump>,
-    pub(crate) old_version: Version,
-    pub(crate) new_version: Version,
-    pub(crate) changeset_ids: Vec<String>,
-    pub(crate) changelog_entry: Option<String>,
+pub struct PlannedRelease {
+    pub name: String,
+    pub bump: Option<Bump>,
+    pub old_version: Version,
+    pub new_version: Version,
+    pub changeset_ids: Vec<String>,
+    pub changelog_entry: Option<String>,
 }
 
 fn plan_releases(
@@ -321,18 +323,18 @@ fn rescue_prereleases<'a>(
     Ok(())
 }
 
-pub(crate) struct StagedWrite {
-    pub(crate) path: PathBuf,
-    pub(crate) content: String,
+pub struct StagedWrite {
+    pub path: PathBuf,
+    pub content: String,
 }
 
 impl StagedWrite {
-    pub(crate) fn apply(&self) -> Result<()> {
+    pub fn apply(&self) -> Result<()> {
         fs::write(&self.path, &self.content).with_context(|| self.path.display().to_string())
     }
 }
 
-pub(crate) fn stage_writes(
+pub fn stage_writes(
     workspace: &Workspace,
     releases: &[PlannedRelease],
 ) -> Result<Vec<StagedWrite>> {

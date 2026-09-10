@@ -7,7 +7,11 @@ use std::{
 };
 
 use tempfile::TempDir;
-use util::{dir_snapshot, write_changeset, write_pre_changeset};
+use util::{
+    dir_snapshot, expected_path, manifest_version, package_dir, prerelease_package_dir,
+    private_two_package_workspace_dir, read_pre_json, two_package_workspace_dir, workspace_dir,
+    write_changeset, write_config, write_pre_changeset, write_pre_json,
+};
 
 const CHANGELOG: &str = "# ublacklist\n\n## 1.1.0\n\n### Minor Changes\n\n- Add feature\n\n## 1.0.0\n\n### Patch Changes\n\n- Fix bug\n";
 
@@ -30,22 +34,6 @@ fn stdout(output: &Output) -> String {
 
 fn stderr(output: &Output) -> String {
     String::from_utf8(output.stderr.clone()).unwrap()
-}
-
-fn expected_path(dir: &Path, rel: &str) -> String {
-    let mut path = dunce::canonicalize(dir).unwrap();
-    path.extend(rel.split('/').filter(|part| !part.is_empty()));
-    path.display().to_string()
-}
-
-fn package_dir() -> TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\"\n}\n",
-    )
-    .unwrap();
-    dir
 }
 
 fn added_path(err: &str) -> &str {
@@ -593,22 +581,6 @@ fn add_fails_in_a_memberless_workspace() {
         "{}",
         stderr(&output)
     );
-}
-
-fn workspace_dir() -> TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        "{\n  \"workspaces\": [\"packages/*\"]\n}\n",
-    )
-    .unwrap();
-    fs::create_dir_all(dir.path().join("packages/a")).unwrap();
-    fs::write(
-        dir.path().join("packages/a/package.json"),
-        "{\n  \"name\": \"pkg-a\",\n  \"version\": \"3.1.4\"\n}\n",
-    )
-    .unwrap();
-    dir
 }
 
 #[test]
@@ -1756,33 +1728,6 @@ fn version_output_dash_writes_the_compact_plan_to_stdout() {
     assert!(!dir.path().join(".changeset").join(ULID_B).exists());
 }
 
-fn two_package_workspace_dir() -> TempDir {
-    let dir = workspace_dir();
-    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
-    fs::write(
-        dir.path().join("packages/b/package.json"),
-        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\"\n}\n",
-    )
-    .unwrap();
-    dir
-}
-
-fn write_config(dir: &Path, text: &str) {
-    fs::create_dir_all(dir.join(".changeset")).unwrap();
-    fs::write(dir.join(".changeset/config.json"), text).unwrap();
-}
-
-fn private_two_package_workspace_dir() -> TempDir {
-    let dir = workspace_dir();
-    fs::create_dir_all(dir.path().join("packages/b")).unwrap();
-    fs::write(
-        dir.path().join("packages/b/package.json"),
-        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\",\n  \"private\": true\n}\n",
-    )
-    .unwrap();
-    dir
-}
-
 #[test]
 fn version_ignore_skips_the_package_and_keeps_its_changeset() {
     let dir = two_package_workspace_dir();
@@ -2765,26 +2710,6 @@ fn status_output_with_zero_changesets_writes_an_empty_plan() {
 const PRE_JSON: &str = "{\n  \"mode\": \"pre\",\n  \"tag\": \"beta\"\n}\n";
 const EXITED_PRE_JSON: &str = "{\n  \"mode\": \"exit\",\n  \"tag\": \"beta\"\n}\n";
 
-fn write_pre_json(dir: &Path, text: &str) {
-    let changeset_dir = dir.join(".changeset");
-    fs::create_dir_all(&changeset_dir).unwrap();
-    fs::write(changeset_dir.join("pre.json"), text).unwrap();
-}
-
-fn read_pre_json(dir: &Path) -> String {
-    fs::read_to_string(dir.join(".changeset/pre.json")).unwrap()
-}
-
-fn prerelease_package_dir(version: &str) -> TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        format!("{{\n  \"name\": \"ublacklist\",\n  \"version\": \"{version}\"\n}}\n"),
-    )
-    .unwrap();
-    dir
-}
-
 #[test]
 fn pre_enter_creates_pre_json() {
     let dir = package_dir();
@@ -3345,13 +3270,6 @@ fn status_output_includes_pre_state_and_prefixed_ids() {
     assert!(plan.contains(&format!("\"id\": \"pre/{ID_A}\"")), "{plan}");
     assert!(plan.contains(&format!("\"pre/{ID_A}\"")), "{plan}");
     assert!(plan.contains("\"newVersion\": \"1.3.0\""), "{plan}");
-}
-
-fn manifest_version(dir: &Path, rel: &str) -> String {
-    let text = fs::read_to_string(dir.join(rel)).unwrap();
-    let start = text.find("\"version\": \"").unwrap() + "\"version\": \"".len();
-    let len = text[start..].find('"').unwrap();
-    text[start..start + len].to_owned()
 }
 
 fn assert_datetime(text: &str) {

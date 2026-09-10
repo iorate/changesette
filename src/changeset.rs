@@ -17,15 +17,16 @@ static FRONTMATTER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)\s*---(.*?)\r?\n\s*---(\s*(?:\n|$).*)").unwrap());
 
 #[derive(Clone, Debug)]
-pub(crate) struct LoadedChange {
-    pub(crate) file_name: String,
-    pub(crate) in_pre: bool,
-    pub(crate) releases: Vec<(String, Option<Bump>)>,
-    pub(crate) summary: String,
+pub struct LoadedChange {
+    pub file_name: String,
+    pub in_pre: bool,
+    pub releases: Vec<(String, Option<Bump>)>,
+    pub summary: String,
 }
 
 impl LoadedChange {
-    pub(crate) fn id(&self) -> String {
+    #[must_use]
+    pub fn id(&self) -> String {
         let stem = self
             .file_name
             .strip_suffix(".md")
@@ -37,7 +38,8 @@ impl LoadedChange {
         }
     }
 
-    pub(crate) fn rel_path(&self) -> PathBuf {
+    #[must_use]
+    pub fn rel_path(&self) -> PathBuf {
         if self.in_pre {
             Path::new("pre").join(&self.file_name)
         } else {
@@ -46,7 +48,7 @@ impl LoadedChange {
     }
 }
 
-pub(crate) fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
+pub fn load(changeset_dir: &Path) -> Result<Vec<LoadedChange>> {
     let file_names = scan(changeset_dir)?.unwrap_or_default();
     let pre_dir = changeset_dir.join("pre");
     let pre_file_names = scan(&pre_dir)?.unwrap_or_default();
@@ -91,7 +93,8 @@ fn scan(dir: &Path) -> Result<Option<Vec<String>>> {
     Ok(Some(file_names))
 }
 
-pub(crate) fn max_bumps(changes: &[LoadedChange]) -> BTreeMap<&str, Option<Bump>> {
+#[must_use]
+pub fn max_bumps(changes: &[LoadedChange]) -> BTreeMap<&str, Option<Bump>> {
     let mut bumps = BTreeMap::new();
     for change in changes {
         for (name, bump) in &change.releases {
@@ -102,7 +105,7 @@ pub(crate) fn max_bumps(changes: &[LoadedChange]) -> BTreeMap<&str, Option<Bump>
     bumps
 }
 
-pub(crate) fn render(releases: &[(String, Option<Bump>)], summary: &str) -> Result<String> {
+pub fn render(releases: &[(String, Option<Bump>)], summary: &str) -> Result<String> {
     let summary = summary.trim();
     let mut content = if releases.is_empty() {
         String::from("---\n---\n")

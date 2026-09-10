@@ -7,47 +7,48 @@ use tracing::info;
 use crate::{bump::Bump, changeset::LoadedChange, output, plan::PlannedRelease, pre::PreJson};
 
 #[derive(Serialize)]
-pub(crate) struct ReleasePlan {
-    pub(crate) changesets: Vec<ChangesetEntry>,
-    pub(crate) releases: Vec<Release>,
+pub struct ReleasePlan {
+    pub changesets: Vec<ChangesetEntry>,
+    pub releases: Vec<Release>,
     #[serde(rename = "preState", skip_serializing_if = "Option::is_none")]
-    pub(crate) pre_state: Option<PreState>,
+    pub pre_state: Option<PreState>,
 }
 
 #[derive(Serialize)]
-pub(crate) struct PreState {
+pub struct PreState {
     pub(crate) mode: &'static str,
-    pub(crate) tag: String,
+    pub tag: String,
 }
 
 #[derive(Serialize)]
-pub(crate) struct ChangesetEntry {
-    pub(crate) id: String,
-    pub(crate) summary: String,
-    pub(crate) releases: Vec<ReleaseRef>,
+pub struct ChangesetEntry {
+    pub id: String,
+    pub summary: String,
+    pub releases: Vec<ReleaseRef>,
 }
 
 #[derive(Serialize)]
-pub(crate) struct ReleaseRef {
-    pub(crate) name: String,
+pub struct ReleaseRef {
+    pub name: String,
     #[serde(rename = "type")]
-    pub(crate) bump: &'static str,
+    pub bump: &'static str,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Release {
-    pub(crate) name: String,
+pub struct Release {
+    pub name: String,
     #[serde(rename = "type")]
-    pub(crate) bump: &'static str,
-    pub(crate) old_version: String,
-    pub(crate) new_version: String,
-    pub(crate) changesets: Vec<String>,
+    pub bump: &'static str,
+    pub old_version: String,
+    pub new_version: String,
+    pub changesets: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) changelog_entry: Option<String>,
+    pub changelog_entry: Option<String>,
 }
 
-pub(crate) fn build(
+#[must_use]
+pub fn build(
     changes: &[LoadedChange],
     releases: &[PlannedRelease],
     pre: Option<&PreJson>,
@@ -86,7 +87,7 @@ pub(crate) fn build(
     }
 }
 
-pub(crate) fn write_file(path: &Path, plan: &ReleasePlan) -> Result<()> {
+pub fn write_file(path: &Path, plan: &ReleasePlan) -> Result<()> {
     if path == Path::new("-") {
         return output::print_json(plan);
     }

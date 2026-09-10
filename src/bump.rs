@@ -2,14 +2,15 @@ use semver::{Prerelease, Version};
 
 // Ordered so that `max` picks the widest bump.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum Bump {
+pub enum Bump {
     Patch,
     Minor,
     Major,
 }
 
 impl Bump {
-    pub(crate) fn as_str(self) -> &'static str {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
         match self {
             Bump::Patch => "patch",
             Bump::Minor => "minor",
@@ -18,7 +19,8 @@ impl Bump {
     }
 }
 
-pub(crate) fn next_version(current: &Version, bump: Bump) -> Version {
+#[must_use]
+pub fn next_version(current: &Version, bump: Bump) -> Version {
     let pre = !current.pre.is_empty();
     match bump {
         Bump::Major if pre && current.minor == 0 && current.patch == 0 => {
@@ -39,7 +41,7 @@ fn checked_inc(number: u64) -> u64 {
     number.checked_add(1).expect("version number overflow")
 }
 
-pub(crate) fn pre_counter(current: &Version, tag: &str) -> u64 {
+pub fn pre_counter(current: &Version, tag: &str) -> u64 {
     // Counting on the tag, rather than on the second pre-release identifier,
     // keeps a dotted tag (`beta.2`) counting and restarts on a tag switch.
     current
@@ -50,16 +52,13 @@ pub(crate) fn pre_counter(current: &Version, tag: &str) -> u64 {
         .map_or(0, checked_inc)
 }
 
-pub(crate) fn next_pre_version(current: &Version, bump: Bump, tag: &str) -> Version {
+#[must_use]
+pub fn next_pre_version(current: &Version, bump: Bump, tag: &str) -> Version {
     next_pre_version_with(current, bump, tag, pre_counter(current, tag))
 }
 
-pub(crate) fn next_pre_version_with(
-    current: &Version,
-    bump: Bump,
-    tag: &str,
-    counter: u64,
-) -> Version {
+#[must_use]
+pub fn next_pre_version_with(current: &Version, bump: Bump, tag: &str, counter: u64) -> Version {
     let mut version = next_version(current, bump);
     version.pre =
         Prerelease::new(&format!("{tag}.{counter}")).expect("a validated tag stays valid");

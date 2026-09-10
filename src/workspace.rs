@@ -21,7 +21,7 @@ pub struct Workspace {
 }
 
 #[derive(Debug)]
-pub(crate) struct Member {
+pub struct Member {
     name: String,
     dir: PathBuf,
     rel_dir: String,
@@ -46,7 +46,7 @@ impl PackageManager {
     }
 }
 
-pub(crate) struct Root {
+pub struct Root {
     dir: PathBuf,
     pm: PackageManager,
     // The packages `find` already enumerated to confirm an npm reroot, kept
@@ -55,7 +55,8 @@ pub(crate) struct Root {
 }
 
 impl Root {
-    pub(crate) fn new(dir: PathBuf) -> Root {
+    #[must_use]
+    pub fn new(dir: PathBuf) -> Root {
         let pm = if probe_is_file(&dir.join("pnpm-workspace.yaml")) {
             PackageManager::Pnpm
         } else if probe_is_file(&dir.join("yarn.lock")) {
@@ -70,7 +71,7 @@ impl Root {
         }
     }
 
-    pub(crate) fn find(cwd: &Path) -> Result<Root> {
+    pub fn find(cwd: &Path) -> Result<Root> {
         for dir in cwd.ancestors() {
             if probe_is_file(&dir.join("pnpm-workspace.yaml")) {
                 return Ok(Root {
@@ -130,14 +131,15 @@ impl Root {
         })
     }
 
-    pub(crate) fn dir(&self) -> &Path {
+    #[must_use]
+    pub fn dir(&self) -> &Path {
         &self.dir
     }
 }
 
 // The root is always the physical path: `Root::find` and `Workspace::load`
 // rely on it holding no `.` or `..` component, as they climb by `parent()`.
-pub(crate) fn resolve_root(dir: &Path) -> Result<PathBuf> {
+pub fn resolve_root(dir: &Path) -> Result<PathBuf> {
     let root = dunce::canonicalize(dir)?;
     if !fs::metadata(&root)?.is_dir() {
         bail!("not a directory")
@@ -146,7 +148,7 @@ pub(crate) fn resolve_root(dir: &Path) -> Result<PathBuf> {
 }
 
 impl Workspace {
-    pub(crate) fn load(root: Root, rel_dirs: Option<&[String]>) -> Result<Workspace> {
+    pub fn load(root: Root, rel_dirs: Option<&[String]>) -> Result<Workspace> {
         let Root {
             dir: root,
             pm,
@@ -207,15 +209,22 @@ impl Workspace {
         Workspace { root, members }
     }
 
-    pub(crate) fn changeset_dir(&self) -> PathBuf {
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    #[must_use]
+    pub fn changeset_dir(&self) -> PathBuf {
         self.root.join(".changeset")
     }
 
-    pub(crate) fn members(&self) -> &[Member] {
+    #[must_use]
+    pub fn members(&self) -> &[Member] {
         &self.members
     }
 
-    pub(crate) fn member(&self, name: &str) -> Result<&Member> {
+    pub fn member(&self, name: &str) -> Result<&Member> {
         if let Some(member) = self.members.iter().find(|member| member.name == name) {
             return Ok(member);
         }
@@ -233,23 +242,28 @@ impl Workspace {
 }
 
 impl Member {
-    pub(crate) fn name(&self) -> &str {
+    #[must_use]
+    pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub(crate) fn dir(&self) -> &Path {
+    #[must_use]
+    pub fn dir(&self) -> &Path {
         &self.dir
     }
 
-    pub(crate) fn rel_dir(&self) -> &str {
+    #[must_use]
+    pub fn rel_dir(&self) -> &str {
         &self.rel_dir
     }
 
-    pub(crate) fn version(&self) -> &Version {
+    #[must_use]
+    pub fn version(&self) -> &Version {
         &self.version
     }
 
-    pub(crate) fn private(&self) -> bool {
+    #[must_use]
+    pub fn private(&self) -> bool {
         self.private
     }
 }

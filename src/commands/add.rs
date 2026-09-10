@@ -168,9 +168,9 @@ fn open_editor(path: &Path) -> Result<()> {
     Ok(())
 }
 
-type Releases = Vec<(String, Option<Bump>)>;
+pub type Releases = Vec<(String, Option<Bump>)>;
 
-fn releases_from_flags(
+pub fn releases_from_flags(
     workspace: &Workspace,
     packages: &[&Member],
     major: &[String],
