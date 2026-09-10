@@ -1,5 +1,0 @@
----
-source: src/config.rs
-expression: "validate_err(\"{ \\\"fixed\\\": [\\\"pkg-a\\\"] }\\n\")"
----
-.changeset/config.json: "fixed" must be an array of arrays of strings

@@ -1,5 +1,0 @@
----
-source: src/config.rs
-expression: "validate_err(\"{ \\\"changesette\\\": [] }\\n\")"
----
-.changeset/config.json: "changesette" must be an object

@@ -1,5 +1,0 @@
----
-source: src/package_json.rs
-expression: "load_err(\"no-package-json\")"
----
-tests/fixtures/package-json/no-package-json/package.json not found

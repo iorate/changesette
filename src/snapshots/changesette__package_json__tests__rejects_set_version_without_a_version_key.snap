@@ -1,5 +1,0 @@
----
-source: src/package_json.rs
-expression: "format!(\"{err:#}\")"
----
-tests/fixtures/package-json/version-missing/package.json: missing top-level "version"
