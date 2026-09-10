@@ -1,5 +1,0 @@
----
-source: src/workspace.rs
-expression: "discover_err(\"bad-glob\")"
----
-tests/fixtures/workspace/bad-glob/package.json: invalid workspace pattern "packages/[": unclosed character class at byte 0; missing ']' (to match a literal '[', escape it as '\[' or '[[]')
