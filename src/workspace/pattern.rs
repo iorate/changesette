@@ -4,13 +4,13 @@ use std::str::CharIndices;
 use anyhow::{Result, bail};
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum Seg {
+pub enum Seg {
     Glob(String),
     Globstar,
 }
 
 #[derive(Debug)]
-pub(crate) struct Pattern {
+pub struct Pattern {
     ascend: usize,
     segs: Vec<Seg>,
 }
@@ -22,7 +22,7 @@ const MAX_BRACE_NESTING: usize = 10;
 // cost stops being linear in its length.
 const MAX_BRACE_EXPANSIONS: usize = 100_000;
 
-pub(crate) fn compile(original: &str) -> Result<(bool, Vec<Pattern>)> {
+pub fn compile(original: &str) -> Result<(bool, Vec<Pattern>)> {
     // Every leading `!` flips the polarity; leaving one in the body would
     // hand it to the glob matcher. A `!` inside a brace alternative is
     // literal, so the polarity is read before the braces are expanded.
@@ -217,15 +217,15 @@ fn classify(part: &str) -> Result<Seg> {
 }
 
 impl Pattern {
-    pub(crate) fn ascend(&self) -> usize {
+    pub fn ascend(&self) -> usize {
         self.ascend
     }
 
-    pub(crate) fn segs(&self) -> &[Seg] {
+    pub fn segs(&self) -> &[Seg] {
         &self.segs
     }
 
-    pub(crate) fn matches(&self, rel_dir: &str, dot_permissive: bool) -> bool {
+    pub fn matches(&self, rel_dir: &str, dot_permissive: bool) -> bool {
         let names: Vec<&str> = if rel_dir == "." {
             Vec::new()
         } else {
@@ -260,7 +260,7 @@ fn matches_from(segs: &[Seg], names: &[&str], dot_permissive: bool) -> bool {
     }
 }
 
-pub(crate) fn seg_matches(seg: &Seg, name: &str, dot_permissive: bool) -> bool {
+pub fn seg_matches(seg: &Seg, name: &str, dot_permissive: bool) -> bool {
     if !dot_permissive && name.starts_with('.') {
         let dot_ok = match seg {
             Seg::Glob(text) => text.starts_with('.'),

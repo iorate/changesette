@@ -16,7 +16,7 @@ pub struct ReleasePlan {
 
 #[derive(Serialize)]
 pub struct PreState {
-    pub(crate) mode: &'static str,
+    pub mode: &'static str,
     pub tag: String,
 }
 

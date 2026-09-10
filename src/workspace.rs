@@ -304,7 +304,8 @@ fn resolve_rel_dir(root: &Path, entry: &str) -> Result<(PathBuf, String)> {
 
 // Purely lexical: `dir` is built from `root` by `parent()` and `push` only,
 // so the two share every component up to where `dir` climbed away.
-pub(crate) fn rel_dir_between(root: &Path, dir: &Path) -> String {
+#[must_use]
+pub fn rel_dir_between(root: &Path, dir: &Path) -> String {
     let mut root_components = root.components().peekable();
     let mut dir_components = dir.components().peekable();
     while let (Some(a), Some(b)) = (root_components.peek(), dir_components.peek()) {
@@ -385,7 +386,7 @@ fn read_manifest(path: &Path) -> Result<Option<Value>> {
 }
 
 // Unlike `read_manifest`, a BOM is deliberately not accepted.
-pub(crate) fn read_json(path: &Path) -> Result<Option<Value>> {
+pub fn read_json(path: &Path) -> Result<Option<Value>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -428,7 +429,7 @@ fn collect_members(
     qualify_packages(collect_packages(root, manifest, patterns, pm)?)
 }
 
-pub(crate) struct Package {
+pub struct Package {
     dir: PathBuf,
     rel_dir: String,
     manifest: PathBuf,
@@ -655,7 +656,8 @@ fn dir_id(dir: &Path) -> Result<FileId> {
     get_file_id(dir).with_context(|| dir.display().to_string())
 }
 
-pub(crate) fn probe_is_file(path: &Path) -> bool {
+#[must_use]
+pub fn probe_is_file(path: &Path) -> bool {
     match fs::metadata(path) {
         Ok(metadata) => metadata.is_file(),
         Err(err) => {
@@ -665,7 +667,7 @@ pub(crate) fn probe_is_file(path: &Path) -> bool {
     }
 }
 
-pub(crate) fn report_fs_error(path: &Path, err: &io::Error) {
+pub fn report_fs_error(path: &Path, err: &io::Error) {
     // Plain absence — NotFound from a missing or dangling path, NotADirectory
     // from a path crossing a regular file — is an ordinary no-match for every
     // caller; any other error (permissions, a symlink loop) can silently drop
