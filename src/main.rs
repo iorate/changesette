@@ -8,7 +8,7 @@ use std::{
 use anyhow::Context;
 use clap::Parser;
 
-use crate::workspace::Workspace;
+use crate::workspace::{Root, Workspace};
 
 mod bump;
 mod changelog;
@@ -180,20 +180,19 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
-    let (root, marker) = if let Some(dir) = cli.root.filter(|dir| !dir.is_empty()) {
+    let root = if let Some(dir) = cli.root.filter(|dir| !dir.is_empty()) {
         let dir = Path::new(&dir);
-        let root = workspace::resolve_root(dir)
+        let dir = workspace::resolve_root(dir)
             .with_context(|| format!("invalid root directory {}", dir.display()))?;
-        (root, None)
+        Root::new(dir)
     } else {
         let cwd = env::current_dir()?;
         let cwd = workspace::resolve_root(&cwd)
             .with_context(|| format!("invalid working directory {}", cwd.display()))?;
-        let (root, marker) = workspace::find_root(&cwd)?;
-        (root, Some(marker))
+        Root::find(&cwd)?
     };
-    let config = config::load(&root.join(".changeset"))?;
-    let workspace = Workspace::load(&root, config.packages.as_deref(), marker)?;
+    let config = config::load(&root.dir().join(".changeset"))?;
+    let workspace = Workspace::load(root, config.packages.as_deref())?;
     match cli.command.unwrap_or(Command::Add(cli.add)) {
         Command::Init => commands::init::run(&workspace),
         Command::Add(args) => commands::add::run(&workspace, &config, args),
