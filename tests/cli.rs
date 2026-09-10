@@ -442,9 +442,9 @@ fn get_packages_lists_nothing_without_package_json() {
     assert_eq!(stderr(&output), "");
 }
 
-const ULID_A: &str = "changesette-01H455VB4PEX5VSKNK084SN02Q.md";
-const ULID_B: &str = "changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md";
-const ID_B: &str = "changesette-01H455WZ0H1X9PE0QB0MV1P1KG";
+const FILE_A: &str = "boldly-brave-otter.md";
+const FILE_B: &str = "calmly-tidy-fox.md";
+const ID_B: &str = "calmly-tidy-fox";
 
 #[test]
 fn version_with_zero_changesets_fails_and_touches_nothing() {
@@ -486,7 +486,7 @@ fn version_bumps_and_writes_the_changelog() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -503,7 +503,7 @@ fn version_bumps_and_writes_the_changelog() {
         fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap(),
         "# ublacklist\n\n## 1.3.0\n\n### Minor Changes\n\n- Add feature\n"
     );
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
     assert!(dir.path().join(".changeset/README.md").exists());
 }
 
@@ -560,7 +560,7 @@ fn version_output_writes_the_pretty_plan_and_applies_the_changesets() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -575,7 +575,7 @@ fn version_output_writes_the_pretty_plan_and_applies_the_changesets() {
         fs::read_to_string(dir.path().join("package.json")).unwrap(),
         "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.3.0\"\n}\n"
     );
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
@@ -583,7 +583,7 @@ fn version_output_dash_writes_the_compact_plan_to_stdout() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -592,7 +592,7 @@ fn version_output_dash_writes_the_compact_plan_to_stdout() {
     assert_eq!(stdout(&output), compact_plan(ID_B) + "\n");
     assert_eq!(stderr(&output), "");
     assert!(!dir.path().join("-").exists());
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
@@ -603,8 +603,8 @@ fn version_ignore_accepts_comma_separated_and_repeated_packages() {
     ];
     for args in cases {
         let dir = two_package_workspace_dir();
-        write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
-        write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+        write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+        write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
         let before = dir_snapshot(dir.path());
         let output = changesette(dir.path(), args);
         assert!(output.status.success(), "{}", stderr(&output));
@@ -617,7 +617,7 @@ fn version_ignore_accepts_comma_separated_and_repeated_packages() {
 fn version_warns_on_an_unmatched_group_pattern() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"missing-*\"]] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
     let output = changesette(dir.path(), &["version"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
@@ -630,7 +630,7 @@ fn version_warns_on_an_unmatched_group_pattern() {
 fn version_log_level_warn_keeps_warnings_and_drops_info() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"missing-*\"]] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
     let output = changesette(dir.path(), &["version", "--log-level", "warn"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
@@ -643,7 +643,7 @@ fn version_log_level_warn_keeps_warnings_and_drops_info() {
 fn version_log_level_error_drops_warnings_but_reports_failures() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"missing-*\"]] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
     let output = changesette(dir.path(), &["version", "--log-level", "error"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stderr(&output), "");
@@ -666,8 +666,8 @@ fn status_lists_packages_grouped_by_bump_without_modifying_files() {
         "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\"\n}\n",
     )
     .unwrap();
-    write_changeset(dir.path(), ULID_A, &[("pkg-b", "major")], "Rework");
-    write_changeset(dir.path(), ULID_B, &[("pkg-a", "minor")], "Add feature");
+    write_changeset(dir.path(), FILE_A, &[("pkg-b", "major")], "Rework");
+    write_changeset(dir.path(), FILE_B, &[("pkg-a", "minor")], "Add feature");
     let before = dir_snapshot(dir.path());
     let output = changesette(dir.path(), &["status"]);
     assert!(output.status.success(), "{}", stderr(&output));
@@ -684,18 +684,18 @@ fn status_verbose_adds_versions_and_changeset_files() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_A,
+        FILE_A,
         &[("ublacklist", "minor")],
         "Add feature",
     );
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
+    write_changeset(dir.path(), FILE_B, &[("ublacklist", "none")], "Note only");
     for flag in ["--verbose", "-v"] {
         let output = changesette(dir.path(), &["status", flag]);
         assert!(output.status.success(), "{}", stderr(&output));
         assert_eq!(
             stdout(&output),
             format!(
-                "Packages to be bumped:\n- minor\n  - ublacklist -> 1.3.0\n    - .changeset/{ULID_A}\n    - .changeset/{ULID_B}\n"
+                "Packages to be bumped:\n- minor\n  - ublacklist -> 1.3.0\n    - .changeset/{FILE_A}\n    - .changeset/{FILE_B}\n"
             )
         );
     }
@@ -813,7 +813,7 @@ fn rejects_invalid_command_lines() {
     fs::write(dir.path().join("CHANGELOG.md"), CHANGELOG).unwrap();
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );

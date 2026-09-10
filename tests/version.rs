@@ -25,10 +25,10 @@ use util::{
     write_pre_changeset, write_pre_json,
 };
 
-const ULID_A: &str = "changesette-01H455VB4PEX5VSKNK084SN02Q.md";
-const ULID_B: &str = "changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md";
-const ID_A: &str = "changesette-01H455VB4PEX5VSKNK084SN02Q";
-const ID_B: &str = "changesette-01H455WZ0H1X9PE0QB0MV1P1KG";
+const FILE_A: &str = "boldly-brave-otter.md";
+const FILE_B: &str = "calmly-tidy-fox.md";
+const ID_A: &str = "boldly-brave-otter";
+const ID_B: &str = "calmly-tidy-fox";
 const PRE_JSON: &str = "{\n  \"mode\": \"pre\",\n  \"tag\": \"beta\"\n}\n";
 const EXITED_PRE_JSON: &str = "{\n  \"mode\": \"exit\",\n  \"tag\": \"beta\"\n}\n";
 const EMPTY_PLAN: &str = "{\n  \"changesets\": [],\n  \"releases\": []\n}\n";
@@ -207,11 +207,11 @@ fn uses_the_max_bump_across_changesets() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_A,
+        FILE_A,
         &[("ublacklist", "major")],
         "Rework everything",
     );
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    write_changeset(dir.path(), FILE_B, &[("ublacklist", "patch")], "Fix bug");
     let planned = plan(dir.path());
     assert_eq!(releases(&planned), ["ublacklist major 1.2.3 -> 2.0.0"]);
     assert_eq!(planned.releases[0].changeset_ids, [ID_A, ID_B]);
@@ -222,8 +222,8 @@ fn uses_the_max_bump_across_changesets() {
         read(dir.path(), "CHANGELOG.md"),
         "# ublacklist\n\n## 2.0.0\n\n### Major Changes\n\n- Rework everything\n\n### Patch Changes\n\n- Fix bug\n"
     );
-    assert!(!dir.path().join(".changeset").join(ULID_A).exists());
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_A).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn bumps_only_the_named_workspace_members() {
     write_file(dir.path(), "packages/c/package.json", &untouched);
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("pkg-b", "patch"), ("pkg-a", "minor")],
         "Improve things",
     );
@@ -263,13 +263,13 @@ fn bumps_only_the_named_workspace_members() {
     assert_eq!(read(dir.path(), "packages/c/package.json"), untouched);
     assert!(!exists(dir.path(), "packages/c/CHANGELOG.md"));
     assert!(!exists(dir.path(), "CHANGELOG.md"));
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
 fn consumes_a_none_only_changeset_without_bumping() {
     let dir = package_dir();
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
+    write_changeset(dir.path(), FILE_B, &[("ublacklist", "none")], "Note only");
     let planned = plan(dir.path());
     assert_eq!(releases(&planned), ["ublacklist none 1.2.3 -> 1.2.3"]);
     assert!(planned.releases[0].changelog_entry.is_none());
@@ -277,20 +277,20 @@ fn consumes_a_none_only_changeset_without_bumping() {
     run_ok(dir.path());
     assert_eq!(read(dir.path(), "package.json"), pkg("ublacklist", "1.2.3"));
     assert!(!exists(dir.path(), "CHANGELOG.md"));
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
 fn consumes_an_empty_changeset() {
     let dir = package_dir();
-    write_changeset(dir.path(), ULID_B, &[], "");
+    write_changeset(dir.path(), FILE_B, &[], "");
     let planned = plan(dir.path());
     assert!(planned.releases.is_empty());
     assert_eq!(planned.changes.len(), 1);
 
     run_ok(dir.path());
     assert!(!exists(dir.path(), "CHANGELOG.md"));
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
@@ -298,13 +298,13 @@ fn fails_for_a_changeset_naming_an_unknown_package_leaving_the_tree_untouched() 
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("other-package", "minor")],
         "Add feature",
     );
     let before = dir_snapshot(dir.path());
     let err = run_err(dir.path());
-    assert!(err.contains(ULID_B), "{err}");
+    assert!(err.contains(FILE_B), "{err}");
     assert!(err.contains("`other-package` not found"), "{err}");
     assert_eq!(dir_snapshot(dir.path()), before);
 
@@ -314,7 +314,7 @@ fn fails_for_a_changeset_naming_an_unknown_package_leaving_the_tree_untouched() 
         "package.json",
         "{\n  \"name\": \"ublacklist\"\n}\n",
     );
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    write_changeset(dir.path(), FILE_B, &[("ublacklist", "patch")], "Fix bug");
     let before = dir_snapshot(dir.path());
     let err = run_err(dir.path());
     assert!(err.contains("`ublacklist` not found"), "{err}");
@@ -328,7 +328,7 @@ fn leaves_the_package_lock_untouched() {
     write_file(dir.path(), "package-lock.json", package_lock);
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -353,8 +353,8 @@ fn skipped_packages_keep_their_changesets() {
         if let Some(config) = config {
             write_config(dir.path(), config);
         }
-        write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
-        write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+        write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+        write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
         let b_manifest = read(dir.path(), "packages/b/package.json");
         let planned = plan_with(dir.path(), ignore, None).unwrap();
         assert_eq!(releases(&planned), ["pkg-a minor 3.1.4 -> 3.2.0"]);
@@ -366,16 +366,16 @@ fn skipped_packages_keep_their_changesets() {
         );
         assert_eq!(read(dir.path(), "packages/b/package.json"), b_manifest);
         assert!(!exists(dir.path(), "packages/b/CHANGELOG.md"));
-        assert!(!dir.path().join(".changeset").join(ULID_A).exists());
-        assert!(dir.path().join(".changeset").join(ULID_B).exists());
+        assert!(!dir.path().join(".changeset").join(FILE_A).exists());
+        assert!(dir.path().join(".changeset").join(FILE_B).exists());
     }
 }
 
 #[test]
 fn release_plan_lists_skipped_changesets_without_a_release() {
     let dir = private_two_package_workspace_dir();
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
-    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
     let planned = plan(dir.path());
     assert_eq!(
         plan_json(&planned),
@@ -411,7 +411,7 @@ fn ignore_rejects_an_unknown_package() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -434,7 +434,7 @@ fn succeeds_when_every_changeset_is_skipped() {
     ];
     for (make_dir, changeset, ignore) in cases {
         let dir = make_dir();
-        write_changeset(dir.path(), ULID_B, changeset, "Note only");
+        write_changeset(dir.path(), FILE_B, changeset, "Note only");
         let before = dir_snapshot(dir.path());
         let planned = plan_with(dir.path(), ignore, None).unwrap();
         assert_eq!(planned.changes.len(), 1);
@@ -467,10 +467,10 @@ fn filter_changes_rejects_a_mixed_changeset() {
     ];
     for (make_dir, changeset, ignore) in cases {
         let dir = make_dir();
-        write_changeset(dir.path(), ULID_B, changeset, "Improve things");
+        write_changeset(dir.path(), FILE_B, changeset, "Improve things");
         let before = dir_snapshot(dir.path());
         let err = run_err_with(dir.path(), ignoring(ignore));
-        assert!(err.contains(ULID_B), "{err}");
+        assert!(err.contains(FILE_B), "{err}");
         assert!(err.contains("cannot mix skipped packages"), "{err}");
         assert!(err.contains("`pkg-a`"), "{err}");
         assert!(err.contains("`pkg-b`"), "{err}");
@@ -486,7 +486,7 @@ fn the_ignore_flag_and_a_config_ignore_are_exclusive() {
     ] {
         let dir = two_package_workspace_dir();
         write_config(dir.path(), config);
-        write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+        write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
         let before = dir_snapshot(dir.path());
         let err = run_err_with(dir.path(), ignoring(&[ignore]));
         assert!(err.contains("--ignore"), "{err}");
@@ -496,8 +496,8 @@ fn the_ignore_flag_and_a_config_ignore_are_exclusive() {
 
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"ignore\": [] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
-    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
     run_with(dir.path(), ignoring(&["pkg-b"])).unwrap();
     assert_eq!(
         manifest_version(dir.path(), "packages/a/package.json"),
@@ -507,7 +507,7 @@ fn the_ignore_flag_and_a_config_ignore_are_exclusive() {
         manifest_version(dir.path(), "packages/b/package.json"),
         "2.0.0"
     );
-    assert!(dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
@@ -526,13 +526,13 @@ fn private_packages_are_versioned_only_when_configured() {
     let skip = SkipSet::load(&workspace, &config, &[]).unwrap();
     assert!(!skip.contains("pkg-b"));
 
-    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
     run_ok(dir.path());
     assert_eq!(
         read(dir.path(), "packages/b/package.json"),
         private_pkg("pkg-b", "2.0.1")
     );
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
@@ -562,7 +562,7 @@ fn skip_set_reports_the_reasons_at_debug() {
 fn fixed_bumps_the_partner_with_a_heading_only_changelog() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
     let planned = plan(dir.path());
     assert_eq!(
         releases(&planned),
@@ -586,14 +586,14 @@ fn fixed_bumps_the_partner_with_a_heading_only_changelog() {
         read(dir.path(), "packages/b/CHANGELOG.md"),
         "# pkg-b\n\n## 3.2.0\n"
     );
-    assert!(!dir.path().join(".changeset").join(ULID_A).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_A).exists());
 }
 
 #[test]
 fn linked_does_not_bump_a_non_releasing_member() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n");
-    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
     let planned = plan(dir.path());
     assert_eq!(releases(&planned), ["pkg-b patch 3.1.4 -> 3.1.5"]);
 
@@ -613,8 +613,8 @@ fn linked_does_not_bump_a_non_releasing_member() {
 fn linked_aligns_the_releasing_members() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
-    write_changeset(dir.path(), ULID_B, &[("pkg-b", "minor")], "Improve pkg-b");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "minor")], "Improve pkg-b");
     let planned = plan(dir.path());
     assert_eq!(
         releases(&planned),
@@ -635,12 +635,12 @@ fn linked_aligns_the_releasing_members() {
 #[test]
 fn groups_report_the_raised_bump_at_debug() {
     let cases: [(&str, Changesets, &str); 2] = [
-        ("fixed", &[(ULID_A, &[("pkg-a", "minor")])], "pkg-b"),
+        ("fixed", &[(FILE_A, &[("pkg-a", "minor")])], "pkg-b"),
         (
             "linked",
             &[
-                (ULID_A, &[("pkg-a", "patch")]),
-                (ULID_B, &[("pkg-b", "minor")]),
+                (FILE_A, &[("pkg-a", "patch")]),
+                (FILE_B, &[("pkg-b", "minor")]),
             ],
             "pkg-a",
         ),
@@ -680,7 +680,7 @@ fn fixed_counts_a_skipped_member_without_adding_it() {
     let b_manifest = private_pkg("pkg-b", "9.9.9");
     write_file(dir.path(), "packages/b/package.json", &b_manifest);
     write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
     let planned = plan(dir.path());
     assert_eq!(releases(&planned), ["pkg-a minor 9.9.9 -> 9.10.0"]);
 
@@ -734,7 +734,7 @@ fn groups_align_the_pre_counter() {
             &format!("{{ \"{kind}\": [[\"pkg-a\", \"pkg-b\"]] }}\n"),
         );
         write_pre_json(dir.path(), PRE_JSON);
-        write_changeset(dir.path(), ULID_B, &[(changed, "patch")], "Fix");
+        write_changeset(dir.path(), FILE_B, &[(changed, "patch")], "Fix");
         run_ok(dir.path());
         assert_eq!(
             manifest_version(dir.path(), "packages/a/package.json"),
@@ -746,7 +746,7 @@ fn groups_align_the_pre_counter() {
             expected_b,
             "{kind}: {changed}"
         );
-        assert!(dir.path().join(".changeset/pre").join(ULID_B).exists());
+        assert!(dir.path().join(".changeset/pre").join(FILE_B).exists());
     }
 }
 
@@ -754,7 +754,7 @@ fn groups_align_the_pre_counter() {
 fn release_plan_reports_the_group_old_version() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
     let planned = plan(dir.path());
     assert_eq!(
         plan_json(&planned)["releases"][1],
@@ -776,7 +776,7 @@ fn plan_version_names_the_config_on_a_group_error() {
         dir.path(),
         "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]], \"linked\": [[\"pkg-b\"]] }\n",
     );
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
     let before = dir_snapshot(dir.path());
     let err = run_err(dir.path());
     assert!(
@@ -842,8 +842,8 @@ fn after_exit_rescues_the_fixed_group_of_a_skipped_prerelease() {
 fn linked_leaves_a_none_only_member_unchanged() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "patch")], "Fix pkg-a");
-    write_changeset(dir.path(), ULID_B, &[("pkg-b", "none")], "Note only");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "none")], "Note only");
     let planned = plan(dir.path());
     assert_eq!(
         releases(&planned),
@@ -856,15 +856,15 @@ fn linked_leaves_a_none_only_member_unchanged() {
         pkg("pkg-b", "2.0.0")
     );
     assert!(!exists(dir.path(), "packages/b/CHANGELOG.md"));
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
 fn fixed_upgrades_a_none_only_member() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
-    write_changeset(dir.path(), ULID_B, &[("pkg-b", "none")], "Note only");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "none")], "Note only");
     let planned = plan(dir.path());
     assert_eq!(
         releases(&planned),
@@ -876,15 +876,15 @@ fn fixed_upgrades_a_none_only_member() {
         read(dir.path(), "packages/b/CHANGELOG.md"),
         "# pkg-b\n\n## 3.2.0\n"
     );
-    assert!(!dir.path().join(".changeset").join(ULID_A).exists());
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_A).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
 fn fixed_is_not_triggered_by_a_none_only_member() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "none")], "Note only");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "none")], "Note only");
     let planned = plan(dir.path());
     assert_eq!(releases(&planned), ["pkg-a none 3.1.4 -> 3.1.4"]);
 
@@ -897,7 +897,7 @@ fn fixed_is_not_triggered_by_a_none_only_member() {
         manifest_version(dir.path(), "packages/b/package.json"),
         "2.0.0"
     );
-    assert!(!dir.path().join(".changeset").join(ULID_A).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_A).exists());
 }
 
 #[test]
@@ -906,7 +906,7 @@ fn in_pre_mode_bumps_to_a_prerelease() {
     write_pre_json(dir.path(), PRE_JSON);
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -926,8 +926,8 @@ fn in_pre_mode_bumps_to_a_prerelease() {
         read(dir.path(), "CHANGELOG.md"),
         "# ublacklist\n\n## 1.3.0-beta.0\n\n### Minor Changes\n\n- Add feature\n"
     );
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
-    assert!(dir.path().join(".changeset/pre").join(ULID_B).is_file());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
+    assert!(dir.path().join(".changeset/pre").join(FILE_B).is_file());
     assert_eq!(read_pre_json(dir.path()), PRE_JSON);
 }
 
@@ -937,13 +937,13 @@ fn in_pre_mode_increments_the_counter() {
     write_pre_json(dir.path(), PRE_JSON);
     write_changeset(
         dir.path(),
-        ULID_A,
+        FILE_A,
         &[("ublacklist", "minor")],
         "Add feature",
     );
     run_ok(dir.path());
 
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    write_changeset(dir.path(), FILE_B, &[("ublacklist", "patch")], "Fix bug");
     let planned = plan(dir.path());
     assert_eq!(
         releases(&planned),
@@ -955,24 +955,24 @@ fn in_pre_mode_increments_the_counter() {
         read(dir.path(), "CHANGELOG.md"),
         "# ublacklist\n\n## 1.3.0-beta.1\n\n### Patch Changes\n\n- Fix bug\n\n## 1.3.0-beta.0\n\n### Minor Changes\n\n- Add feature\n"
     );
-    assert!(dir.path().join(".changeset/pre").join(ULID_A).is_file());
-    assert!(dir.path().join(".changeset/pre").join(ULID_B).is_file());
+    assert!(dir.path().join(".changeset/pre").join(FILE_A).is_file());
+    assert!(dir.path().join(".changeset/pre").join(FILE_B).is_file());
 }
 
 #[test]
 fn in_pre_mode_fails_on_a_move_collision() {
     let dir = package_dir();
     write_pre_json(dir.path(), PRE_JSON);
-    write_pre_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    write_pre_changeset(dir.path(), FILE_B, &[("ublacklist", "patch")], "Fix bug");
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
     let before = dir_snapshot(dir.path());
     let err = run_err(dir.path());
-    assert!(err.contains(ULID_B), "{err}");
+    assert!(err.contains(FILE_B), "{err}");
     assert!(err.contains("refusing to overwrite"), "{err}");
     assert_eq!(dir_snapshot(dir.path()), before);
 }
@@ -986,7 +986,7 @@ fn plan_version_rejects_an_invalid_pre_tag() {
     );
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1008,8 +1008,8 @@ fn in_pre_mode_leaves_skipped_changesets_in_place() {
     for (make_dir, ignore) in cases {
         let dir = make_dir();
         write_pre_json(dir.path(), PRE_JSON);
-        write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
-        write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+        write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+        write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
         let b_manifest = read(dir.path(), "packages/b/package.json");
         run_with(dir.path(), ignoring(ignore)).unwrap();
         assert_eq!(
@@ -1017,9 +1017,9 @@ fn in_pre_mode_leaves_skipped_changesets_in_place() {
             "3.2.0-beta.0"
         );
         assert_eq!(read(dir.path(), "packages/b/package.json"), b_manifest);
-        assert!(dir.path().join(".changeset/pre").join(ULID_A).is_file());
-        assert!(dir.path().join(".changeset").join(ULID_B).is_file());
-        assert!(!dir.path().join(".changeset/pre").join(ULID_B).exists());
+        assert!(dir.path().join(".changeset/pre").join(FILE_A).is_file());
+        assert!(dir.path().join(".changeset").join(FILE_B).is_file());
+        assert!(!dir.path().join(".changeset/pre").join(FILE_B).exists());
     }
 }
 
@@ -1027,11 +1027,11 @@ fn in_pre_mode_leaves_skipped_changesets_in_place() {
 fn in_pre_mode_keeps_a_none_only_package_unchanged() {
     let dir = package_dir();
     write_pre_json(dir.path(), PRE_JSON);
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
+    write_changeset(dir.path(), FILE_B, &[("ublacklist", "none")], "Note only");
     run_ok(dir.path());
     assert_eq!(read(dir.path(), "package.json"), pkg("ublacklist", "1.2.3"));
     assert!(!exists(dir.path(), "CHANGELOG.md"));
-    assert!(dir.path().join(".changeset/pre").join(ULID_B).is_file());
+    assert!(dir.path().join(".changeset/pre").join(FILE_B).is_file());
 }
 
 #[test]
@@ -1040,7 +1040,7 @@ fn in_pre_mode_with_no_new_changesets_fails() {
     write_pre_json(dir.path(), PRE_JSON);
     write_pre_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1063,11 +1063,11 @@ fn after_exit_finalizes() {
     write_pre_json(dir.path(), EXITED_PRE_JSON);
     write_pre_changeset(
         dir.path(),
-        ULID_A,
+        FILE_A,
         &[("ublacklist", "minor")],
         "Add feature",
     );
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    write_changeset(dir.path(), FILE_B, &[("ublacklist", "patch")], "Fix bug");
     let planned = plan(dir.path());
     assert!(planned.exiting_pre());
     assert_eq!(
@@ -1081,8 +1081,8 @@ fn after_exit_finalizes() {
         read(dir.path(), "CHANGELOG.md"),
         "# ublacklist\n\n## 1.3.0\n\n### Minor Changes\n\n- Add feature\n\n### Patch Changes\n\n- Fix bug\n\n## 1.3.0-beta.0\n\n### Minor Changes\n\n- Add feature\n"
     );
-    assert!(!dir.path().join(".changeset/pre").join(ULID_A).exists());
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset/pre").join(FILE_A).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
     assert!(!exists(dir.path(), ".changeset/pre.json"));
 }
 
@@ -1124,7 +1124,7 @@ fn after_exit_rescues_prerelease_packages() {
 fn after_exit_rescues_a_none_only_package() {
     let dir = prerelease_package_dir("1.2.3-beta.1");
     write_pre_json(dir.path(), EXITED_PRE_JSON);
-    write_pre_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
+    write_pre_changeset(dir.path(), FILE_B, &[("ublacklist", "none")], "Note only");
     let planned = plan(dir.path());
     assert_eq!(
         releases(&planned),
@@ -1137,7 +1137,7 @@ fn after_exit_rescues_a_none_only_package() {
         read(dir.path(), "CHANGELOG.md"),
         "# ublacklist\n\n## 1.2.3\n"
     );
-    assert!(!dir.path().join(".changeset/pre").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset/pre").join(FILE_B).exists());
     assert!(!exists(dir.path(), ".changeset/pre.json"));
 }
 
@@ -1164,7 +1164,7 @@ fn after_exit_succeeds_with_an_invalid_tag() {
     );
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1187,11 +1187,11 @@ fn consumes_pre_changesets_without_pre_json() {
     let dir = package_dir();
     write_pre_changeset(
         dir.path(),
-        ULID_A,
+        FILE_A,
         &[("ublacklist", "minor")],
         "Add feature",
     );
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    write_changeset(dir.path(), FILE_B, &[("ublacklist", "patch")], "Fix bug");
     let planned = plan(dir.path());
     assert_eq!(releases(&planned), ["ublacklist minor 1.2.3 -> 1.3.0"]);
 
@@ -1200,8 +1200,8 @@ fn consumes_pre_changesets_without_pre_json() {
         read(dir.path(), "CHANGELOG.md"),
         "# ublacklist\n\n## 1.3.0\n\n### Minor Changes\n\n- Add feature\n\n### Patch Changes\n\n- Fix bug\n"
     );
-    assert!(!dir.path().join(".changeset/pre").join(ULID_A).exists());
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset/pre").join(FILE_A).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
@@ -1209,7 +1209,7 @@ fn release_plan_carries_pre_state_and_prefixed_ids() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1230,7 +1230,7 @@ fn release_plan_carries_pre_state_and_prefixed_ids() {
     write_pre_json(dir.path(), EXITED_PRE_JSON);
     write_pre_changeset(
         dir.path(),
-        ULID_A,
+        FILE_A,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1258,7 +1258,7 @@ fn status_writes_the_plan_without_modifying_files() {
 
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1296,7 +1296,7 @@ fn snapshot_bumps_to_a_zero_based_version() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1310,7 +1310,7 @@ fn snapshot_bumps_to_a_zero_based_version() {
         read(dir.path(), "CHANGELOG.md"),
         format!("# ublacklist\n\n## {version}\n\n### Minor Changes\n\n- Add feature\n")
     );
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
@@ -1318,7 +1318,7 @@ fn snapshot_with_a_tag_prefixes_the_suffix() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1333,8 +1333,8 @@ fn snapshot_with_a_tag_prefixes_the_suffix() {
 #[test]
 fn snapshot_shares_one_suffix_across_packages() {
     let dir = two_package_workspace_dir();
-    write_changeset(dir.path(), ULID_A, &[("pkg-a", "minor")], "Improve pkg-a");
-    write_changeset(dir.path(), ULID_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
     run_with(dir.path(), snapshot_args(Some("canary"), None)).unwrap();
     let version_a = manifest_version(dir.path(), "packages/a/package.json");
     let version_b = manifest_version(dir.path(), "packages/b/package.json");
@@ -1354,7 +1354,7 @@ fn snapshot_uses_the_config_template() {
     );
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1379,7 +1379,7 @@ fn snapshot_cli_template_overrides_the_config() {
     );
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1404,7 +1404,7 @@ fn snapshot_uses_the_calculated_version() {
     );
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1419,11 +1419,11 @@ fn snapshot_uses_the_calculated_version() {
 #[test]
 fn snapshot_keeps_a_none_only_package_unchanged() {
     let dir = package_dir();
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "none")], "Note only");
+    write_changeset(dir.path(), FILE_B, &[("ublacklist", "none")], "Note only");
     run_with(dir.path(), snapshot_args(None, None)).unwrap();
     assert_eq!(manifest_version(dir.path(), "package.json"), "1.2.3");
     assert!(!exists(dir.path(), "CHANGELOG.md"));
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]
@@ -1432,7 +1432,7 @@ fn snapshot_fails_in_pre_mode() {
     write_pre_json(dir.path(), PRE_JSON);
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1446,14 +1446,14 @@ fn snapshot_fails_in_pre_mode() {
 fn snapshot_after_exit_keeps_pre_json() {
     let dir = prerelease_package_dir("1.3.0-beta.1");
     write_pre_json(dir.path(), EXITED_PRE_JSON);
-    write_changeset(dir.path(), ULID_B, &[("ublacklist", "patch")], "Fix bug");
+    write_changeset(dir.path(), FILE_B, &[("ublacklist", "patch")], "Fix bug");
     run_with(dir.path(), snapshot_args(None, None)).unwrap();
     let version = manifest_version(dir.path(), "package.json");
     assert!(
         version.starts_with("0.0.0-"),
         "unexpected version: {version}"
     );
-    assert!(!dir.path().join(".changeset").join(ULID_B).exists());
+    assert!(!dir.path().join(".changeset").join(FILE_B).exists());
     assert_eq!(read_pre_json(dir.path()), EXITED_PRE_JSON);
 }
 
@@ -1475,7 +1475,7 @@ fn snapshot_rejects_an_invalid_template_leaving_the_tree_untouched() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );
@@ -1493,7 +1493,7 @@ fn release_plan_reports_snapshot_versions() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
-        ULID_B,
+        FILE_B,
         &[("ublacklist", "minor")],
         "Add feature",
     );

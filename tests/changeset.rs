@@ -5,7 +5,7 @@ use changesette::{
     changeset::{self, LoadedChange},
 };
 
-const FILE: &str = "changesette-01H455WZ0H1X9PE0QB0MV1P1KG.md";
+const FILE: &str = "calmly-tidy-fox.md";
 
 fn fixture(case: &str) -> PathBuf {
     Path::new("tests/fixtures/changeset").join(case)
@@ -63,7 +63,7 @@ fn sorts_by_file_name_and_skips_ignored_files() {
                 "Sorted second",
             ),
             (
-                "changesette-01H455VB4PEX5VSKNK084SN02Q".to_owned(),
+                "boldly-brave-otter".to_owned(),
                 vec![("ublacklist", Some(Bump::Patch))],
                 "Sorted last, and written without quotes the way knope writes them",
             ),
@@ -148,7 +148,7 @@ fn parses_empty_frontmatter_and_empty_summary() {
     assert_eq!(
         view(&load("empty-with-summary")),
         [(
-            "changesette-01H455WZ0H1X9PE0QB0MV1P1KG".to_owned(),
+            "calmly-tidy-fox".to_owned(),
             vec![],
             "An empty changeset, as `changeset add --empty` writes upstream",
         )]
@@ -156,7 +156,7 @@ fn parses_empty_frontmatter_and_empty_summary() {
     assert_eq!(
         view(&load("frontmatter-only")),
         [(
-            "changesette-01H455WZ0H1X9PE0QB0MV1P1KG".to_owned(),
+            "calmly-tidy-fox".to_owned(),
             vec![("ublacklist", Some(Bump::Minor))],
             "",
         )]
@@ -168,7 +168,7 @@ fn follows_symlinked_changesets() {
     assert_eq!(
         view(&load("symlink")),
         [(
-            "changesette-01H455WZ0H1X9PE0QB0MV1P1KG".to_owned(),
+            "calmly-tidy-fox".to_owned(),
             vec![("ublacklist", Some(Bump::Patch))],
             "Fix something recorded in a symlinked changeset.",
         )]
@@ -198,7 +198,7 @@ fn parses_crlf_files() {
     assert_eq!(
         view(&load("crlf")),
         [(
-            "changesette-01H455WZ0H1X9PE0QB0MV1P1KG".to_owned(),
+            "calmly-tidy-fox".to_owned(),
             vec![("ublacklist", Some(Bump::Patch))],
             "A body written with CRLF line endings\r\nand a second line",
         )]
@@ -218,7 +218,7 @@ fn parses_frontmatter_with_comments_and_blank_lines() {
     assert_eq!(
         view(&load("comments-and-blank-lines")),
         [(
-            "changesette-01H455WZ0H1X9PE0QB0MV1P1KG".to_owned(),
+            "calmly-tidy-fox".to_owned(),
             vec![("ublacklist", Some(Bump::Patch))],
             "Frontmatter with a comment and a blank line",
         )]
