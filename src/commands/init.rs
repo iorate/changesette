@@ -28,7 +28,7 @@ const CONFIG: &str = "{
 }
 ";
 
-pub(crate) fn run(workspace: &Workspace) -> Result<()> {
+pub fn run(workspace: &Workspace) -> Result<()> {
     let changeset_dir = workspace.changeset_dir();
     fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
 

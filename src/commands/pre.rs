@@ -8,7 +8,7 @@ use crate::{
     workspace::Workspace,
 };
 
-pub(crate) fn enter(workspace: &Workspace, tag: &str) -> Result<()> {
+pub fn enter(workspace: &Workspace, tag: &str) -> Result<()> {
     let changeset_dir = workspace.changeset_dir();
     let pre = PreJson::load(&changeset_dir)?;
 
@@ -35,7 +35,7 @@ pub(crate) fn enter(workspace: &Workspace, tag: &str) -> Result<()> {
 }
 
 // Exiting twice is deliberately not an error.
-pub(crate) fn exit(workspace: &Workspace) -> Result<()> {
+pub fn exit(workspace: &Workspace) -> Result<()> {
     let changeset_dir = workspace.changeset_dir();
     let Some(mut pre) = PreJson::load(&changeset_dir)? else {
         bail!("not in pre mode; run `changesette pre enter <tag>` to enter");

@@ -5,7 +5,7 @@ use tracing::info;
 
 use crate::{changeset, workspace::Workspace};
 
-pub(crate) fn run(workspace: &Workspace, id: &str, summary: &str) -> Result<()> {
+pub fn run(workspace: &Workspace, id: &str, summary: &str) -> Result<()> {
     let changeset_dir = workspace.changeset_dir();
 
     let changes = changeset::load(&changeset_dir)?;

@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::{bump::Bump, config::Config, output, plan, release_plan, workspace::Workspace};
 
-pub(crate) fn run(
+pub fn run(
     workspace: Workspace,
     config: &Config,
     verbose: bool,

@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::{changelog, output, workspace::Workspace};
 
-pub(crate) fn run(workspace: &Workspace, package: &str, version: &semver::Version) -> Result<()> {
+pub fn run(workspace: &Workspace, package: &str, version: &semver::Version) -> Result<()> {
     let member = workspace.member(package)?;
     let path = member.dir().join("CHANGELOG.md");
     let text = match fs::read_to_string(&path) {

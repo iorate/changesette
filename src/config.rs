@@ -8,7 +8,7 @@ use tracing::warn;
 use crate::workspace::read_json;
 
 #[derive(Debug, Default)]
-pub(crate) struct Config {
+pub struct Config {
     ignore: Vec<String>,
     fixed: Vec<Vec<String>>,
     linked: Vec<Vec<String>>,

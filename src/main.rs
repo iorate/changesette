@@ -5,25 +5,11 @@ use std::{
     process::ExitCode,
 };
 
-use anyhow::Context;
+use changesette::{
+    commands::{self, add::AddArgs, version::VersionArgs},
+    output,
+};
 use clap::Parser;
-
-use crate::workspace::{Root, Workspace};
-
-mod bump;
-mod changelog;
-mod changeset;
-mod commands;
-mod config;
-mod jsonc;
-mod output;
-mod package_json;
-mod plan;
-mod pre;
-mod release_plan;
-mod skip;
-mod snapshot;
-mod workspace;
 
 #[derive(Parser)]
 #[command(version, args_conflicts_with_subcommands = true)]
@@ -58,58 +44,6 @@ impl LogLevel {
             LogLevel::Debug => LevelFilter::DEBUG,
         }
     }
-}
-
-#[derive(clap::Args)]
-struct AddArgs {
-    /// Create a changeset that names no packages
-    #[arg(long, conflicts_with_all = ["major", "minor", "patch"])]
-    empty: bool,
-    /// Open the created changeset in your editor
-    #[arg(long)]
-    open: bool,
-    /// The summary text of the change
-    #[arg(short, long)]
-    message: Option<String>,
-    /// The packages to record a major bump for (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    major: Vec<String>,
-    /// The packages to record a minor bump for (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    minor: Vec<String>,
-    /// The packages to record a patch bump for (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    patch: Vec<String>,
-}
-
-#[derive(clap::Args)]
-struct VersionArgs {
-    /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
-    ignore: Vec<String>,
-    /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
-    #[arg(
-        long,
-        value_name = "TAG",
-        num_args = 0..=1,
-        value_parser = clap::builder::NonEmptyStringValueParser::new()
-    )]
-    #[expect(clippy::option_option)]
-    snapshot: Option<Option<String>>,
-    /// The snapshot suffix template; the placeholders are {tag}, {timestamp}, and {datetime}
-    #[arg(
-        long,
-        value_name = "TEMPLATE",
-        requires = "snapshot",
-        value_parser = clap::builder::NonEmptyStringValueParser::new()
-    )]
-    snapshot_prerelease_template: Option<String>,
-    /// Succeed even when there are no unreleased changesets
-    #[arg(short, long)]
-    allow_no_changesets: bool,
-    /// Write the release plan to the file (or stdout with `-`) as JSON
-    #[arg(short, long, value_name = "FILE")]
-    output: Option<PathBuf>,
 }
 
 #[derive(clap::Subcommand)]
@@ -180,19 +114,9 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
-    let root = if let Some(dir) = cli.root.filter(|dir| !dir.is_empty()) {
-        let dir = Path::new(&dir);
-        let dir = workspace::resolve_root(dir)
-            .with_context(|| format!("invalid root directory {}", dir.display()))?;
-        Root::new(dir)
-    } else {
-        let cwd = env::current_dir()?;
-        let cwd = workspace::resolve_root(&cwd)
-            .with_context(|| format!("invalid working directory {}", cwd.display()))?;
-        Root::find(&cwd)?
-    };
-    let config = config::load(&root.dir().join(".changeset"))?;
-    let workspace = Workspace::load(root, config.packages.as_deref())?;
+    let root = cli.root.filter(|dir| !dir.is_empty());
+    let cwd = env::current_dir()?;
+    let (workspace, config) = changesette::load(&cwd, root.as_deref().map(Path::new))?;
     match cli.command.unwrap_or(Command::Add(cli.add)) {
         Command::Init => commands::init::run(&workspace),
         Command::Add(args) => commands::add::run(&workspace, &config, args),

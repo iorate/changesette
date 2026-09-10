@@ -14,7 +14,7 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
-pub(crate) fn init_subscriber(max_level: LevelFilter) {
+pub fn init_subscriber(max_level: LevelFilter) {
     tracing_subscriber::fmt()
         .event_format(Formatter)
         .with_max_level(max_level)
