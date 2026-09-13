@@ -5,41 +5,15 @@ use tracing::info;
 
 use crate::{config::Config, plan, release_plan, snapshot::Snapshot, workspace::Workspace};
 
-#[derive(clap::Args)]
 pub struct VersionArgs {
-    /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
     pub ignore: Vec<String>,
-    /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
-    #[arg(
-        long,
-        value_name = "TAG",
-        num_args = 0..=1,
-        value_parser = clap::builder::NonEmptyStringValueParser::new()
-    )]
-    pub snapshot: Option<Option<String>>,
-    /// The snapshot suffix template; the placeholders are {tag}, {timestamp}, and {datetime}
-    #[arg(
-        long,
-        value_name = "TEMPLATE",
-        requires = "snapshot",
-        value_parser = clap::builder::NonEmptyStringValueParser::new()
-    )]
-    pub snapshot_prerelease_template: Option<String>,
-    /// Succeed even when there are no unreleased changesets
-    #[arg(short, long)]
+    pub snapshot: Option<Snapshot>,
     pub allow_no_changesets: bool,
-    /// Write the release plan to the file (or stdout with `-`) as JSON
-    #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
 }
 
-pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<()> {
-    let snapshot = args.snapshot.map(|tag| Snapshot {
-        tag,
-        template: args.snapshot_prerelease_template,
-    });
-    let planned = plan::plan_version(workspace, config, &args.ignore, snapshot.as_ref())?;
+pub fn run(workspace: Workspace, config: &Config, args: &VersionArgs) -> Result<()> {
+    let planned = plan::plan_version(workspace, config, &args.ignore, args.snapshot.as_ref())?;
     let pre = planned.in_pre();
     if let Some(pre) = pre {
         info!(
@@ -92,7 +66,7 @@ pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<(
         // always ends here; a snapshot run keeps it, leaving the exit to the
         // next regular `version` once the throwaway tree is discarded.
         if let Some(pre) = &planned.pre
-            && snapshot.is_none()
+            && args.snapshot.is_none()
         {
             fs::remove_file(pre.path()).with_context(|| pre.path().display().to_string())?;
         }
