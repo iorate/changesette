@@ -1,5 +1,13 @@
 # changesette
 
+## 6.4.1
+
+### Patch Changes
+
+- Always pretty-print the JSON output of `get-packages` and `version --output -`, instead of printing it on a single line when stdout is not a terminal.
+
+- Warn when no workspace is found at the root, and drop the implementation details from the `--root` help text.
+
 ## 6.4.0
 
 ### Minor Changes
