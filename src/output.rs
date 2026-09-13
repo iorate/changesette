@@ -18,8 +18,7 @@ pub fn init_subscriber(max_level: LevelFilter) {
     tracing_subscriber::fmt()
         .event_format(Formatter)
         .with_max_level(max_level)
-        // The default writer is stdout, which belongs to the machine-readable
-        // main output.
+        // Logs go to stderr; stdout carries the command output.
         .with_writer(|| LenientStderr(io::stderr()))
         .init();
 }
