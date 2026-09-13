@@ -20,25 +20,12 @@ use crate::{
     workspace::{Member, Workspace},
 };
 
-#[derive(clap::Args)]
 pub struct AddArgs {
-    /// Create a changeset that names no packages
-    #[arg(long, conflicts_with_all = ["major", "minor", "patch"])]
     pub empty: bool,
-    /// Open the created changeset in your editor
-    #[arg(long)]
     pub open: bool,
-    /// The summary text of the change
-    #[arg(short, long)]
     pub message: Option<String>,
-    /// The packages to record a major bump for (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
     pub major: Vec<String>,
-    /// The packages to record a minor bump for (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
     pub minor: Vec<String>,
-    /// The packages to record a patch bump for (comma-separated, repeatable)
-    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
     pub patch: Vec<String>,
 }
 

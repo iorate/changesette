@@ -5,10 +5,7 @@ use std::{
     process::ExitCode,
 };
 
-use changesette::{
-    commands::{self, add::AddArgs, version::VersionArgs},
-    output,
-};
+use changesette::{commands, output, snapshot::Snapshot};
 use clap::Parser;
 
 #[derive(Parser)]
@@ -53,7 +50,34 @@ enum Command {
     /// Create a changeset (the default command)
     Add(AddArgs),
     /// Consume changesets: bump each named package's version and update its CHANGELOG.md
-    Version(VersionArgs),
+    Version {
+        /// The packages to skip, leaving their changesets in place (comma-separated, repeatable)
+        #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
+        ignore: Vec<String>,
+        /// Create a snapshot release: bump to throwaway `0.0.0-<suffix>` versions instead
+        #[arg(
+            long,
+            value_name = "TAG",
+            num_args = 0..=1,
+            value_parser = clap::builder::NonEmptyStringValueParser::new()
+        )]
+        #[allow(clippy::option_option)]
+        snapshot: Option<Option<String>>,
+        /// The snapshot suffix template; the placeholders are {tag}, {timestamp}, and {datetime}
+        #[arg(
+            long,
+            value_name = "TEMPLATE",
+            requires = "snapshot",
+            value_parser = clap::builder::NonEmptyStringValueParser::new()
+        )]
+        snapshot_prerelease_template: Option<String>,
+        /// Succeed even when there are no unreleased changesets
+        #[arg(short, long)]
+        allow_no_changesets: bool,
+        /// Write the release plan to the file (or stdout with `-`) as JSON
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
     /// Enter or exit pre-release mode
     Pre {
         #[command(subcommand)]
@@ -90,6 +114,28 @@ enum Command {
     },
 }
 
+#[derive(clap::Args)]
+struct AddArgs {
+    /// Create a changeset that names no packages
+    #[arg(long, conflicts_with_all = ["major", "minor", "patch"])]
+    empty: bool,
+    /// Open the created changeset in your editor
+    #[arg(long)]
+    open: bool,
+    /// The summary text of the change
+    #[arg(short, long)]
+    message: Option<String>,
+    /// The packages to record a major bump for (comma-separated, repeatable)
+    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
+    major: Vec<String>,
+    /// The packages to record a minor bump for (comma-separated, repeatable)
+    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
+    minor: Vec<String>,
+    /// The packages to record a patch bump for (comma-separated, repeatable)
+    #[arg(long, value_name = "PACKAGES", value_delimiter = ',')]
+    patch: Vec<String>,
+}
+
 #[derive(clap::Subcommand)]
 enum PreCommand {
     /// Enter pre-release mode: `version` will bump to `-<tag>.<n>` prerelease versions
@@ -119,8 +165,37 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let (workspace, config) = changesette::load(&cwd, root.as_deref().map(Path::new))?;
     match cli.command.unwrap_or(Command::Add(cli.add)) {
         Command::Init => commands::init::run(&workspace),
-        Command::Add(args) => commands::add::run(&workspace, &config, args),
-        Command::Version(args) => commands::version::run(workspace, &config, args),
+        Command::Add(args) => commands::add::run(
+            &workspace,
+            &config,
+            commands::add::AddArgs {
+                empty: args.empty,
+                open: args.open,
+                message: args.message,
+                major: args.major,
+                minor: args.minor,
+                patch: args.patch,
+            },
+        ),
+        Command::Version {
+            ignore,
+            snapshot,
+            snapshot_prerelease_template,
+            allow_no_changesets,
+            output,
+        } => commands::version::run(
+            workspace,
+            &config,
+            &commands::version::VersionArgs {
+                ignore,
+                snapshot: snapshot.map(|tag| Snapshot {
+                    tag,
+                    template: snapshot_prerelease_template,
+                }),
+                allow_no_changesets,
+                output,
+            },
+        ),
         Command::Pre { command } => match command {
             PreCommand::Enter { tag } => commands::pre::enter(&workspace, &tag),
             PreCommand::Exit => commands::pre::exit(&workspace),
