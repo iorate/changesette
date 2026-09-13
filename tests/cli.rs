@@ -379,7 +379,7 @@ fn get_packages_prints_the_single_package_with_a_dot_dir() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[{\"name\":\"ublacklist\",\"version\":\"1.2.3\",\"private\":false,\"dir\":\".\"}]\n"
+        "[\n  {\n    \"name\": \"ublacklist\",\n    \"version\": \"1.2.3\",\n    \"private\": false,\n    \"dir\": \".\"\n  }\n]\n"
     );
 }
 
@@ -407,14 +407,14 @@ fn get_packages_lists_skipped_members_only_with_all() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"pkg-c\",\"version\":\"2.0.0\",\"private\":false,\"dir\":\"packages/c\"}]\n"
+        "[\n  {\n    \"name\": \"pkg-a\",\n    \"version\": \"3.1.4\",\n    \"private\": false,\n    \"dir\": \"packages/a\"\n  },\n  {\n    \"name\": \"pkg-c\",\n    \"version\": \"2.0.0\",\n    \"private\": false,\n    \"dir\": \"packages/c\"\n  }\n]\n"
     );
 
     let output = changesette(dir.path(), &["get-packages", "--all"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"},{\"name\":\"pkg-b\",\"version\":\"1.0.0\",\"private\":true,\"dir\":\"packages/b\"},{\"name\":\"pkg-c\",\"version\":\"2.0.0\",\"private\":false,\"dir\":\"packages/c\"}]\n"
+        "[\n  {\n    \"name\": \"pkg-a\",\n    \"version\": \"3.1.4\",\n    \"private\": false,\n    \"dir\": \"packages/a\"\n  },\n  {\n    \"name\": \"pkg-b\",\n    \"version\": \"1.0.0\",\n    \"private\": true,\n    \"dir\": \"packages/b\"\n  },\n  {\n    \"name\": \"pkg-c\",\n    \"version\": \"2.0.0\",\n    \"private\": false,\n    \"dir\": \"packages/c\"\n  }\n]\n"
     );
 }
 
@@ -541,20 +541,6 @@ fn pretty_plan(id: &str) -> String {
     )
 }
 
-fn compact_plan(id: &str) -> String {
-    format!(
-        concat!(
-            "{{\"changesets\":[{{\"id\":\"{0}\",\"summary\":\"Add feature\",",
-            "\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"minor\"}}]}}],",
-            "\"releases\":[{{\"name\":\"ublacklist\",\"type\":\"minor\",",
-            "\"oldVersion\":\"1.2.3\",\"newVersion\":\"1.3.0\",",
-            "\"changesets\":[\"{0}\"],",
-            "\"changelogEntry\":\"### Minor Changes\\n\\n- Add feature\"}}]}}"
-        ),
-        id
-    )
-}
-
 #[test]
 fn version_output_writes_the_pretty_plan_and_applies_the_changesets() {
     let dir = package_dir();
@@ -579,7 +565,7 @@ fn version_output_writes_the_pretty_plan_and_applies_the_changesets() {
 }
 
 #[test]
-fn version_output_dash_writes_the_compact_plan_to_stdout() {
+fn version_output_dash_writes_the_pretty_plan_to_stdout() {
     let dir = package_dir();
     write_changeset(
         dir.path(),
@@ -589,7 +575,7 @@ fn version_output_dash_writes_the_compact_plan_to_stdout() {
     );
     let output = changesette(dir.path(), &["version", "--output", "-"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), compact_plan(ID_B) + "\n");
+    assert_eq!(stdout(&output), pretty_plan(ID_B));
     assert_eq!(stderr(&output), "");
     assert!(!dir.path().join("-").exists());
     assert!(!dir.path().join(".changeset").join(FILE_B).exists());
@@ -838,7 +824,7 @@ fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[{\"name\":\"root\",\"version\":\"1.0.0\",\"private\":false,\"dir\":\".\"}]\n"
+        "[\n  {\n    \"name\": \"root\",\n    \"version\": \"1.0.0\",\n    \"private\": false,\n    \"dir\": \".\"\n  }\n]\n"
     );
     assert_eq!(
         stderr(&output),
@@ -849,8 +835,7 @@ fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
     );
 }
 
-const PKG_A_JSON: &str =
-    "[{\"name\":\"pkg-a\",\"version\":\"3.1.4\",\"private\":false,\"dir\":\"packages/a\"}]\n";
+const PKG_A_JSON: &str = "[\n  {\n    \"name\": \"pkg-a\",\n    \"version\": \"3.1.4\",\n    \"private\": false,\n    \"dir\": \"packages/a\"\n  }\n]\n";
 
 #[test]
 fn root_option_takes_a_relative_directory() {

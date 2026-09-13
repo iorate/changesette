@@ -1,6 +1,6 @@
 use std::{
     fmt,
-    io::{self, IsTerminal, Write},
+    io::{self, Write},
 };
 
 use anyhow::Result;
@@ -71,12 +71,7 @@ impl Write for LenientStderr {
 }
 
 pub fn print_json(value: &impl Serialize) -> Result<()> {
-    let json = if io::stdout().is_terminal() {
-        serde_json::to_string_pretty(value)?
-    } else {
-        serde_json::to_string(value)?
-    };
-    print_line(&json)
+    print_line(&serde_json::to_string_pretty(value)?)
 }
 
 pub fn print_line(text: &str) -> Result<()> {
