@@ -66,7 +66,7 @@ fn assert_changeset_path(line: &str) {
 
 #[test]
 fn init_creates_backfills_and_then_reports_initialized() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = package_dir();
     let output = changesette(dir.path(), &["init"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
@@ -426,7 +426,7 @@ fn get_packages_debug_reports_the_member_list() {
     let err = stderr(&output);
     assert!(
         err.contains(&format!(
-            "debug: workspace {} (npm): members: pkg-a (packages/a)",
+            "debug: {}: npm workspace, members: pkg-a (packages/a)",
             expected_path(dir.path(), "")
         )),
         "{err}"
@@ -439,7 +439,13 @@ fn get_packages_lists_nothing_without_package_json() {
     let output = changesette(dir.path(), &["get-packages"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "[]\n");
-    assert_eq!(stderr(&output), "");
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "warning: {}: no workspace found\n",
+            expected_path(dir.path(), "")
+        )
+    );
 }
 
 const FILE_A: &str = "boldly-brave-otter.md";

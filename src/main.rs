@@ -21,7 +21,7 @@ struct Cli {
     /// The lowest level of messages to print to stderr
     #[arg(long, value_name = "LEVEL", global = true, default_value = "info")]
     log_level: LogLevel,
-    /// Use DIR as the workspace root instead of finding it from the working directory; symlinks in DIR are resolved, and only the markers in DIR decide the members
+    /// Use DIR as the workspace root instead of finding it from the working directory
     #[arg(long, value_name = "DIR", global = true, env = "CHANGESETTE_ROOT")]
     root: Option<OsString>,
 }
