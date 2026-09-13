@@ -7,13 +7,18 @@ use crate::{config::Config, plan, release_plan, snapshot::Snapshot, workspace::W
 
 pub struct VersionArgs {
     pub ignore: Vec<String>,
-    pub snapshot: Option<Snapshot>,
+    pub snapshot: Option<Option<String>>,
+    pub snapshot_prerelease_template: Option<String>,
     pub allow_no_changesets: bool,
     pub output: Option<PathBuf>,
 }
 
-pub fn run(workspace: Workspace, config: &Config, args: &VersionArgs) -> Result<()> {
-    let planned = plan::plan_version(workspace, config, &args.ignore, args.snapshot.as_ref())?;
+pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<()> {
+    let snapshot = args.snapshot.map(|tag| Snapshot {
+        tag,
+        template: args.snapshot_prerelease_template,
+    });
+    let planned = plan::plan_version(workspace, config, &args.ignore, snapshot.as_ref())?;
     let pre = planned.in_pre();
     if let Some(pre) = pre {
         info!(
@@ -66,7 +71,7 @@ pub fn run(workspace: Workspace, config: &Config, args: &VersionArgs) -> Result<
         // always ends here; a snapshot run keeps it, leaving the exit to the
         // next regular `version` once the throwaway tree is discarded.
         if let Some(pre) = &planned.pre
-            && args.snapshot.is_none()
+            && snapshot.is_none()
         {
             fs::remove_file(pre.path()).with_context(|| pre.path().display().to_string())?;
         }

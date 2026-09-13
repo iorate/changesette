@@ -5,7 +5,7 @@ use std::{
     process::ExitCode,
 };
 
-use changesette::{commands, output, snapshot::Snapshot};
+use changesette::{commands, output};
 use clap::Parser;
 
 #[derive(Parser)]
@@ -186,12 +186,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         } => commands::version::run(
             workspace,
             &config,
-            &commands::version::VersionArgs {
+            commands::version::VersionArgs {
                 ignore,
-                snapshot: snapshot.map(|tag| Snapshot {
-                    tag,
-                    template: snapshot_prerelease_template,
-                }),
+                snapshot,
+                snapshot_prerelease_template,
                 allow_no_changesets,
                 output,
             },
