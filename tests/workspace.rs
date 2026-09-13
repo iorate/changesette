@@ -575,7 +575,13 @@ fn the_working_directory_is_the_root_without_any_package_json() {
     let (workspace, output) = discover_captured(&dir.path().join("a/b"));
     assert_eq!(workspace.root(), dir.path().join("a/b"));
     assert_eq!(names(&workspace), [] as [&str; 0]);
-    assert!(warning_lines(&output).is_empty(), "{output}");
+    assert_eq!(
+        warning_lines(&output),
+        [format!(
+            "warning: {}: no workspace found",
+            dir.path().join("a/b").display()
+        )]
+    );
 }
 
 #[test]
@@ -2221,11 +2227,35 @@ fn a_forced_root_without_a_manifest_has_no_members() {
     let workspace = result.unwrap();
     assert_eq!(workspace.root(), dir.path());
     assert_eq!(names(&workspace), [] as [&str; 0]);
-    assert!(warning_lines(&output).is_empty(), "{output}");
+    assert_eq!(
+        warning_lines(&output),
+        [format!(
+            "warning: {}: no workspace found",
+            dir.path().display()
+        )]
+    );
 
+    for marker in ["yarn.lock", "pnpm-workspace.yaml"] {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(dir.path(), marker, "");
+        let mut result = None;
+        let output = capture_output(|| result = Some(forced(dir.path())));
+        assert_eq!(names(&result.unwrap()), [] as [&str; 0], "{marker}");
+        assert!(warning_lines(&output).is_empty(), "{marker}: {output}");
+    }
+}
+
+#[test]
+fn listed_packages_make_a_root_without_a_manifest_a_workspace() {
     let dir = tempfile::tempdir().unwrap();
-    write_file(dir.path(), "yarn.lock", "");
-    assert_eq!(names(&forced(dir.path())), [] as [&str; 0]);
+    write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
+    let mut result = None;
+    let output = capture_output(|| result = Some(load_listed(dir.path(), &["packages/a"])));
+    assert_eq!(
+        names_and_rel_dirs(&result.unwrap().unwrap()),
+        [("pkg-a", "packages/a")]
+    );
+    assert!(warning_lines(&output).is_empty(), "{output}");
 }
 
 #[test]

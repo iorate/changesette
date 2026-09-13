@@ -37,18 +37,18 @@ enum PackageManager {
 }
 
 impl PackageManager {
-    fn as_str(self) -> &'static str {
+    fn workspace_kind(self) -> &'static str {
         match self {
-            PackageManager::Npm => "npm",
-            PackageManager::Yarn => "yarn",
-            PackageManager::Pnpm => "pnpm",
+            PackageManager::Npm => "npm workspace",
+            PackageManager::Yarn => "yarn workspace",
+            PackageManager::Pnpm => "pnpm workspace",
         }
     }
 }
 
 pub struct Root {
     dir: PathBuf,
-    pm: PackageManager,
+    pm: Option<PackageManager>,
     // The packages `find` already enumerated to confirm an npm reroot, kept
     // so that `load` does not walk the workspace (and warn) a second time.
     reroot: Option<Vec<Package>>,
@@ -58,11 +58,13 @@ impl Root {
     #[must_use]
     pub fn new(dir: PathBuf) -> Root {
         let pm = if probe_is_file(&dir.join("pnpm-workspace.yaml")) {
-            PackageManager::Pnpm
+            Some(PackageManager::Pnpm)
         } else if probe_is_file(&dir.join("yarn.lock")) {
-            PackageManager::Yarn
+            Some(PackageManager::Yarn)
+        } else if probe_is_file(&dir.join("package.json")) {
+            Some(PackageManager::Npm)
         } else {
-            PackageManager::Npm
+            None
         };
         Root {
             dir,
@@ -76,20 +78,19 @@ impl Root {
             if probe_is_file(&dir.join("pnpm-workspace.yaml")) {
                 return Ok(Root {
                     dir: dir.to_path_buf(),
-                    pm: PackageManager::Pnpm,
+                    pm: Some(PackageManager::Pnpm),
                     reroot: None,
                 });
             }
             if probe_is_file(&dir.join("yarn.lock")) {
                 return Ok(Root {
                     dir: dir.to_path_buf(),
-                    pm: PackageManager::Yarn,
+                    pm: Some(PackageManager::Yarn),
                     reroot: None,
                 });
             }
         }
 
-        let pm = PackageManager::Npm;
         let mut prefix = None;
         for dir in cwd.ancestors() {
             let path = dir.join("package.json");
@@ -114,18 +115,22 @@ impl Root {
             // The candidate prefix is looked for among every matched directory
             // holding a package.json, so the member qualification (and the
             // duplicate-name exclusion) must not run first.
-            let packages = collect_packages(dir, &path, &patterns, pm)?;
+            let packages = collect_packages(dir, &path, &patterns, PackageManager::Npm)?;
             if lists_dir(&packages, prefix_dir)? {
                 return Ok(Root {
                     dir: dir.to_path_buf(),
-                    pm,
+                    pm: Some(PackageManager::Npm),
                     reroot: Some(packages),
                 });
             }
         }
 
+        let (dir, pm) = match prefix {
+            Some(dir) => (dir, Some(PackageManager::Npm)),
+            None => (cwd.to_path_buf(), None),
+        };
         Ok(Root {
-            dir: prefix.unwrap_or_else(|| cwd.to_path_buf()),
+            dir,
             pm,
             reroot: None,
         })
@@ -174,30 +179,34 @@ impl Workspace {
             }
             return Ok(Workspace::new(
                 root,
-                "packages from config",
+                "workspace listed by changesette.packages",
                 qualify_packages(packages)?,
             ));
         }
+        let Some(pm) = pm else {
+            warn!("{}: no workspace found", root.display());
+            return Ok(Workspace::new(root, "no workspace", Vec::new()));
+        };
         let members = if let Some(packages) = reroot {
             qualify_packages(packages)?
         } else {
             let (manifest, patterns) = read_patterns(&root, pm)?;
             collect_members(&root, &manifest, &patterns, pm)?
         };
-        Ok(Workspace::new(root, pm.as_str(), members))
+        Ok(Workspace::new(root, pm.workspace_kind(), members))
     }
 
     // The one construction point, so that every loading path reports the
     // final member list — the shortest answer to "why is my package not
     // found".
-    fn new(root: PathBuf, source: &'static str, members: Vec<Member>) -> Workspace {
+    fn new(root: PathBuf, kind: &'static str, members: Vec<Member>) -> Workspace {
         if members.is_empty() {
-            debug!("workspace {} ({source}): no members", root.display());
+            debug!("{}: {kind}, no members", root.display());
         } else {
             // The list is built inside the macro so that the event macro's
             // enabled check makes it free at the default level.
             debug!(
-                "workspace {} ({source}): members: {}",
+                "{}: {kind}, members: {}",
                 root.display(),
                 members
                     .iter()
