@@ -54,6 +54,7 @@ fn args() -> VersionArgs {
     VersionArgs {
         ignore: Vec::new(),
         snapshot: None,
+        snapshot_prerelease_template: None,
         allow_no_changesets: false,
         output: None,
     }
@@ -68,10 +69,8 @@ fn ignoring(names: &[&str]) -> VersionArgs {
 
 fn snapshot_args(tag: Option<&str>, template: Option<&str>) -> VersionArgs {
     VersionArgs {
-        snapshot: Some(Snapshot {
-            tag: tag.map(str::to_owned),
-            template: template.map(str::to_owned),
-        }),
+        snapshot: Some(tag.map(str::to_owned)),
+        snapshot_prerelease_template: template.map(str::to_owned),
         ..args()
     }
 }
@@ -80,21 +79,21 @@ fn load(dir: &Path) -> (Workspace, Config) {
     changesette::load(dir, None).unwrap()
 }
 
-fn run_with(dir: &Path, args: &VersionArgs) -> Result<()> {
+fn run_with(dir: &Path, args: VersionArgs) -> Result<()> {
     let (workspace, config) = load(dir);
     version::run(workspace, &config, args)
 }
 
 fn run_ok(dir: &Path) {
-    run_with(dir, &args()).unwrap();
+    run_with(dir, args()).unwrap();
 }
 
-fn run_err_with(dir: &Path, args: &VersionArgs) -> String {
+fn run_err_with(dir: &Path, args: VersionArgs) -> String {
     format!("{:#}", run_with(dir, args).unwrap_err())
 }
 
 fn run_err(dir: &Path) -> String {
-    run_err_with(dir, &args())
+    run_err_with(dir, args())
 }
 
 fn plan_with(dir: &Path, ignore: &[&str], snapshot: Option<&Snapshot>) -> Result<PlannedVersion> {
@@ -165,7 +164,7 @@ fn allow_no_changesets_succeeds_and_writes_an_empty_plan() {
     let before = dir_snapshot(dir.path());
     run_with(
         dir.path(),
-        &VersionArgs {
+        VersionArgs {
             allow_no_changesets: true,
             ..args()
         },
@@ -176,7 +175,7 @@ fn allow_no_changesets_succeeds_and_writes_an_empty_plan() {
 
     run_with(
         dir.path(),
-        &VersionArgs {
+        VersionArgs {
             allow_no_changesets: true,
             output: Some(dir.path().join("plan.json")),
             ..args()
@@ -194,7 +193,7 @@ fn output_with_zero_changesets_fails_without_writing_the_plan() {
     let before = dir_snapshot(dir.path());
     let err = run_err_with(
         dir.path(),
-        &VersionArgs {
+        VersionArgs {
             output: Some(dir.path().join("plan.json")),
             ..args()
         },
@@ -360,7 +359,7 @@ fn skipped_packages_keep_their_changesets() {
         let planned = plan_with(dir.path(), ignore, None).unwrap();
         assert_eq!(releases(&planned), ["pkg-a minor 3.1.4 -> 3.2.0"]);
 
-        run_with(dir.path(), &ignoring(ignore)).unwrap();
+        run_with(dir.path(), ignoring(ignore)).unwrap();
         assert_eq!(
             manifest_version(dir.path(), "packages/a/package.json"),
             "3.2.0"
@@ -417,7 +416,7 @@ fn ignore_rejects_an_unknown_package() {
         "Add feature",
     );
     let before = dir_snapshot(dir.path());
-    let err = run_err_with(dir.path(), &ignoring(&["other-package"]));
+    let err = run_err_with(dir.path(), ignoring(&["other-package"]));
     assert!(err.contains("--ignore"), "{err}");
     assert!(err.contains("`other-package` not found"), "{err}");
     assert_eq!(dir_snapshot(dir.path()), before);
@@ -442,7 +441,7 @@ fn succeeds_when_every_changeset_is_skipped() {
         assert!(planned.consumed_changes.is_empty());
         assert!(planned.releases.is_empty());
 
-        run_with(dir.path(), &ignoring(ignore)).unwrap();
+        run_with(dir.path(), ignoring(ignore)).unwrap();
         assert_eq!(dir_snapshot(dir.path()), before);
     }
 }
@@ -470,7 +469,7 @@ fn filter_changes_rejects_a_mixed_changeset() {
         let dir = make_dir();
         write_changeset(dir.path(), FILE_B, changeset, "Improve things");
         let before = dir_snapshot(dir.path());
-        let err = run_err_with(dir.path(), &ignoring(ignore));
+        let err = run_err_with(dir.path(), ignoring(ignore));
         assert!(err.contains(FILE_B), "{err}");
         assert!(err.contains("cannot mix skipped packages"), "{err}");
         assert!(err.contains("`pkg-a`"), "{err}");
@@ -489,7 +488,7 @@ fn the_ignore_flag_and_a_config_ignore_are_exclusive() {
         write_config(dir.path(), config);
         write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
         let before = dir_snapshot(dir.path());
-        let err = run_err_with(dir.path(), &ignoring(&[ignore]));
+        let err = run_err_with(dir.path(), ignoring(&[ignore]));
         assert!(err.contains("--ignore"), "{err}");
         assert!(err.contains("use only one of them"), "{err}");
         assert_eq!(dir_snapshot(dir.path()), before);
@@ -499,7 +498,7 @@ fn the_ignore_flag_and_a_config_ignore_are_exclusive() {
     write_config(dir.path(), "{ \"ignore\": [] }\n");
     write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
     write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
-    run_with(dir.path(), &ignoring(&["pkg-b"])).unwrap();
+    run_with(dir.path(), ignoring(&["pkg-b"])).unwrap();
     assert_eq!(
         manifest_version(dir.path(), "packages/a/package.json"),
         "3.2.0"
@@ -1012,7 +1011,7 @@ fn in_pre_mode_leaves_skipped_changesets_in_place() {
         write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
         write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
         let b_manifest = read(dir.path(), "packages/b/package.json");
-        run_with(dir.path(), &ignoring(ignore)).unwrap();
+        run_with(dir.path(), ignoring(ignore)).unwrap();
         assert_eq!(
             manifest_version(dir.path(), "packages/a/package.json"),
             "3.2.0-beta.0"
@@ -1104,7 +1103,7 @@ fn after_exit_rescues_prerelease_packages() {
     let planned = plan_with(dir.path(), &["pkg-b"], None).unwrap();
     assert_eq!(releases(&planned), ["pkg-a patch 3.2.0-beta.0 -> 3.2.0"]);
 
-    run_with(dir.path(), &ignoring(&["pkg-b"])).unwrap();
+    run_with(dir.path(), ignoring(&["pkg-b"])).unwrap();
     assert_eq!(
         read(dir.path(), "packages/a/package.json"),
         pkg("pkg-a", "3.2.0")
@@ -1301,7 +1300,7 @@ fn snapshot_bumps_to_a_zero_based_version() {
         &[("ublacklist", "minor")],
         "Add feature",
     );
-    run_with(dir.path(), &snapshot_args(None, None)).unwrap();
+    run_with(dir.path(), snapshot_args(None, None)).unwrap();
     let version = manifest_version(dir.path(), "package.json");
     let suffix = version
         .strip_prefix("0.0.0-")
@@ -1323,7 +1322,7 @@ fn snapshot_with_a_tag_prefixes_the_suffix() {
         &[("ublacklist", "minor")],
         "Add feature",
     );
-    run_with(dir.path(), &snapshot_args(Some("canary"), None)).unwrap();
+    run_with(dir.path(), snapshot_args(Some("canary"), None)).unwrap();
     let version = manifest_version(dir.path(), "package.json");
     let suffix = version
         .strip_prefix("0.0.0-canary-")
@@ -1336,7 +1335,7 @@ fn snapshot_shares_one_suffix_across_packages() {
     let dir = two_package_workspace_dir();
     write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
     write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
-    run_with(dir.path(), &snapshot_args(Some("canary"), None)).unwrap();
+    run_with(dir.path(), snapshot_args(Some("canary"), None)).unwrap();
     let version_a = manifest_version(dir.path(), "packages/a/package.json");
     let version_b = manifest_version(dir.path(), "packages/b/package.json");
     assert_eq!(version_a, version_b);
@@ -1359,7 +1358,7 @@ fn snapshot_uses_the_config_template() {
         &[("ublacklist", "minor")],
         "Add feature",
     );
-    run_with(dir.path(), &snapshot_args(Some("canary"), None)).unwrap();
+    run_with(dir.path(), snapshot_args(Some("canary"), None)).unwrap();
     let version = manifest_version(dir.path(), "package.json");
     let timestamp = version
         .strip_prefix("0.0.0-canary.")
@@ -1386,7 +1385,7 @@ fn snapshot_cli_template_overrides_the_config() {
     );
     run_with(
         dir.path(),
-        &snapshot_args(Some("canary"), Some("{tag}-cli-{datetime}")),
+        snapshot_args(Some("canary"), Some("{tag}-cli-{datetime}")),
     )
     .unwrap();
     let version = manifest_version(dir.path(), "package.json");
@@ -1409,7 +1408,7 @@ fn snapshot_uses_the_calculated_version() {
         &[("ublacklist", "minor")],
         "Add feature",
     );
-    run_with(dir.path(), &snapshot_args(None, None)).unwrap();
+    run_with(dir.path(), snapshot_args(None, None)).unwrap();
     let version = manifest_version(dir.path(), "package.json");
     let suffix = version
         .strip_prefix("1.3.0-")
@@ -1421,7 +1420,7 @@ fn snapshot_uses_the_calculated_version() {
 fn snapshot_keeps_a_none_only_package_unchanged() {
     let dir = package_dir();
     write_changeset(dir.path(), FILE_B, &[("ublacklist", "none")], "Note only");
-    run_with(dir.path(), &snapshot_args(None, None)).unwrap();
+    run_with(dir.path(), snapshot_args(None, None)).unwrap();
     assert_eq!(manifest_version(dir.path(), "package.json"), "1.2.3");
     assert!(!exists(dir.path(), "CHANGELOG.md"));
     assert!(!dir.path().join(".changeset").join(FILE_B).exists());
@@ -1438,7 +1437,7 @@ fn snapshot_fails_in_pre_mode() {
         "Add feature",
     );
     let before = dir_snapshot(dir.path());
-    let err = run_err_with(dir.path(), &snapshot_args(None, None));
+    let err = run_err_with(dir.path(), snapshot_args(None, None));
     assert!(err.contains("not allowed in pre mode"), "{err}");
     assert_eq!(dir_snapshot(dir.path()), before);
 }
@@ -1448,7 +1447,7 @@ fn snapshot_after_exit_keeps_pre_json() {
     let dir = prerelease_package_dir("1.3.0-beta.1");
     write_pre_json(dir.path(), EXITED_PRE_JSON);
     write_changeset(dir.path(), FILE_B, &[("ublacklist", "patch")], "Fix bug");
-    run_with(dir.path(), &snapshot_args(None, None)).unwrap();
+    run_with(dir.path(), snapshot_args(None, None)).unwrap();
     let version = manifest_version(dir.path(), "package.json");
     assert!(
         version.starts_with("0.0.0-"),
@@ -1462,7 +1461,7 @@ fn snapshot_after_exit_keeps_pre_json() {
 fn snapshot_after_exit_rescues_to_a_snapshot_version() {
     let dir = prerelease_package_dir("1.3.0-beta.1");
     write_pre_json(dir.path(), EXITED_PRE_JSON);
-    run_with(dir.path(), &snapshot_args(None, None)).unwrap();
+    run_with(dir.path(), snapshot_args(None, None)).unwrap();
     let version = manifest_version(dir.path(), "package.json");
     let suffix = version
         .strip_prefix("0.0.0-")
@@ -1483,7 +1482,7 @@ fn snapshot_rejects_an_invalid_template_leaving_the_tree_untouched() {
     let before = dir_snapshot(dir.path());
     let err = run_err_with(
         dir.path(),
-        &snapshot_args(Some("canary"), Some("{datetime}")),
+        snapshot_args(Some("canary"), Some("{datetime}")),
     );
     assert!(err.contains("{tag}"), "{err}");
     assert_eq!(dir_snapshot(dir.path()), before);
