@@ -316,7 +316,7 @@ In pre-release mode, a top-level `preState` object is included.
 
 ### `changesette status [--verbose] [--output <file>]`
 
-Prints the packages that `version` would bump to stdout, without changing any file. `--output` (short form `-o`) writes the release plan to the given file instead — the same JSON `version --output` writes.
+Prints the packages that `version` would bump, without changing any file. `--output` (short form `-o`) writes the release plan to the given file (`-` for stdout) instead — the same JSON `version --output` writes.
 
 ### `changesette pre enter <tag>`
 
@@ -328,7 +328,7 @@ Leaves pre-release mode by flipping `.changeset/pre.json` to the exited state, s
 
 ### `changesette get-packages [--all]`
 
-Prints the packages managed by `version` to stdout as a JSON array:
+Prints the packages managed by `version` as a JSON array:
 
 ```json
 [
