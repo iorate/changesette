@@ -1,15 +1,21 @@
-use changesette::bump::{Bump, next_pre_version, next_pre_version_with, next_version, pre_counter};
+use changesette::bump::{
+    Bump, Prerelease, next_pre_version, next_pre_version_with, next_version, pre_counter,
+};
 
 fn next(current: &str, bump: Bump) -> String {
     next_version(&current.parse().unwrap(), bump).to_string()
 }
 
 fn next_pre(current: &str, bump: Bump, tag: &str) -> String {
-    next_pre_version(&current.parse().unwrap(), bump, tag).to_string()
+    next_pre_version(&current.parse().unwrap(), bump, &pre(tag)).to_string()
 }
 
 fn counter(current: &str, tag: &str) -> u64 {
-    pre_counter(&current.parse().unwrap(), tag)
+    pre_counter(&current.parse().unwrap(), &pre(tag))
+}
+
+fn pre(text: &str) -> Prerelease {
+    Prerelease::new(text).unwrap()
 }
 
 #[test]
@@ -91,7 +97,13 @@ fn pre_counter_feeds_next_pre_version_with() {
     assert_eq!(counter("1.1.0-alpha.3", "beta"), 0);
     assert_eq!(counter("1.0.0-alpha.beta", "alpha"), 0);
     assert_eq!(
-        next_pre_version_with(&"1.1.0-beta.0".parse().unwrap(), Bump::Patch, "beta", 5).to_string(),
+        next_pre_version_with(
+            &"1.1.0-beta.0".parse().unwrap(),
+            Bump::Patch,
+            &pre("beta"),
+            5
+        )
+        .to_string(),
         "1.1.0-beta.5"
     );
 }
@@ -99,11 +111,46 @@ fn pre_counter_feeds_next_pre_version_with() {
 #[test]
 #[should_panic(expected = "version number overflow")]
 fn panics_on_a_version_component_overflow() {
-    next("18446744073709551615.0.0", Bump::Major);
+    let _ = next_version(&nodejs_semver::Version::from((u64::MAX, 0, 0)), Bump::Major);
 }
 
 #[test]
 #[should_panic(expected = "version number overflow")]
 fn pre_counter_panics_on_a_counter_overflow() {
     counter("1.0.0-beta.18446744073709551615", "beta");
+}
+
+#[test]
+fn prerelease_accepts_dotted_and_numeric_identifiers() {
+    for text in ["beta", "beta.2", "1", "rc-0", "0", "01a", "-"] {
+        let pre = Prerelease::new(text).unwrap_or_else(|| panic!("{text:?} should be accepted"));
+        assert_eq!(pre.as_str(), text);
+        assert_eq!(pre.to_string(), text);
+    }
+}
+
+#[test]
+fn prerelease_rejects_invalid_identifiers() {
+    for text in [
+        "",
+        " ",
+        "beta 2",
+        "beta_2",
+        "ベータ",
+        "01",
+        "beta.",
+        ".beta",
+        "beta..2",
+    ] {
+        assert!(
+            Prerelease::new(text).is_none(),
+            "{text:?} should be rejected"
+        );
+    }
+}
+
+#[test]
+fn prerelease_with_counter_appends_an_identifier() {
+    assert_eq!(pre("beta").with_counter(0).as_str(), "beta.0");
+    assert_eq!(pre("beta.2").with_counter(10).as_str(), "beta.2.10");
 }

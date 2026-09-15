@@ -9,8 +9,8 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use file_id::{FileId, get_file_id};
+use nodejs_semver::Version;
 use saphyr::{LoadableYamlNode, Yaml};
-use semver::Version;
 use serde_json::Value;
 use tracing::{debug, warn};
 

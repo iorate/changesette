@@ -4,7 +4,7 @@ use std::{fs, io, path::Path};
 
 use anyhow::Result;
 use changesette::workspace::{Member, Root, Workspace, resolve_root};
-use semver::Version;
+use nodejs_semver::Version;
 use tempfile::TempDir;
 use util::{capture_output, names_and_rel_dirs, write_file};
 
@@ -127,7 +127,7 @@ fn members_are_sorted_by_name() {
         [("alpha", "packages/two"), ("zeta", "packages/one")]
     );
     let alpha = &workspace.members()[0];
-    assert_eq!(alpha.version(), &Version::new(2, 0, 0));
+    assert_eq!(alpha.version(), &Version::from((2, 0, 0)));
     assert!(alpha.private());
     assert!(!workspace.members()[1].private());
 }

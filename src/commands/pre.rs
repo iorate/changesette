@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use tracing::info;
 
 use crate::{
+    bump::Prerelease,
     pre::{self, PreJson, PreMode},
     workspace::Workspace,
 };
@@ -17,15 +18,15 @@ pub fn enter(workspace: &Workspace, tag: &str) -> Result<()> {
     if matches!(&pre, Some(pre) if pre.mode() == PreMode::Pre) {
         bail!("already in pre mode; run `changesette pre exit` to exit");
     }
-    pre::validate_tag(tag)?;
+    let tag = Prerelease::new(tag).with_context(|| format!("invalid pre tag {tag:?}"))?;
 
     if let Some(mut pre) = pre {
         pre.set_mode(PreMode::Pre);
-        pre.set_tag(tag);
+        pre.set_tag(&tag);
         fs::write(pre.path(), pre.text()).with_context(|| pre.path().display().to_string())?;
     } else {
         fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
-        pre::write_new(&changeset_dir, tag)?;
+        pre::write_new(&changeset_dir, tag.as_str())?;
     }
 
     info!(

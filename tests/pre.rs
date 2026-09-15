@@ -1,6 +1,9 @@
 use std::fs;
 
-use changesette::pre::{PreJson, PreMode, validate_tag};
+use changesette::{
+    bump::Prerelease,
+    pre::{PreJson, PreMode},
+};
 use tempfile::TempDir;
 
 fn changeset_dir(pre_json: &str) -> TempDir {
@@ -74,25 +77,11 @@ fn rewrites_in_place_keeping_unknown_fields_and_formatting() {
     assert_eq!(pre.mode(), PreMode::Exit);
     assert_eq!(pre.tag(), "alpha");
     pre.set_mode(PreMode::Pre);
-    pre.set_tag("beta.2");
+    pre.set_tag(&Prerelease::new("beta.2").unwrap());
     assert_eq!(pre.mode(), PreMode::Pre);
     assert_eq!(pre.tag(), "beta.2");
     assert_eq!(
         pre.text(),
         "{ // pre state\n\t\"tag\":\t\"beta.2\",\n\t\"mode\": \"pre\",\n\t\"someday\": [1, 2, 3]\n}"
     );
-}
-
-#[test]
-fn validate_tag_accepts_dotted_and_numeric_tags() {
-    for tag in ["beta", "beta.2", "1", "rc-0"] {
-        assert!(validate_tag(tag).is_ok(), "{tag} should be accepted");
-    }
-}
-
-#[test]
-fn validate_tag_rejects_invalid_tags() {
-    for tag in ["", " ", "beta 2", "beta_2", "ベータ", "01", "beta."] {
-        assert!(validate_tag(tag).is_err(), "{tag:?} should be rejected");
-    }
 }

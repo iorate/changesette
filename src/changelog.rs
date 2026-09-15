@@ -1,8 +1,8 @@
 use std::ops::Range;
 
 use anyhow::{Context, Result};
+use nodejs_semver::Version;
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
-use semver::Version;
 
 use crate::bump::Bump;
 

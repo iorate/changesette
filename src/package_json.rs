@@ -49,9 +49,11 @@ impl PackageJson {
             let raw_version = version_lit
                 .decoded_value()
                 .context("top-level \"version\" must be a valid string")?;
-            raw_version.parse::<semver::Version>().with_context(|| {
-                format!("top-level \"version\" ({raw_version:?}) is not a valid semver version")
-            })?;
+            raw_version
+                .parse::<nodejs_semver::Version>()
+                .with_context(|| {
+                    format!("top-level \"version\" ({raw_version:?}) is not a valid semver version")
+                })?;
         }
 
         Ok(Self {
@@ -61,7 +63,7 @@ impl PackageJson {
         })
     }
 
-    pub fn set_version(&mut self, version: &semver::Version) -> Result<()> {
+    pub fn set_version(&mut self, version: &nodejs_semver::Version) -> Result<()> {
         let Some(version_lit) = &self.version_lit else {
             bail!("{}: missing top-level \"version\"", self.path.display())
         };

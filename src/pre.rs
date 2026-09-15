@@ -9,7 +9,10 @@ use jsonc_parser::{
     cst::{CstRootNode, CstStringLit},
 };
 
-use crate::jsonc::{set_string_value, string_prop};
+use crate::{
+    bump::Prerelease,
+    jsonc::{set_string_value, string_prop},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreMode {
@@ -105,25 +108,15 @@ impl PreJson {
         self.mode = mode;
     }
 
-    // `tag` must have passed `validate_tag`.
-    pub fn set_tag(&mut self, tag: &str) {
-        set_string_value(&self.tag_lit, tag);
-        tag.clone_into(&mut self.tag);
+    pub fn set_tag(&mut self, tag: &Prerelease) {
+        set_string_value(&self.tag_lit, tag.as_str());
+        self.tag = tag.to_string();
     }
 
     #[must_use]
     pub fn text(&self) -> String {
         self.root.to_string()
     }
-}
-
-pub fn validate_tag(tag: &str) -> Result<()> {
-    // An empty pre-release parses, so the counter is appended before the
-    // check to reject an empty tag along with the invalid ones.
-    if let Err(err) = semver::Prerelease::new(&format!("{tag}.0")) {
-        bail!("invalid pre tag {tag:?}: {err}");
-    }
-    Ok(())
 }
 
 pub fn write_new(changeset_dir: &Path, tag: &str) -> Result<()> {

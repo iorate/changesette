@@ -5,16 +5,16 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use semver::Version;
+use nodejs_semver::Version;
 use tracing::debug;
 
 use crate::{
-    bump::{self, Bump},
+    bump::{self, Bump, Prerelease},
     changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
     config::{Config, ResolvedGroups},
     package_json::PackageJson,
-    pre::{self, PreJson, PreMode},
+    pre::{PreJson, PreMode},
     skip::SkipSet,
     snapshot::{Snapshot, SnapshotVersions},
     workspace::{Member, Workspace},
@@ -63,13 +63,17 @@ pub fn plan_version(
 
     let pre = PreJson::load(&changeset_dir)?;
     let in_pre = pre_state(pre.as_ref());
+    let mut pre_tag = None;
     if let Some(pre) = in_pre {
         if snapshot.is_some() {
             bail!(
                 "snapshot releases are not allowed in pre mode; run `changesette pre exit` first"
             );
         }
-        pre::validate_tag(pre.tag())?;
+        pre_tag = Some(
+            Prerelease::new(pre.tag())
+                .with_context(|| format!("invalid pre tag {:?}", pre.tag()))?,
+        );
     }
     let snapshot_versions = snapshot
         .map(|snapshot| SnapshotVersions::resolve(snapshot, config))
@@ -86,6 +90,7 @@ pub fn plan_version(
         &workspace,
         &consumed_changes,
         pre.as_ref(),
+        pre_tag.as_ref(),
         &skip,
         snapshot_versions.as_ref(),
         &groups,
@@ -114,6 +119,7 @@ fn plan_releases(
     workspace: &Workspace,
     changes: &[LoadedChange],
     pre: Option<&PreJson>,
+    pre_tag: Option<&Prerelease>,
     skip: &SkipSet,
     snapshot: Option<&SnapshotVersions>,
     groups: &ResolvedGroups,
@@ -121,13 +127,7 @@ fn plan_releases(
     let mut max_bumps = changeset::max_bumps(changes);
     // The group passes run before the pre exit rescue so that a rescued
     // member does not pull its group along.
-    let overrides = apply_groups(
-        workspace,
-        groups,
-        skip,
-        pre_state(pre).map(PreJson::tag),
-        &mut max_bumps,
-    )?;
+    let overrides = apply_groups(workspace, groups, skip, pre_tag, &mut max_bumps)?;
     if matches!(pre, Some(pre) if pre.mode() == PreMode::Exit) {
         rescue_prereleases(workspace, skip, groups, &mut max_bumps)?;
     }
@@ -160,15 +160,12 @@ fn plan_releases(
                     .collect();
                 let new_version = match snapshot {
                     Some(snapshot) => snapshot.apply(&old_version, max_bump),
-                    None => match pre_state(pre) {
-                        Some(pre) => match overrides.pre_counters.get(name) {
-                            Some(&counter) => bump::next_pre_version_with(
-                                &old_version,
-                                max_bump,
-                                pre.tag(),
-                                counter,
-                            ),
-                            None => bump::next_pre_version(&old_version, max_bump, pre.tag()),
+                    None => match pre_tag {
+                        Some(tag) => match overrides.pre_counters.get(name) {
+                            Some(&counter) => {
+                                bump::next_pre_version_with(&old_version, max_bump, tag, counter)
+                            }
+                            None => bump::next_pre_version(&old_version, max_bump, tag),
                         },
                         None => bump::next_version(&old_version, max_bump),
                     },
@@ -200,7 +197,7 @@ fn apply_groups<'a>(
     workspace: &'a Workspace,
     groups: &ResolvedGroups,
     skip: &SkipSet,
-    pre_tag: Option<&str>,
+    pre_tag: Option<&Prerelease>,
     max_bumps: &mut BTreeMap<&'a str, Option<Bump>>,
 ) -> Result<GroupOverrides> {
     let mut old_versions = BTreeMap::new();
@@ -302,7 +299,7 @@ fn rescue_prereleases<'a>(
         // them.
         let mut on_prerelease = false;
         for name in group {
-            if !workspace.member(name)?.version().pre.is_empty() {
+            if workspace.member(name)?.version().is_prerelease() {
                 on_prerelease = true;
                 break;
             }
@@ -316,7 +313,7 @@ fn rescue_prereleases<'a>(
         {
             continue;
         }
-        if group_rescued.contains(member.name()) || !member.version().pre.is_empty() {
+        if group_rescued.contains(member.name()) || member.version().is_prerelease() {
             max_bumps.insert(member.name(), Some(Bump::Patch));
         }
     }

@@ -1,11 +1,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
-use semver::{Prerelease, Version};
+use nodejs_semver::Version;
 use time::OffsetDateTime;
 
 use crate::{
-    bump::{self, Bump},
+    bump::{self, Bump, Prerelease},
     config::Config,
 };
 
@@ -38,13 +38,12 @@ impl SnapshotVersions {
 
     #[must_use]
     pub fn apply(&self, old_version: &Version, bump: Bump) -> Version {
-        let mut version = if self.use_calculated_version {
+        let base = if self.use_calculated_version {
             bump::next_version(old_version, bump)
         } else {
-            Version::new(0, 0, 0)
+            Version::from((0, 0, 0))
         };
-        version.pre = self.suffix.clone();
-        version
+        bump::with_pre(&base, &self.suffix)
     }
 }
 
@@ -106,7 +105,7 @@ mod tests {
     const DATETIME: &str = "20250822000000";
 
     fn render(tag: Option<&str>, template: Option<&str>) -> Result<String> {
-        render_suffix(tag, template, MILLIS).map(|suffix| suffix.to_string())
+        render_suffix(tag, template, MILLIS).map(|s| s.to_string())
     }
 
     #[test]
