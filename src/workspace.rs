@@ -5,6 +5,7 @@ use std::{
     borrow::Borrow,
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     fmt, fs, io,
+    ops::Index,
     path::{Component, Path, PathBuf},
 };
 
@@ -12,7 +13,7 @@ use anyhow::{Context, Result, bail, ensure};
 use file_id::{FileId, get_file_id};
 use nodejs_semver::Version;
 use saphyr::{LoadableYamlNode, Yaml};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tracing::{debug, warn};
 
 use crate::{bump::parse_version, config::Config};
@@ -322,6 +323,14 @@ impl Workspace {
     }
 }
 
+impl Index<&RelDir> for Workspace {
+    type Output = Package;
+
+    fn index(&self, rel_dir: &RelDir) -> &Package {
+        &self.packages[rel_dir]
+    }
+}
+
 #[derive(Debug)]
 pub struct Package {
     name: Option<String>,
@@ -329,6 +338,7 @@ pub struct Package {
     dir: PathBuf,
     rel_dir: RelDir,
     private: bool,
+    dependencies: Vec<Dependency>,
     versionable: bool,
 }
 
@@ -356,6 +366,11 @@ impl Package {
     #[must_use]
     pub fn private(&self) -> bool {
         self.private
+    }
+
+    #[must_use]
+    pub fn dependencies(&self) -> &[Dependency] {
+        &self.dependencies
     }
 
     #[must_use]
@@ -405,8 +420,42 @@ impl<'a> Versionable<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependencyField {
+    Dependencies,
+    DevDependencies,
+    PeerDependencies,
+    OptionalDependencies,
+}
+
+impl DependencyField {
+    pub const ALL: [DependencyField; 4] = [
+        DependencyField::Dependencies,
+        DependencyField::DevDependencies,
+        DependencyField::PeerDependencies,
+        DependencyField::OptionalDependencies,
+    ];
+
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DependencyField::Dependencies => "dependencies",
+            DependencyField::DevDependencies => "devDependencies",
+            DependencyField::PeerDependencies => "peerDependencies",
+            DependencyField::OptionalDependencies => "optionalDependencies",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dependency {
+    pub field: DependencyField,
+    pub name: String,
+    pub spec: String,
+}
+
 // `/`-separated, `.` for the root itself, and climbing only by leading `..`
-// segments; `rel_dir_between` is its only source.
+// segments; `rel_dir_between` and `join` are its only sources.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RelDir(String);
 
@@ -414,6 +463,33 @@ impl RelDir {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    #[must_use]
+    pub fn join(&self, rel: &str) -> RelDir {
+        let mut parts: Vec<&str> = if self.0 == "." {
+            Vec::new()
+        } else {
+            self.0.split('/').collect()
+        };
+        for seg in rel.split('/') {
+            match seg {
+                "" | "." => {}
+                ".." => {
+                    if parts.last().is_none_or(|last| *last == "..") {
+                        parts.push("..");
+                    } else {
+                        parts.pop();
+                    }
+                }
+                _ => parts.push(seg),
+            }
+        }
+        RelDir(if parts.is_empty() {
+            ".".to_owned()
+        } else {
+            parts.join("/")
+        })
     }
 }
 
@@ -716,8 +792,42 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: RelDir, path: &Path) -> Option<
             .get("private")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        dependencies: qualify_dependencies(object, path),
         versionable: false,
     })
+}
+
+fn qualify_dependencies(object: &Map<String, Value>, path: &Path) -> Vec<Dependency> {
+    let mut dependencies = Vec::new();
+    for field in DependencyField::ALL {
+        let Some(value) = object.get(field.as_str()) else {
+            continue;
+        };
+        let Some(entries) = value.as_object() else {
+            warn!(
+                "{}: \"{}\" is not an object: ignored",
+                path.display(),
+                field.as_str()
+            );
+            continue;
+        };
+        for (name, spec) in entries {
+            let Some(spec) = spec.as_str() else {
+                warn!(
+                    "{}: {name:?} in \"{}\" is not a string: ignored",
+                    path.display(),
+                    field.as_str()
+                );
+                continue;
+            };
+            dependencies.push(Dependency {
+                field,
+                name: name.clone(),
+                spec: spec.to_owned(),
+            });
+        }
+    }
+    dependencies
 }
 
 fn qualify_name(value: Option<&Value>, path: &Path) -> Option<String> {

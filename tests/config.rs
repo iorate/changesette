@@ -2,7 +2,10 @@ mod util;
 
 use std::fs;
 
-use changesette::config::{self, Config, ResolvedGroups};
+use changesette::{
+    bump::Bump,
+    config::{self, Config, ResolvedGroups, UpdateInternalDependencies},
+};
 use util::capture_output;
 
 fn load_ok(text: &str) -> Config {
@@ -22,7 +25,13 @@ fn assert_default(config: &Config) {
     assert!(!config.private_packages_version);
     assert!(!config.snapshot_use_calculated_version);
     assert!(config.snapshot_prerelease_template.is_none());
+    assert_eq!(
+        config.update_internal_dependencies,
+        UpdateInternalDependencies::Patch
+    );
+    assert!(!config.bump_versions_with_workspace_protocol_only);
     assert!(config.packages.is_none());
+    assert!(!config.ignore_internal_dependencies);
 }
 
 fn resolve(text: &str, names: &[&str]) -> Vec<String> {
@@ -188,6 +197,61 @@ fn resolves_snapshot_settings() {
 }
 
 #[test]
+fn resolves_update_internal_dependencies() {
+    for (text, expected) in [
+        (
+            "{ \"updateInternalDependencies\": \"patch\" }\n",
+            UpdateInternalDependencies::Patch,
+        ),
+        (
+            "{ \"updateInternalDependencies\": \"minor\" }\n",
+            UpdateInternalDependencies::Minor,
+        ),
+    ] {
+        assert_eq!(
+            load_ok(text).update_internal_dependencies,
+            expected,
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn update_internal_dependencies_allows_bumps_at_or_above_its_level() {
+    for bump in [Bump::Patch, Bump::Minor, Bump::Major] {
+        assert!(UpdateInternalDependencies::Patch.allows(bump), "{bump:?}");
+    }
+    assert!(!UpdateInternalDependencies::Minor.allows(Bump::Patch));
+    assert!(UpdateInternalDependencies::Minor.allows(Bump::Minor));
+    assert!(UpdateInternalDependencies::Minor.allows(Bump::Major));
+}
+
+#[test]
+fn resolves_bump_versions_with_workspace_protocol_only() {
+    assert!(
+        load_ok("{ \"bumpVersionsWithWorkspaceProtocolOnly\": true }\n")
+            .bump_versions_with_workspace_protocol_only
+    );
+    assert!(
+        !load_ok("{ \"bumpVersionsWithWorkspaceProtocolOnly\": false }\n")
+            .bump_versions_with_workspace_protocol_only
+    );
+}
+
+#[test]
+fn resolves_changesette_ignore_internal_dependencies() {
+    assert!(
+        load_ok("{ \"changesette\": { \"ignoreInternalDependencies\": true } }\n")
+            .ignore_internal_dependencies
+    );
+    assert!(
+        !load_ok("{ \"changesette\": { \"ignoreInternalDependencies\": false } }\n")
+            .ignore_internal_dependencies
+    );
+    assert!(!load_ok("{ \"changesette\": {} }\n").ignore_internal_dependencies);
+}
+
+#[test]
 fn resolves_changesette_packages() {
     let config =
         load_ok("{ \"changesette\": { \"packages\": [\"packages/a\", \"packages/b\", \".\"] } }\n");
@@ -255,7 +319,23 @@ fn rejects_wrong_types() {
             "{ \"snapshot\": { \"prereleaseTemplate\": \"\" } }\n",
             "\"prereleaseTemplate\"",
         ),
+        (
+            "{ \"updateInternalDependencies\": \"major\" }\n",
+            "\"updateInternalDependencies\"",
+        ),
+        (
+            "{ \"updateInternalDependencies\": true }\n",
+            "\"updateInternalDependencies\"",
+        ),
+        (
+            "{ \"bumpVersionsWithWorkspaceProtocolOnly\": \"yes\" }\n",
+            "\"bumpVersionsWithWorkspaceProtocolOnly\"",
+        ),
         ("{ \"changesette\": [] }\n", "\"changesette\""),
+        (
+            "{ \"changesette\": { \"ignoreInternalDependencies\": \"no\" } }\n",
+            "\"ignoreInternalDependencies\"",
+        ),
         (
             "{ \"changesette\": { \"packages\": null } }\n",
             "\"packages\"",

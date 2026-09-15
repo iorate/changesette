@@ -5,7 +5,9 @@ use std::{fs, io, path::Path};
 use anyhow::Result;
 use changesette::{
     config::Config,
-    workspace::{Package, Root, Workspace, resolve_root},
+    workspace::{
+        Dependency, DependencyField, Package, Root, Workspace, rel_dir_between, resolve_root,
+    },
 };
 use nodejs_semver::Version;
 use tempfile::TempDir;
@@ -464,6 +466,79 @@ fn a_nameless_root_is_a_package() {
         names_and_rel_dirs(&discover_ok(dir.path())),
         [("<unnamed>", "."), ("pkg-a", "packages/a")]
     );
+}
+
+#[test]
+fn qualification_reads_the_four_dependency_fields() {
+    let dir = pnpm_dir(&["packages/*"]);
+    write_file(
+        dir.path(),
+        "packages/a/package.json",
+        "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"dependencies\": { \"pkg-b\": \"^1.0.0\", \"left-pad\": \"1.3.0\" }, \"devDependencies\": { \"pkg-c\": \"workspace:*\" }, \"peerDependencies\": { \"pkg-b\": \">=1\" }, \"optionalDependencies\": { \"pkg-d\": \"\" } }\n",
+    );
+    let (workspace, output) = discover_captured(dir.path());
+    let dependency = |field, name: &str, spec: &str| Dependency {
+        field,
+        name: name.to_owned(),
+        spec: spec.to_owned(),
+    };
+    assert_eq!(
+        workspace.package("pkg-a").unwrap().dependencies(),
+        [
+            dependency(DependencyField::Dependencies, "left-pad", "1.3.0"),
+            dependency(DependencyField::Dependencies, "pkg-b", "^1.0.0"),
+            dependency(DependencyField::DevDependencies, "pkg-c", "workspace:*"),
+            dependency(DependencyField::PeerDependencies, "pkg-b", ">=1"),
+            dependency(DependencyField::OptionalDependencies, "pkg-d", ""),
+        ]
+    );
+    assert!(warning_lines(&output).is_empty(), "{output}");
+}
+
+#[test]
+fn qualification_warns_on_malformed_dependency_fields() {
+    let dir = pnpm_dir(&["packages/*"]);
+    write_file(
+        dir.path(),
+        "packages/a/package.json",
+        "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\", \"dependencies\": [\"pkg-b\"], \"peerDependencies\": { \"pkg-b\": 1, \"pkg-c\": \"^1.0.0\" } }\n",
+    );
+    let (workspace, output) = discover_captured(dir.path());
+    assert_eq!(
+        workspace.package("pkg-a").unwrap().dependencies(),
+        [Dependency {
+            field: DependencyField::PeerDependencies,
+            name: "pkg-c".to_owned(),
+            spec: "^1.0.0".to_owned(),
+        }]
+    );
+    let manifest = manifest_path(dir.path(), "packages/a");
+    assert_eq!(
+        warning_lines(&output),
+        [
+            format!("warning: {manifest}: \"dependencies\" is not an object: ignored"),
+            format!(
+                "warning: {manifest}: \"pkg-b\" in \"peerDependencies\" is not a string: ignored"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn rel_dir_join_resolves_lexically() {
+    let rel_dir = |rel: &str| rel_dir_between(Path::new("/root"), &Path::new("/root").join(rel));
+    for (base, rel, expected) in [
+        ("packages/a", "../b", "packages/b"),
+        (".", "packages/a", "packages/a"),
+        ("packages/a", "../..", "."),
+        ("packages/a", "../../..", ".."),
+        (".", "./x/./y", "x/y"),
+        ("packages/a", "..//b/", "packages/b"),
+    ] {
+        assert_eq!(rel_dir(base).join(rel).as_str(), expected, "{base} + {rel}");
+    }
+    let above = rel_dir_between(Path::new("/root/sub"), Path::new("/root/x"));
+    assert_eq!(above.join("../../y").as_str(), "../../y");
 }
 
 // Root detection
