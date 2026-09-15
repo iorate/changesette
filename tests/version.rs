@@ -45,6 +45,12 @@ fn private_pkg(name: &str, version: &str) -> String {
     format!("{{\n  \"name\": \"{name}\",\n  \"version\": \"{version}\",\n  \"private\": true\n}}\n")
 }
 
+fn dependent_pkg(name: &str, version: &str, field: &str, dependency: &str, spec: &str) -> String {
+    format!(
+        "{{\n  \"name\": \"{name}\",\n  \"version\": \"{version}\",\n  \"{field}\": {{\n    \"{dependency}\": \"{spec}\"\n  }}\n}}\n"
+    )
+}
+
 fn owned(names: &[&str]) -> Vec<String> {
     names.iter().map(|name| (*name).to_owned()).collect()
 }
@@ -1527,4 +1533,332 @@ fn release_plan_reports_snapshot_versions() {
         new_version.starts_with("0.0.0-canary-"),
         "unexpected version: {new_version}"
     );
+}
+
+#[test]
+fn dependents_are_bumped_when_the_next_version_leaves_the_range() {
+    let bumps = [
+        ("none", "3.1.4"),
+        ("patch", "3.1.5"),
+        ("minor", "3.2.0"),
+        ("major", "4.0.0"),
+    ];
+    let specs: [(&str, &[&str]); 8] = [
+        ("^3.1.4", &["major"]),
+        ("~3.1.4", &["minor", "major"]),
+        ("3.1.4", &["patch", "minor", "major"]),
+        ("*", &[]),
+        ("workspace:^", &["major"]),
+        ("workspace:~", &["minor", "major"]),
+        ("workspace:*", &["patch", "minor", "major"]),
+        ("workspace:^3.1.4", &["major"]),
+    ];
+    for field in [
+        "dependencies",
+        "peerDependencies",
+        "optionalDependencies",
+        "devDependencies",
+    ] {
+        for (spec, bumping) in specs {
+            for (bump, next) in bumps {
+                let dir = workspace_dir();
+                write_file(
+                    dir.path(),
+                    "packages/b/package.json",
+                    &dependent_pkg("pkg-b", "2.0.0", field, "pkg-a", spec),
+                );
+                write_changeset(dir.path(), FILE_A, &[("pkg-a", bump)], "Change");
+                let mut expected = vec![format!("pkg-a {bump} 3.1.4 -> {next}")];
+                if field != "devDependencies" && bumping.contains(&bump) {
+                    expected.push("pkg-b patch 2.0.0 -> 2.0.1".to_owned());
+                }
+                assert_eq!(
+                    releases(&plan(dir.path())),
+                    expected,
+                    "{field} {spec} {bump}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn dependents_are_bumped_transitively_with_a_heading_only_changelog() {
+    let dir = workspace_dir();
+    let b_manifest = |version| dependent_pkg("pkg-b", version, "dependencies", "pkg-a", "^3.1.4");
+    let d_manifest = dependent_pkg("pkg-d", "1.0.0", "dependencies", "pkg-c", "^1.0.0");
+    write_file(dir.path(), "packages/b/package.json", &b_manifest("2.0.0"));
+    write_file(
+        dir.path(),
+        "packages/c/package.json",
+        &dependent_pkg("pkg-c", "1.0.0", "dependencies", "pkg-b", "workspace:*"),
+    );
+    write_file(dir.path(), "packages/d/package.json", &d_manifest);
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "major")], "Break pkg-a");
+    let output = capture_output(|| {
+        let planned = plan(dir.path());
+        assert_eq!(
+            releases(&planned),
+            [
+                "pkg-a major 3.1.4 -> 4.0.0",
+                "pkg-b patch 2.0.0 -> 2.0.1",
+                "pkg-c patch 1.0.0 -> 1.0.1"
+            ]
+        );
+    });
+    let lines: Vec<&str> = output
+        .lines()
+        .filter(|line| line.contains("as a dependent"))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "debug: pkg-b@2.0.0 (packages/b): bumped as a dependent of `pkg-a` (>=3.1.4 <4.0.0-0 does not include 4.0.0)",
+            "debug: pkg-c@1.0.0 (packages/c): bumped as a dependent of `pkg-b` (2.0.0 does not include 2.0.1)",
+        ],
+        "{output}"
+    );
+
+    run_ok(dir.path());
+    assert_eq!(
+        read(dir.path(), "packages/b/package.json"),
+        b_manifest("2.0.1")
+    );
+    assert_eq!(
+        read(dir.path(), "packages/b/CHANGELOG.md"),
+        "# pkg-b\n\n## 2.0.1\n"
+    );
+    assert_eq!(read(dir.path(), "packages/d/package.json"), d_manifest);
+    assert!(!exists(dir.path(), "packages/d/CHANGELOG.md"));
+}
+
+#[test]
+fn a_fixed_partner_bumps_its_dependents() {
+    let dir = two_package_workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/c/package.json",
+        &dependent_pkg("pkg-c", "1.0.0", "dependencies", "pkg-b", "^2.0.0"),
+    );
+    write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    assert_eq!(
+        releases(&plan(dir.path())),
+        [
+            "pkg-a patch 3.1.4 -> 3.1.5",
+            "pkg-b patch 3.1.4 -> 3.1.5",
+            "pkg-c patch 1.0.0 -> 1.0.1"
+        ]
+    );
+}
+
+#[test]
+fn a_dependent_raised_by_its_linked_group_bumps_its_own_dependents() {
+    let dir = two_package_workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        &dependent_pkg("pkg-b", "2.0.0", "dependencies", "pkg-x", "1.0.0"),
+    );
+    write_file(
+        dir.path(),
+        "packages/c/package.json",
+        &dependent_pkg("pkg-c", "1.0.0", "dependencies", "pkg-b", "~2.0.0"),
+    );
+    write_file(
+        dir.path(),
+        "packages/x/package.json",
+        &pkg("pkg-x", "1.0.0"),
+    );
+    write_config(dir.path(), "{ \"linked\": [[\"pkg-a\", \"pkg-b\"]] }\n");
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), FILE_B, &[("pkg-x", "patch")], "Fix pkg-x");
+    assert_eq!(
+        releases(&plan(dir.path())),
+        [
+            "pkg-a minor 3.1.4 -> 3.2.0",
+            "pkg-b minor 3.1.4 -> 3.2.0",
+            "pkg-c patch 1.0.0 -> 1.0.1",
+            "pkg-x patch 1.0.0 -> 1.0.1"
+        ]
+    );
+}
+
+#[test]
+fn pre_mode_bumps_the_dependents_whose_range_excludes_the_prerelease() {
+    for spec in ["^3.1.4", "*"] {
+        let dir = workspace_dir();
+        write_file(
+            dir.path(),
+            "packages/b/package.json",
+            &dependent_pkg("pkg-b", "2.0.0", "dependencies", "pkg-a", spec),
+        );
+        write_pre_json(dir.path(), PRE_JSON);
+        write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+        assert_eq!(
+            releases(&plan(dir.path())),
+            [
+                "pkg-a patch 3.1.4 -> 3.1.5-beta.0",
+                "pkg-b patch 2.0.0 -> 2.0.1-beta.0"
+            ],
+            "{spec}"
+        );
+    }
+}
+
+#[test]
+fn after_exit_dependents_join_the_rescued_packages() {
+    let dir = workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/a/package.json",
+        &pkg("pkg-a", "3.1.5-beta.1"),
+    );
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        &dependent_pkg("pkg-b", "2.0.0", "dependencies", "pkg-c", "^1.0.0"),
+    );
+    write_file(
+        dir.path(),
+        "packages/c/package.json",
+        &pkg("pkg-c", "1.0.0"),
+    );
+    write_pre_json(dir.path(), EXITED_PRE_JSON);
+    write_changeset(dir.path(), FILE_A, &[("pkg-c", "major")], "Break pkg-c");
+    assert_eq!(
+        releases(&plan(dir.path())),
+        [
+            "pkg-a patch 3.1.5-beta.1 -> 3.1.5",
+            "pkg-b patch 2.0.0 -> 2.0.1",
+            "pkg-c major 1.0.0 -> 2.0.0"
+        ]
+    );
+}
+
+#[test]
+fn snapshot_judges_dependents_by_the_plain_next_version() {
+    for (spec, bumped) in [("~3.1.4", true), ("^3.1.4", false)] {
+        let dir = workspace_dir();
+        write_file(
+            dir.path(),
+            "packages/b/package.json",
+            &dependent_pkg("pkg-b", "2.0.0", "dependencies", "pkg-a", spec),
+        );
+        write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+        let snapshot = Snapshot {
+            tag: Some("canary".to_owned()),
+            template: None,
+        };
+        let planned = plan_with(dir.path(), &[], Some(&snapshot)).unwrap();
+        let names: Vec<&str> = planned
+            .releases
+            .iter()
+            .map(|release| release.name.as_str())
+            .collect();
+        let expected: &[&str] = if bumped {
+            &["pkg-a", "pkg-b"]
+        } else {
+            &["pkg-a"]
+        };
+        assert_eq!(names, expected, "{spec}");
+        for release in &planned.releases {
+            let new_version = release.new_version.to_string();
+            assert!(
+                new_version.starts_with("0.0.0-canary-"),
+                "{spec}: {new_version}"
+            );
+        }
+    }
+}
+
+#[test]
+fn skipped_dependents_are_not_released() {
+    let dir = workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\",\n  \"private\": true,\n  \"dependencies\": {\n    \"pkg-a\": \"3.1.4\"\n  }\n}\n",
+    );
+    write_file(
+        dir.path(),
+        "packages/c/package.json",
+        &dependent_pkg("pkg-c", "1.0.0", "dependencies", "pkg-a", "3.1.4"),
+    );
+    write_file(
+        dir.path(),
+        "packages/d/package.json",
+        "{\n  \"name\": \"pkg-d\",\n  \"dependencies\": {\n    \"pkg-a\": \"3.1.4\"\n  }\n}\n",
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    let planned = plan_with(dir.path(), &["pkg-c"], None).unwrap();
+    assert_eq!(releases(&planned), ["pkg-a patch 3.1.4 -> 3.1.5"]);
+}
+
+#[test]
+fn ignore_internal_dependencies_leaves_the_dependents_alone() {
+    let dir = workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        &dependent_pkg("pkg-b", "2.0.0", "dependencies", "pkg-a", "3.1.4"),
+    );
+    write_config(
+        dir.path(),
+        "{ \"changesette\": { \"ignoreInternalDependencies\": true } }\n",
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    assert_eq!(releases(&plan(dir.path())), ["pkg-a patch 3.1.4 -> 3.1.5"]);
+}
+
+#[test]
+fn workspace_protocol_only_bumps_only_the_workspace_dependents() {
+    let dir = workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        &dependent_pkg("pkg-b", "2.0.0", "dependencies", "pkg-a", "3.1.4"),
+    );
+    write_file(
+        dir.path(),
+        "packages/c/package.json",
+        &dependent_pkg("pkg-c", "1.0.0", "dependencies", "pkg-a", "workspace:*"),
+    );
+    write_config(
+        dir.path(),
+        "{ \"bumpVersionsWithWorkspaceProtocolOnly\": true }\n",
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    assert_eq!(
+        releases(&plan(dir.path())),
+        ["pkg-a patch 3.1.4 -> 3.1.5", "pkg-c patch 1.0.0 -> 1.0.1"]
+    );
+}
+
+#[test]
+fn release_plan_reports_a_dependent_release() {
+    let dir = workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        &dependent_pkg("pkg-b", "2.0.0", "dependencies", "pkg-a", "3.1.4"),
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    assert_eq!(
+        plan_json(&plan(dir.path()))["releases"][1],
+        json!({
+            "name": "pkg-b",
+            "type": "patch",
+            "oldVersion": "2.0.0",
+            "newVersion": "2.0.1",
+            "changesets": [],
+            "changelogEntry": ""
+        })
+    );
+
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "none")], "Note pkg-b");
+    let release = &plan_json(&plan(dir.path()))["releases"][1];
+    assert_eq!(release["type"], "patch");
+    assert_eq!(release["changesets"], json!([ID_B]));
+    assert_eq!(release["changelogEntry"], "");
 }
