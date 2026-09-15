@@ -13,10 +13,11 @@ use crate::{
     changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
     config::{Config, ResolvedGroups},
+    dependency::{self, DependentsGraph, effective_range},
     package_json::PackageJson,
     pre::{PreJson, PreMode},
     snapshot::{Snapshot, SnapshotVersions},
-    workspace::{Package, Versionable, Workspace},
+    workspace::{DependencyField, Package, RelDir, Versionable, Workspace},
 };
 
 pub struct PlannedVersion {
@@ -29,6 +30,7 @@ pub struct PlannedVersion {
     pub changes: Vec<LoadedChange>,
     pub consumed_changes: Vec<LoadedChange>,
     pub releases: Vec<PlannedRelease>,
+    pub graph: DependentsGraph,
 }
 
 fn pre_state(pre: Option<&PreJson>) -> Option<&PreJson> {
@@ -66,17 +68,8 @@ pub fn plan_version(
 
     let pre = PreJson::load(&changeset_dir)?;
     let in_pre = pre_state(pre.as_ref());
-    let mut pre_tag = None;
-    if let Some(pre) = in_pre {
-        if snapshot.is_some() {
-            bail!(
-                "snapshot releases are not allowed in pre mode; run `changesette pre exit` first"
-            );
-        }
-        pre_tag = Some(
-            Prerelease::new(pre.tag())
-                .with_context(|| format!("invalid pre tag {:?}", pre.tag()))?,
-        );
+    if in_pre.is_some() && snapshot.is_some() {
+        bail!("snapshot releases are not allowed in pre mode; run `changesette pre exit` first");
     }
     let snapshot_versions = snapshot
         .map(|snapshot| SnapshotVersions::resolve(snapshot, config))
@@ -89,14 +82,22 @@ pub fn plan_version(
         changes.retain(|change| !change.in_pre);
     }
     let consumed_changes = filter_changes(&workspace, &changeset_dir, &changes)?;
+    let graph = if config.ignore_internal_dependencies {
+        DependentsGraph::default()
+    } else {
+        DependentsGraph::build(dependency::internal_dependencies(
+            &workspace,
+            config.bump_versions_with_workspace_protocol_only,
+        )?)
+    };
     let releases = plan_releases(
         &workspace,
         &config_path,
         &consumed_changes,
         pre.as_ref(),
-        pre_tag.as_ref(),
         snapshot_versions.as_ref(),
         &groups,
+        &graph,
     )?;
 
     Ok(PlannedVersion {
@@ -106,6 +107,7 @@ pub fn plan_version(
         changes,
         consumed_changes,
         releases,
+        graph,
     })
 }
 
@@ -179,35 +181,58 @@ fn plan_releases(
     config_path: &Path,
     changes: &[LoadedChange],
     pre: Option<&PreJson>,
-    pre_tag: Option<&Prerelease>,
     snapshot: Option<&SnapshotVersions>,
     groups: &ResolvedGroups,
+    graph: &DependentsGraph,
 ) -> Result<Vec<PlannedRelease>> {
-    let mut max_bumps = changeset::max_bumps(changes);
+    let pre_tag = pre_state(pre)
+        .map(|pre| {
+            Prerelease::new(pre.tag()).with_context(|| format!("invalid pre tag {:?}", pre.tag()))
+        })
+        .transpose()?;
+    let pre_counters = match &pre_tag {
+        Some(tag) => group_pre_counters(workspace, groups, tag)
+            .with_context(|| config_path.display().to_string())?,
+        None => BTreeMap::new(),
+    };
+
+    let mut drafts = initial_drafts(workspace, changes)?;
+    // A package the fixed pass adds can leave a dependent's range, and that
+    // dependent can raise its linked group, so the passes repeat until such
+    // chains die out.
+    loop {
+        let dependents = add_dependents(
+            workspace,
+            graph,
+            pre_tag.as_ref(),
+            &pre_counters,
+            &mut drafts,
+        );
+        let fixed = apply_fixed(workspace, &groups.fixed, &mut drafts)
+            .with_context(|| config_path.display().to_string())?;
+        let linked = apply_linked(workspace, &groups.linked, &mut drafts)
+            .with_context(|| config_path.display().to_string())?;
+        if !(dependents || fixed || linked) {
+            break;
+        }
+    }
     // The group passes run before the pre exit rescue so that a rescued
     // package does not pull its group along.
-    let overrides = apply_groups(workspace, groups, pre_tag, &mut max_bumps)
-        .with_context(|| config_path.display().to_string())?;
     if matches!(pre, Some(pre) if pre.mode() == PreMode::Exit) {
-        rescue_prereleases(workspace, groups, &mut max_bumps)
+        rescue_prereleases(workspace, groups, &mut drafts)
             .with_context(|| config_path.display().to_string())?;
     }
 
     let mut releases = Vec::new();
-    for (name, max_bump) in max_bumps {
-        let versionable = resolve_versionable(workspace, name)?;
-        let old_version = match overrides.old_versions.get(name) {
-            Some(version) => version.clone(),
-            None => versionable.version().clone(),
-        };
+    for (rel_dir, draft) in &drafts {
+        let name = draft.versionable.name();
         let changeset_ids = changes
             .iter()
             .filter(|change| change.releases.iter().any(|(n, _)| n == name))
             .map(LoadedChange::id)
             .collect();
-
-        let (new_version, changelog_entry) = match max_bump {
-            Some(max_bump) => {
+        let (new_version, changelog_entry) = match draft.bump {
+            Some(bump) => {
                 let summaries: Vec<(Bump, &str)> = changes
                     .iter()
                     .filter_map(|change| {
@@ -219,39 +244,82 @@ fn plan_releases(
                             .map(|bump| (bump, change.summary.as_str()))
                     })
                     .collect();
-                let new_version = match snapshot {
-                    Some(snapshot) => snapshot.apply(&old_version, max_bump),
-                    None => match pre_tag {
-                        Some(tag) => match overrides.pre_counters.get(name) {
-                            Some(&counter) => {
-                                bump::next_pre_version_with(&old_version, max_bump, tag, counter)
-                            }
-                            None => bump::next_pre_version(&old_version, max_bump, tag),
-                        },
-                        None => bump::next_version(&old_version, max_bump),
-                    },
-                };
+                let new_version = next_version_of(
+                    &draft.old_version,
+                    bump,
+                    pre_tag.as_ref(),
+                    pre_counters.get(rel_dir).copied(),
+                    snapshot,
+                );
                 (new_version, Some(render_entry(&summaries)))
             }
-            None => (old_version.clone(), None),
+            None => (draft.old_version.clone(), None),
         };
         releases.push(PlannedRelease {
             name: name.to_owned(),
-            bump: max_bump,
-            old_version,
+            bump: draft.bump,
+            old_version: draft.old_version.clone(),
             new_version,
             changeset_ids,
             changelog_entry,
         });
     }
+    releases.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(releases)
 }
 
-fn resolve_versionable<'a>(workspace: &'a Workspace, name: &str) -> Result<Versionable<'a>> {
-    workspace
-        .package(name)?
-        .versionable()
-        .with_context(|| format!("package `{name}` is not versionable"))
+struct Draft<'a> {
+    versionable: Versionable<'a>,
+    bump: Option<Bump>,
+    // Fixed and linked groups plan every member against the group's highest
+    // version rather than its own.
+    old_version: Version,
+}
+
+impl Draft<'_> {
+    fn new(versionable: Versionable<'_>, bump: Option<Bump>) -> Draft<'_> {
+        Draft {
+            versionable,
+            bump,
+            old_version: versionable.version().clone(),
+        }
+    }
+}
+
+type Drafts<'a> = BTreeMap<RelDir, Draft<'a>>;
+
+fn initial_drafts<'a>(workspace: &'a Workspace, changes: &[LoadedChange]) -> Result<Drafts<'a>> {
+    let mut drafts = BTreeMap::new();
+    for (name, bump) in changeset::max_bumps(changes) {
+        let versionable = workspace
+            .package(name)?
+            .versionable()
+            .with_context(|| format!("package `{name}` is not versionable"))?;
+        drafts.insert(
+            versionable.package().rel_dir().clone(),
+            Draft::new(versionable, bump),
+        );
+    }
+    Ok(drafts)
+}
+
+fn next_version_of(
+    old_version: &Version,
+    bump: Bump,
+    pre_tag: Option<&Prerelease>,
+    pre_counter: Option<u64>,
+    snapshot: Option<&SnapshotVersions>,
+) -> Version {
+    match snapshot {
+        Some(snapshot) => snapshot.apply(old_version, bump),
+        None => match pre_tag {
+            Some(tag) => match pre_counter {
+                Some(counter) => bump::next_pre_version_with(old_version, bump, tag, counter),
+                None => bump::next_pre_version(old_version, bump, tag),
+            },
+            None => bump::next_version(old_version, bump),
+        },
+    }
 }
 
 // The skipped packages of a group count too: their versions bound the group
@@ -263,22 +331,77 @@ fn group_version<'a>(workspace: &'a Workspace, kind: &str, name: &str) -> Result
         .with_context(|| format!("package `{name}` in a {kind:?} group has no version"))
 }
 
-struct GroupOverrides {
-    old_versions: BTreeMap<String, Version>,
-    pre_counters: BTreeMap<String, u64>,
+// The judgment uses the plain next version even for a snapshot release, so a
+// dependent joins the release on the same condition either way.
+fn add_dependents<'a>(
+    workspace: &'a Workspace,
+    graph: &DependentsGraph,
+    pre_tag: Option<&Prerelease>,
+    pre_counters: &BTreeMap<RelDir, u64>,
+    drafts: &mut Drafts<'a>,
+) -> bool {
+    let mut changed = false;
+    let nexts: Vec<(RelDir, &str, Version, Version)> = drafts
+        .iter()
+        .filter_map(|(rel_dir, draft)| {
+            let bump = draft.bump?;
+            let next = next_version_of(
+                &draft.old_version,
+                bump,
+                pre_tag,
+                pre_counters.get(rel_dir).copied(),
+                None,
+            );
+            Some((
+                rel_dir.clone(),
+                draft.versionable.name(),
+                draft.old_version.clone(),
+                next,
+            ))
+        })
+        .collect();
+    for (rel_dir, name, old_version, next) in nexts {
+        for edge in graph.dependents(&rel_dir) {
+            if edge.field == DependencyField::DevDependencies {
+                continue;
+            }
+            let Some(dependent) = workspace[&edge.dependent].versionable() else {
+                continue;
+            };
+            if drafts
+                .get(&edge.dependent)
+                .is_some_and(|draft| draft.bump.is_some())
+            {
+                continue;
+            }
+            let Some(range) = effective_range(&edge.spec, &old_version) else {
+                continue;
+            };
+            if range.satisfies(&next) {
+                continue;
+            }
+            debug!(
+                "{}: bumped as a dependent of `{name}` ({range} does not include {next})",
+                dependent.package()
+            );
+            drafts.insert(
+                edge.dependent.clone(),
+                Draft::new(dependent, Some(Bump::Patch)),
+            );
+            changed = true;
+        }
+    }
+    changed
 }
 
-// One pass per kind reaches the fixed point because config validation keeps
-// the groups disjoint and changesette adds no dependents.
-fn apply_groups<'a>(
+fn apply_fixed<'a>(
     workspace: &'a Workspace,
-    groups: &ResolvedGroups,
-    pre_tag: Option<&Prerelease>,
-    max_bumps: &mut BTreeMap<&'a str, Option<Bump>>,
-) -> Result<GroupOverrides> {
-    let mut old_versions = BTreeMap::new();
-    for group in &groups.fixed {
-        let Some(max_bump) = group_max_bump(group, max_bumps) else {
+    groups: &[Vec<String>],
+    drafts: &mut Drafts<'a>,
+) -> Result<bool> {
+    let mut changed = false;
+    for group in groups {
+        let Some(max_bump) = group_max_bump(workspace, group, drafts)? else {
             continue;
         };
         let highest = group_highest_version(workspace, "fixed", group)?;
@@ -286,69 +409,80 @@ fn apply_groups<'a>(
             let Some(versionable) = workspace.package(name)?.versionable() else {
                 continue;
             };
-            let previous = max_bumps.insert(versionable.name(), Some(max_bump));
-            if previous.flatten() != Some(max_bump) {
+            let rel_dir = versionable.package().rel_dir();
+            let previous = drafts.get(rel_dir);
+            if previous
+                .is_some_and(|draft| draft.bump == Some(max_bump) && draft.old_version == highest)
+            {
+                continue;
+            }
+            if previous.and_then(|draft| draft.bump) != Some(max_bump) {
                 debug!(
                     "`{name}`: the \"fixed\" group raises the bump to {} (planning against {highest})",
                     max_bump.as_str()
                 );
             }
-            old_versions.insert(name.clone(), highest.clone());
+            drafts.insert(
+                rel_dir.clone(),
+                Draft {
+                    versionable,
+                    bump: Some(max_bump),
+                    old_version: highest.clone(),
+                },
+            );
+            changed = true;
         }
     }
-    for group in &groups.linked {
-        let Some(max_bump) = group_max_bump(group, max_bumps) else {
+    Ok(changed)
+}
+
+fn apply_linked(
+    workspace: &Workspace,
+    groups: &[Vec<String>],
+    drafts: &mut Drafts<'_>,
+) -> Result<bool> {
+    let mut changed = false;
+    for group in groups {
+        let Some(max_bump) = group_max_bump(workspace, group, drafts)? else {
             continue;
         };
         let highest = group_highest_version(workspace, "linked", group)?;
         for name in group {
-            if let Some(entry) = max_bumps.get_mut(name.as_str())
-                && entry.is_some()
+            let Some(draft) = drafts.get_mut(workspace.package(name)?.rel_dir()) else {
+                continue;
+            };
+            if draft.bump.is_none()
+                || (draft.bump == Some(max_bump) && draft.old_version == highest)
             {
-                if *entry != Some(max_bump) {
-                    debug!(
-                        "`{name}`: the \"linked\" group raises the bump to {} (planning against {highest})",
-                        max_bump.as_str()
-                    );
-                }
-                *entry = Some(max_bump);
-                old_versions.insert(name.clone(), highest.clone());
+                continue;
             }
+            if draft.bump != Some(max_bump) {
+                debug!(
+                    "`{name}`: the \"linked\" group raises the bump to {} (planning against {highest})",
+                    max_bump.as_str()
+                );
+            }
+            draft.bump = Some(max_bump);
+            draft.old_version = highest.clone();
+            changed = true;
         }
     }
-
-    let mut pre_counters = BTreeMap::new();
-    if let Some(tag) = pre_tag {
-        // The old_version override alone would miss a package whose version
-        // is low but whose counter is high, so the counter is aligned
-        // separately.
-        for (kind, groups) in [("fixed", &groups.fixed), ("linked", &groups.linked)] {
-            for group in groups {
-                let mut counter = 0;
-                for name in group {
-                    counter = counter.max(bump::pre_counter(
-                        group_version(workspace, kind, name)?,
-                        tag,
-                    ));
-                }
-                for name in group {
-                    pre_counters.insert(name.clone(), counter);
-                }
-            }
-        }
-    }
-
-    Ok(GroupOverrides {
-        old_versions,
-        pre_counters,
-    })
+    Ok(changed)
 }
 
-fn group_max_bump(group: &[String], max_bumps: &BTreeMap<&str, Option<Bump>>) -> Option<Bump> {
-    group
-        .iter()
-        .filter_map(|name| max_bumps.get(name.as_str()).copied().flatten())
-        .max()
+fn group_max_bump(
+    workspace: &Workspace,
+    group: &[String],
+    drafts: &Drafts<'_>,
+) -> Result<Option<Bump>> {
+    let mut max_bump = None;
+    for name in group {
+        let bump = drafts
+            .get(workspace.package(name)?.rel_dir())
+            .and_then(|draft| draft.bump);
+        max_bump = max_bump.max(bump);
+    }
+    Ok(max_bump)
 }
 
 fn group_highest_version(workspace: &Workspace, kind: &str, group: &[String]) -> Result<Version> {
@@ -364,13 +498,38 @@ fn group_highest_version(workspace: &Workspace, kind: &str, group: &[String]) ->
         .clone())
 }
 
+// The old_version override alone would miss a package whose version is low
+// but whose counter is high, so the counter is aligned separately.
+fn group_pre_counters(
+    workspace: &Workspace,
+    groups: &ResolvedGroups,
+    tag: &Prerelease,
+) -> Result<BTreeMap<RelDir, u64>> {
+    let mut pre_counters = BTreeMap::new();
+    for (kind, groups) in [("fixed", &groups.fixed), ("linked", &groups.linked)] {
+        for group in groups {
+            let mut counter = 0;
+            for name in group {
+                counter = counter.max(bump::pre_counter(
+                    group_version(workspace, kind, name)?,
+                    tag,
+                ));
+            }
+            for name in group {
+                pre_counters.insert(workspace.package(name)?.rel_dir().clone(), counter);
+            }
+        }
+    }
+    Ok(pre_counters)
+}
+
 // Each rescued package is planned at its own version: `next_version` then
 // merely drops the pre-release, and the empty summary list renders a
 // heading-only changelog section.
 fn rescue_prereleases<'a>(
     workspace: &'a Workspace,
     groups: &ResolvedGroups,
-    max_bumps: &mut BTreeMap<&'a str, Option<Bump>>,
+    drafts: &mut Drafts<'a>,
 ) -> Result<()> {
     let mut group_rescued = BTreeSet::new();
     for (kind, groups) in [("fixed", &groups.fixed), ("linked", &groups.linked)] {
@@ -383,19 +542,22 @@ fn rescue_prereleases<'a>(
                 }
             }
             if on_prerelease {
-                group_rescued.extend(group.iter().map(String::as_str));
+                for name in group {
+                    group_rescued.insert(workspace.package(name)?.rel_dir());
+                }
             }
         }
     }
     for versionable in workspace.versionables() {
-        if max_bumps
-            .get(versionable.name())
-            .is_some_and(Option::is_some)
+        let rel_dir = versionable.package().rel_dir();
+        if drafts
+            .get(rel_dir)
+            .is_some_and(|draft| draft.bump.is_some())
         {
             continue;
         }
-        if group_rescued.contains(versionable.name()) || versionable.version().is_prerelease() {
-            max_bumps.insert(versionable.name(), Some(Bump::Patch));
+        if group_rescued.contains(rel_dir) || versionable.version().is_prerelease() {
+            drafts.insert(rel_dir.clone(), Draft::new(versionable, Some(Bump::Patch)));
         }
     }
     Ok(())
