@@ -10,7 +10,7 @@ pub fn run(
     verbose: bool,
     output_path: Option<&Path>,
 ) -> Result<()> {
-    let planned = plan::plan_version(workspace, config, &[], None)?;
+    let planned = plan::plan_version(workspace, config, None)?;
 
     if let Some(path) = output_path {
         return release_plan::write_file(

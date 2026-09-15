@@ -15,9 +15,7 @@ use tracing::info;
 use crate::{
     bump::Bump,
     changeset,
-    config::Config,
-    skip::SkipSet,
-    workspace::{Member, Workspace},
+    workspace::{Versionable, Workspace},
 };
 
 pub struct AddArgs {
@@ -29,26 +27,16 @@ pub struct AddArgs {
     pub patch: Vec<String>,
 }
 
-pub fn run(workspace: &Workspace, config: &Config, args: AddArgs) -> Result<()> {
+pub fn run(workspace: &Workspace, args: AddArgs) -> Result<()> {
     ensure!(
         !args.open || (io::stdin().is_terminal() && io::stderr().is_terminal()),
         "cannot use --open in non-interactive mode"
     );
 
-    ensure!(
-        !workspace.members().is_empty(),
-        "no packages found in the workspace"
-    );
-
     let changeset_dir = workspace.changeset_dir();
-    let skip = SkipSet::load(workspace, config, &[])?;
-    let packages: Vec<&Member> = workspace
-        .members()
-        .iter()
-        .filter(|member| !skip.contains(member.name()))
-        .collect();
+    let versionables: Vec<Versionable> = workspace.versionables().collect();
     ensure!(
-        !packages.is_empty(),
+        !versionables.is_empty(),
         "no versionable packages found; ensure the packages are not private or ignored and have a version field in package.json"
     );
     fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
@@ -74,9 +62,15 @@ pub fn run(workspace: &Workspace, config: &Config, args: AddArgs) -> Result<()> 
             }
         }
         let releases = if flags_given {
-            releases_from_flags(workspace, &packages, &args.major, &args.minor, &args.patch)?
+            releases_from_flags(
+                workspace,
+                &versionables,
+                &args.major,
+                &args.minor,
+                &args.patch,
+            )?
         } else {
-            let Some(releases) = prompt_releases(&packages)? else {
+            let Some(releases) = prompt_releases(&versionables)? else {
                 info!("Cancelled");
                 return Ok(());
             };
@@ -159,7 +153,7 @@ pub type Releases = Vec<(String, Option<Bump>)>;
 
 pub fn releases_from_flags(
     workspace: &Workspace,
-    packages: &[&Member],
+    versionables: &[Versionable],
     major: &[String],
     minor: &[String],
     patch: &[String],
@@ -174,11 +168,14 @@ pub fn releases_from_flags(
     let mut flags_by_name: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (flag, _, names) in &flags {
         for name in *names {
-            if workspace.member(name).is_err() {
+            if workspace.find_package(name)?.is_none() {
                 errors.push(format!(
-                    "the package `{name}` is passed to `{flag}` but is not a workspace member"
+                    "the package `{name}` is passed to `{flag}` but is not a workspace package"
                 ));
-            } else if !packages.iter().any(|member| member.name() == name) {
+            } else if !versionables
+                .iter()
+                .any(|versionable| versionable.name() == name)
+            {
                 errors.push(format!(
                     "the package `{name}` is passed to `{flag}` but is skipped (private, ignored, or without a version)"
                 ));
@@ -225,13 +222,13 @@ fn cancel_to_none<T>(result: Result<T, InquireError>) -> Result<Option<T>> {
     }
 }
 
-fn prompt_releases(packages: &[&Member]) -> Result<Option<Releases>> {
-    if let [member] = packages {
+fn prompt_releases(versionables: &[Versionable]) -> Result<Option<Releases>> {
+    if let [versionable] = versionables {
         const ITEMS: [Bump; 3] = [Bump::Patch, Bump::Minor, Bump::Major];
         let prompt = format!(
             "What kind of change is this for {}? (current version is {})",
-            member.name(),
-            member.version()
+            versionable.name(),
+            versionable.version()
         );
         let Some(option) =
             cancel_to_none(Select::new(&prompt, ITEMS.map(Bump::as_str).to_vec()).raw_prompt())?
@@ -239,12 +236,12 @@ fn prompt_releases(packages: &[&Member]) -> Result<Option<Releases>> {
             return Ok(None);
         };
         return Ok(Some(vec![(
-            member.name().to_owned(),
+            versionable.name().to_owned(),
             Some(ITEMS[option.index]),
         )]));
     }
 
-    let names: Vec<&str> = packages.iter().map(|member| member.name()).collect();
+    let names: Vec<&str> = versionables.iter().map(Versionable::name).collect();
     let Some(selected) = cancel_to_none(
         MultiSelect::new(
             "Which packages were affected by the changes you made?",
@@ -258,14 +255,14 @@ fn prompt_releases(packages: &[&Member]) -> Result<Option<Releases>> {
     else {
         return Ok(None);
     };
-    let affected: Vec<&Member> = selected
+    let affected: Vec<Versionable> = selected
         .into_iter()
-        .map(|option| packages[option.index])
+        .map(|option| versionables[option.index])
         .collect();
 
     let labels: Vec<String> = affected
         .iter()
-        .map(|member| format!("{}@{}", member.name(), member.version()))
+        .map(|versionable| format!("{}@{}", versionable.name(), versionable.version()))
         .collect();
 
     let mut releases = Vec::new();

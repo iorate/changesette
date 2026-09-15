@@ -5,8 +5,7 @@ use std::{fs, path::Path};
 use changesette::{
     commands::{add::releases_from_flags, pre, set_summary},
     config::Config,
-    skip::SkipSet,
-    workspace::{Member, Workspace},
+    workspace::{Versionable, Workspace},
 };
 use util::{
     dir_snapshot, package_dir, private_two_package_workspace_dir, read_pre_json,
@@ -19,7 +18,7 @@ const EXITED_PRE_JSON: &str = "{\n  \"mode\": \"exit\",\n  \"tag\": \"beta\"\n}\
 type Names<'a> = &'a [&'a str];
 
 fn load(dir: &Path) -> (Workspace, Config) {
-    changesette::load(dir, None).unwrap()
+    changesette::load(dir, None, &[]).unwrap()
 }
 
 fn workspace(dir: &Path) -> Workspace {
@@ -101,13 +100,8 @@ fn set_summary_rewrites_a_pre_changeset() {
     );
 }
 
-fn versionable<'a>(workspace: &'a Workspace, config: &Config) -> Vec<&'a Member> {
-    let skip = SkipSet::load(workspace, config, &[]).unwrap();
-    workspace
-        .members()
-        .iter()
-        .filter(|member| !skip.contains(member.name()))
-        .collect()
+fn versionables(workspace: &Workspace) -> Vec<Versionable<'_>> {
+    workspace.versionables().collect()
 }
 
 fn owned(names: &[&str]) -> Vec<String> {
@@ -117,11 +111,11 @@ fn owned(names: &[&str]) -> Vec<String> {
 #[test]
 fn releases_from_flags_keeps_the_flag_order_and_dedupes_a_repeated_name() {
     let dir = two_package_workspace_dir();
-    let (workspace, config) = load(dir.path());
-    let packages = versionable(&workspace, &config);
+    let workspace = workspace(dir.path());
+    let versionables = versionables(&workspace);
     let releases = releases_from_flags(
         &workspace,
-        &packages,
+        &versionables,
         &owned(&["pkg-b"]),
         &owned(&["pkg-a", "pkg-a"]),
         &[],
@@ -143,9 +137,9 @@ fn releases_from_flags_rejects_unknown_skipped_and_doubly_flagged_packages() {
         "{\n  \"name\": \"pkg-c\",\n  \"version\": \"1.0.0\"\n}\n",
     );
     write_config(dir.path(), "{ \"ignore\": [\"pkg-c\"] }\n");
-    let (workspace, config) = load(dir.path());
-    let packages = versionable(&workspace, &config);
-    let names: Vec<&str> = packages.iter().map(|member| member.name()).collect();
+    let workspace = workspace(dir.path());
+    let versionables = versionables(&workspace);
+    let names: Vec<&str> = versionables.iter().map(Versionable::name).collect();
     assert_eq!(names, ["pkg-a"]);
 
     let cases: [(Names, Names, Names, Names); 5] = [
@@ -153,7 +147,7 @@ fn releases_from_flags_rejects_unknown_skipped_and_doubly_flagged_packages() {
             &[],
             &["nope"],
             &[],
-            &["`nope`", "`--minor`", "not a workspace member"],
+            &["`nope`", "`--minor`", "not a workspace package"],
         ),
         (&[], &[], &["pkg-b"], &["`pkg-b`", "`--patch`", "skipped"]),
         (&["pkg-c"], &[], &[], &["`pkg-c`", "`--major`", "skipped"]),
@@ -167,13 +161,13 @@ fn releases_from_flags_rejects_unknown_skipped_and_doubly_flagged_packages() {
             &["nope"],
             &["nope"],
             &[],
-            &["not a workspace member", "multiple bump type flags"],
+            &["not a workspace package", "multiple bump type flags"],
         ),
     ];
     for (major, minor, patch, needles) in cases {
         let err = releases_from_flags(
             &workspace,
-            &packages,
+            &versionables,
             &owned(major),
             &owned(minor),
             &owned(patch),

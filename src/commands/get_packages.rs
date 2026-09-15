@@ -1,30 +1,27 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::{config::Config, output, skip::SkipSet, workspace::Workspace};
+use crate::{output, workspace::Workspace};
 
 #[derive(Serialize)]
-struct Package<'a> {
-    name: &'a str,
-    version: String,
+struct Row<'a> {
+    name: Option<&'a str>,
+    version: Option<String>,
     private: bool,
     dir: &'a str,
 }
 
-pub fn run(workspace: &Workspace, config: &Config, all: bool) -> Result<()> {
-    let skip = SkipSet::load(workspace, config, &[])?;
-    let mut packages = Vec::new();
-    for member in workspace.members() {
-        if !all && skip.contains(member.name()) {
-            continue;
-        }
-        packages.push(Package {
-            name: member.name(),
-            version: member.version().to_string(),
-            private: member.private(),
-            dir: member.rel_dir(),
-        });
-    }
-    output::print_json(&packages)?;
+pub fn run(workspace: &Workspace, all: bool) -> Result<()> {
+    let rows: Vec<Row> = workspace
+        .packages()
+        .filter(|package| all || package.versionable().is_some())
+        .map(|package| Row {
+            name: package.name(),
+            version: package.version().map(ToString::to_string),
+            private: package.private(),
+            dir: package.rel_dir().as_str(),
+        })
+        .collect();
+    output::print_json(&rows)?;
     Ok(())
 }

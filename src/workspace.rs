@@ -2,32 +2,20 @@ mod pattern;
 mod walk;
 
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
-    fs, io,
+    borrow::Borrow,
+    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
+    fmt, fs, io,
     path::{Component, Path, PathBuf},
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use file_id::{FileId, get_file_id};
 use nodejs_semver::Version;
 use saphyr::{LoadableYamlNode, Yaml};
 use serde_json::Value;
 use tracing::{debug, warn};
 
-#[derive(Debug)]
-pub struct Workspace {
-    root: PathBuf,
-    members: Vec<Member>,
-}
-
-#[derive(Debug)]
-pub struct Member {
-    name: String,
-    dir: PathBuf,
-    rel_dir: String,
-    version: Version,
-    private: bool,
-}
+use crate::config::Config;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageManager {
@@ -49,9 +37,10 @@ impl PackageManager {
 pub struct Root {
     dir: PathBuf,
     pm: Option<PackageManager>,
-    // The packages `find` already enumerated to confirm an npm reroot, kept
-    // so that `load` does not walk the workspace (and warn) a second time.
-    reroot: Option<Vec<Package>>,
+    // The candidates `find` already enumerated to confirm an npm reroot,
+    // kept so that `load` does not walk the workspace (and warn) a second
+    // time.
+    reroot: Option<Vec<Candidate>>,
 }
 
 impl Root {
@@ -113,14 +102,14 @@ impl Root {
                 continue;
             };
             // The candidate prefix is looked for among every matched directory
-            // holding a package.json, so the member qualification (and the
-            // duplicate-name exclusion) must not run first.
-            let packages = collect_packages(dir, &path, &patterns, PackageManager::Npm)?;
-            if lists_dir(&packages, prefix_dir)? {
+            // holding a package.json, so the qualification must not run
+            // first.
+            let candidates = collect_candidates(dir, &path, &patterns, PackageManager::Npm)?;
+            if lists_dir(&candidates, prefix_dir)? {
                 return Ok(Root {
                     dir: dir.to_path_buf(),
                     pm: Some(PackageManager::Npm),
-                    reroot: Some(packages),
+                    reroot: Some(candidates),
                 });
             }
         }
@@ -152,15 +141,21 @@ pub fn resolve_root(dir: &Path) -> Result<PathBuf> {
     Ok(root)
 }
 
+#[derive(Debug)]
+pub struct Workspace {
+    root: PathBuf,
+    packages: BTreeMap<RelDir, Package>,
+}
+
 impl Workspace {
-    pub fn load(root: Root, rel_dirs: Option<&[String]>) -> Result<Workspace> {
+    pub fn load(root: Root, config: &Config, cli_ignore: &[String]) -> Result<Workspace> {
         let Root {
             dir: root,
             pm,
             reroot,
         } = root;
-        if let Some(rel_dirs) = rel_dirs {
-            let mut packages = Vec::new();
+        if let Some(rel_dirs) = &config.packages {
+            let mut candidates = Vec::new();
             for entry in rel_dirs {
                 let (dir, rel_dir) = resolve_rel_dir(&root, entry)?;
                 let manifest = dir.join("package.json");
@@ -170,52 +165,108 @@ impl Workspace {
                         manifest.display()
                     )
                 };
-                packages.push(Package {
+                candidates.push(Candidate {
                     dir,
                     rel_dir,
                     manifest,
                     value,
                 });
             }
-            return Ok(Workspace::new(
+            return Workspace::new(
                 root,
                 "workspace listed by changesette.packages",
-                qualify_packages(packages)?,
-            ));
+                qualify_candidates(candidates)?,
+                config,
+                cli_ignore,
+            );
         }
         let Some(pm) = pm else {
             warn!("{}: no workspace found", root.display());
-            return Ok(Workspace::new(root, "no workspace", Vec::new()));
+            return Workspace::new(root, "no workspace", Vec::new(), config, cli_ignore);
         };
-        let members = if let Some(packages) = reroot {
-            qualify_packages(packages)?
+        let packages = if let Some(candidates) = reroot {
+            qualify_candidates(candidates)?
         } else {
             let (manifest, patterns) = read_patterns(&root, pm)?;
-            collect_members(&root, &manifest, &patterns, pm)?
+            collect_packages(&root, &manifest, &patterns, pm)?
         };
-        Ok(Workspace::new(root, pm.workspace_kind(), members))
+        Workspace::new(root, pm.workspace_kind(), packages, config, cli_ignore)
     }
 
     // The one construction point, so that every loading path reports the
-    // final member list — the shortest answer to "why is my package not
+    // final package list — the shortest answer to "why is my package not
     // found".
-    fn new(root: PathBuf, kind: &'static str, members: Vec<Member>) -> Workspace {
-        if members.is_empty() {
-            debug!("{}: {kind}, no members", root.display());
+    fn new(
+        root: PathBuf,
+        kind: &'static str,
+        packages: Vec<Package>,
+        config: &Config,
+        cli_ignore: &[String],
+    ) -> Result<Workspace> {
+        let mut workspace = Workspace {
+            root,
+            packages: packages
+                .into_iter()
+                .map(|package| (package.rel_dir.clone(), package))
+                .collect(),
+        };
+        if workspace.packages.is_empty() {
+            debug!("{}: {kind}, no packages", workspace.root.display());
         } else {
             // The list is built inside the macro so that the event macro's
             // enabled check makes it free at the default level.
             debug!(
-                "{}: {kind}, members: {}",
-                root.display(),
-                members
-                    .iter()
-                    .map(|member| format!("{} ({})", member.name, member.rel_dir))
+                "{}: {kind}, packages: {}",
+                workspace.root.display(),
+                workspace
+                    .packages
+                    .values()
+                    .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(", ")
             );
         }
-        Workspace { root, members }
+        workspace.mark_versionable(config, cli_ignore)?;
+        Ok(workspace)
+    }
+
+    fn mark_versionable(&mut self, config: &Config, cli_ignore: &[String]) -> Result<()> {
+        let ignore = if config.has_ignore() {
+            ensure!(
+                cli_ignore.is_empty(),
+                "the --ignore option cannot be used while ignore is defined in .changeset/config.json; use only one of them"
+            );
+            config.resolve_ignore(self.packages.values().filter_map(Package::name))
+        } else {
+            for name in cli_ignore {
+                self.package(name).context("invalid `--ignore` value")?;
+            }
+            cli_ignore.to_vec()
+        };
+        let mut seen = BTreeSet::new();
+        let mut duplicates = BTreeSet::new();
+        for name in self.packages.values().filter_map(Package::name) {
+            if !seen.insert(name) {
+                duplicates.insert(name.to_owned());
+            }
+        }
+        for package in self.packages.values_mut() {
+            let reason = match (&package.name, &package.version) {
+                (None, _) => "no name",
+                (_, None) => "no version",
+                (Some(name), _) if duplicates.contains(name) => {
+                    "the name is used by more than one package"
+                }
+                (Some(name), _) if ignore.contains(name) => "ignored",
+                _ if package.private && !config.private_packages_version => "private",
+                _ => {
+                    package.versionable = true;
+                    continue;
+                }
+            };
+            debug!("{package}: skipped: {reason}");
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -228,32 +279,68 @@ impl Workspace {
         self.root.join(".changeset")
     }
 
-    #[must_use]
-    pub fn members(&self) -> &[Member] {
-        &self.members
+    pub fn packages(&self) -> impl Iterator<Item = &Package> {
+        self.packages.values()
     }
 
-    pub fn member(&self, name: &str) -> Result<&Member> {
-        if let Some(member) = self.members.iter().find(|member| member.name == name) {
-            return Ok(member);
+    pub fn versionables(&self) -> impl Iterator<Item = Versionable<'_>> {
+        self.packages.values().filter_map(Package::versionable)
+    }
+
+    pub fn find_package(&self, name: &str) -> Result<Option<&Package>> {
+        let found: Vec<&Package> = self
+            .packages
+            .values()
+            .filter(|package| package.name.as_deref() == Some(name))
+            .collect();
+        match found.as_slice() {
+            [] => Ok(None),
+            [package] => Ok(Some(package)),
+            _ => {
+                let rel_dirs = found
+                    .iter()
+                    .map(|package| package.rel_dir.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                bail!("package `{name}` is ambiguous: used by {rel_dirs}")
+            }
         }
-        if self.members.is_empty() {
-            bail!("package `{name}` not found: the workspace has no members")
+    }
+
+    pub fn package(&self, name: &str) -> Result<&Package> {
+        if let Some(package) = self.find_package(name)? {
+            return Ok(package);
         }
-        let known = self
-            .members
-            .iter()
-            .map(|member| member.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        bail!("package `{name}` not found; known packages: {known}")
+        let known: BTreeSet<&str> = self.packages.values().filter_map(Package::name).collect();
+        if known.is_empty() {
+            bail!("package `{name}` not found: the workspace has no named packages")
+        }
+        bail!(
+            "package `{name}` not found; known packages: {}",
+            known.into_iter().collect::<Vec<_>>().join(", ")
+        )
     }
 }
 
-impl Member {
+#[derive(Debug)]
+pub struct Package {
+    name: Option<String>,
+    version: Option<Version>,
+    dir: PathBuf,
+    rel_dir: RelDir,
+    private: bool,
+    versionable: bool,
+}
+
+impl Package {
     #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    #[must_use]
+    pub fn version(&self) -> Option<&Version> {
+        self.version.as_ref()
     }
 
     #[must_use]
@@ -262,25 +349,90 @@ impl Member {
     }
 
     #[must_use]
-    pub fn rel_dir(&self) -> &str {
+    pub fn rel_dir(&self) -> &RelDir {
         &self.rel_dir
-    }
-
-    #[must_use]
-    pub fn version(&self) -> &Version {
-        &self.version
     }
 
     #[must_use]
     pub fn private(&self) -> bool {
         self.private
     }
+
+    #[must_use]
+    pub fn versionable(&self) -> Option<Versionable<'_>> {
+        if !self.versionable {
+            return None;
+        }
+        Some(Versionable {
+            package: self,
+            name: self.name.as_deref()?,
+            version: self.version.as_ref()?,
+        })
+    }
+}
+
+impl fmt::Display for Package {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name.as_deref().unwrap_or("<unnamed>"))?;
+        if let Some(version) = &self.version {
+            write!(f, "@{version}")?;
+        }
+        write!(f, " ({})", self.rel_dir)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Versionable<'a> {
+    package: &'a Package,
+    name: &'a str,
+    version: &'a Version,
+}
+
+impl<'a> Versionable<'a> {
+    #[must_use]
+    pub fn package(&self) -> &'a Package {
+        self.package
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &'a str {
+        self.name
+    }
+
+    #[must_use]
+    pub fn version(&self) -> &'a Version {
+        self.version
+    }
+}
+
+// `/`-separated, `.` for the root itself, and climbing only by leading `..`
+// segments; `rel_dir_between` is its only source.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RelDir(String);
+
+impl RelDir {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for RelDir {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl Borrow<str> for RelDir {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
 }
 
 // A segment is pushed only when it parses as exactly one `Normal` component:
 // `PathBuf::push` re-parses the segment, and a prefix in it (`C:` or `C:x` on
 // Windows) would silently replace the directory built so far.
-fn resolve_rel_dir(root: &Path, entry: &str) -> Result<(PathBuf, String)> {
+fn resolve_rel_dir(root: &Path, entry: &str) -> Result<(PathBuf, RelDir)> {
     let mut dir = root.to_path_buf();
     for seg in entry.split('/') {
         match seg {
@@ -314,7 +466,7 @@ fn resolve_rel_dir(root: &Path, entry: &str) -> Result<(PathBuf, String)> {
 // Purely lexical: `dir` is built from `root` by `parent()` and `push` only,
 // so the two share every component up to where `dir` climbed away.
 #[must_use]
-pub fn rel_dir_between(root: &Path, dir: &Path) -> String {
+pub fn rel_dir_between(root: &Path, dir: &Path) -> RelDir {
     let mut root_components = root.components().peekable();
     let mut dir_components = dir.components().peekable();
     while let (Some(a), Some(b)) = (root_components.peek(), dir_components.peek()) {
@@ -328,11 +480,11 @@ pub fn rel_dir_between(root: &Path, dir: &Path) -> String {
     parts.extend(
         dir_components.map(|component| component.as_os_str().to_string_lossy().into_owned()),
     );
-    if parts.is_empty() {
+    RelDir(if parts.is_empty() {
         ".".to_owned()
     } else {
         parts.join("/")
-    }
+    })
 }
 
 fn read_patterns(root: &Path, pm: PackageManager) -> Result<(PathBuf, Vec<String>)> {
@@ -382,29 +534,6 @@ fn pnpm_patterns(doc: &Yaml, path: &Path) -> Option<Vec<String>> {
         })
 }
 
-// BOM'd manifests exist in the wild, so the BOM is stripped before parsing.
-fn read_manifest(path: &Path) -> Result<Option<Value>> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err).context(path.display().to_string()),
-    };
-    let value = serde_json::from_str(text.strip_prefix('\u{feff}').unwrap_or(&text))
-        .with_context(|| path.display().to_string())?;
-    Ok(Some(value))
-}
-
-// Unlike `read_manifest`, a BOM is deliberately not accepted.
-pub fn read_json(path: &Path) -> Result<Option<Value>> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err).context(path.display().to_string()),
-    };
-    let value = serde_json::from_str(&text).with_context(|| path.display().to_string())?;
-    Ok(Some(value))
-}
-
 fn workspaces_patterns(value: &Value, path: &Path) -> Option<Vec<String>> {
     let workspaces = value.get("workspaces")?;
     let items = match workspaces {
@@ -429,18 +558,32 @@ fn all_strings<'a>(items: impl IntoIterator<Item = Option<&'a str>>) -> Option<V
         .collect()
 }
 
-fn collect_members(
-    root: &Path,
-    manifest: &Path,
-    patterns: &[String],
-    pm: PackageManager,
-) -> Result<Vec<Member>> {
-    qualify_packages(collect_packages(root, manifest, patterns, pm)?)
+// BOM'd manifests exist in the wild, so the BOM is stripped before parsing.
+fn read_manifest(path: &Path) -> Result<Option<Value>> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).context(path.display().to_string()),
+    };
+    let value = serde_json::from_str(text.strip_prefix('\u{feff}').unwrap_or(&text))
+        .with_context(|| path.display().to_string())?;
+    Ok(Some(value))
 }
 
-pub struct Package {
+// Unlike `read_manifest`, a BOM is deliberately not accepted.
+pub fn read_json(path: &Path) -> Result<Option<Value>> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).context(path.display().to_string()),
+    };
+    let value = serde_json::from_str(&text).with_context(|| path.display().to_string())?;
+    Ok(Some(value))
+}
+
+pub struct Candidate {
     dir: PathBuf,
-    rel_dir: String,
+    rel_dir: RelDir,
     manifest: PathBuf,
     value: Value,
 }
@@ -451,18 +594,27 @@ fn collect_packages(
     patterns: &[String],
     pm: PackageManager,
 ) -> Result<Vec<Package>> {
-    let mut packages = Vec::new();
-    // Yarn expands every member's own `workspaces` field in turn (its
+    qualify_candidates(collect_candidates(root, manifest, patterns, pm)?)
+}
+
+fn collect_candidates(
+    root: &Path,
+    manifest: &Path,
+    patterns: &[String],
+    pm: PackageManager,
+) -> Result<Vec<Candidate>> {
+    let mut candidates = Vec::new();
+    // Yarn expands every package's own `workspaces` field in turn (its
     // worktrees), a declaration's negations reaching only its own directory.
     let mut queue = VecDeque::from([(
         root.to_path_buf(),
         manifest.to_path_buf(),
         patterns.to_vec(),
     )]);
-    // Keyed by the file id, so that a member declaring a symlink to itself is
+    // Keyed by the file id, so that a package declaring a symlink to itself is
     // not requeued forever; the root goes in first, as a `..` pattern lists it
     // again. Only the queue is guarded, leaving the alias spelling to
-    // `exclude_duplicate_names`.
+    // `collapse_aliases`.
     let mut visited = HashSet::new();
     if pm == PackageManager::Yarn {
         visited.insert(dir_id(root)?);
@@ -475,13 +627,13 @@ fn collect_packages(
                 continue;
             };
             if pm == PackageManager::Yarn
-                && rel_dir != "."
+                && rel_dir.as_str() != "."
                 && let Some(declared) = workspaces_patterns(&value, &path)
                 && visited.insert(dir_id(&child_dir)?)
             {
                 queue.push_back((child_dir.clone(), path.clone(), declared));
             }
-            packages.push(Package {
+            candidates.push(Candidate {
                 dir: child_dir,
                 rel_dir,
                 manifest: path,
@@ -489,14 +641,14 @@ fn collect_packages(
             });
         }
     }
-    Ok(packages)
+    Ok(candidates)
 }
 
 fn enumerate(
     root: &Path,
     manifest: &Path,
     patterns: &[String],
-) -> Result<BTreeMap<String, PathBuf>> {
+) -> Result<BTreeMap<RelDir, PathBuf>> {
     let mut positives = Vec::new();
     let mut negations = Vec::new();
     for original in patterns {
@@ -522,139 +674,120 @@ fn enumerate(
 
     let mut candidates = walk::collect(root, &positives, &negations);
     if probe_is_file(&root.join("package.json")) {
-        candidates.insert(".".to_owned(), root.to_path_buf());
+        candidates.insert(rel_dir_between(root, root), root.to_path_buf());
     }
     Ok(candidates)
 }
 
-fn qualify_packages(packages: Vec<Package>) -> Result<Vec<Member>> {
-    let mut members: Vec<Member> = packages
+fn qualify_candidates(candidates: Vec<Candidate>) -> Result<Vec<Package>> {
+    let mut packages: Vec<Package> = candidates
         .into_iter()
-        .filter_map(|package| {
+        .filter_map(|candidate| {
             qualify(
-                &package.value,
-                package.dir,
-                package.rel_dir,
-                &package.manifest,
+                &candidate.value,
+                candidate.dir,
+                candidate.rel_dir,
+                &candidate.manifest,
             )
         })
         .collect();
-    members.sort_by(|a, b| (&a.name, &a.dir).cmp(&(&b.name, &b.dir)));
-    exclude_duplicate_names(&mut members)?;
-    Ok(members)
+    packages.sort_by(|a, b| (&a.name, &a.rel_dir).cmp(&(&b.name, &b.rel_dir)));
+    collapse_aliases(&mut packages)?;
+    Ok(packages)
 }
 
-// A missing `name` or `version` key is only reported at debug level —
-// fixture, private-root, and docs-site manifests omit them legitimately —
-// while a key carrying an invalid value can only be a mistake and warns.
-fn qualify(value: &Value, dir: PathBuf, rel_dir: String, path: &Path) -> Option<Member> {
+// A missing `name` or `version` is only reported at debug level — fixture,
+// private-root, and docs-site manifests omit them legitimately — while a key
+// carrying an invalid value can only be a mistake and warns.
+fn qualify(value: &Value, dir: PathBuf, rel_dir: RelDir, path: &Path) -> Option<Package> {
     let Some(object) = value.as_object() else {
         warn!(
-            "{}: not a workspace member: the manifest is not a JSON object",
+            "{}: not a workspace package: the manifest is not a JSON object",
             path.display()
         );
         return None;
     };
-    let name = match object.get("name") {
-        None => {
-            debug!(
-                "{}: not a workspace member: \"name\" is missing",
-                path.display()
-            );
-            return None;
-        }
-        Some(Value::String(name)) if name.is_empty() => {
-            warn!(
-                "{}: not a workspace member: \"name\" is an empty string",
-                path.display()
-            );
-            return None;
-        }
-        Some(Value::String(name)) => name.clone(),
-        Some(_) => {
-            warn!(
-                "{}: not a workspace member: \"name\" is not a string",
-                path.display()
-            );
-            return None;
-        }
-    };
-    let version = match object.get("version") {
-        None => {
-            debug!(
-                "{}: not a workspace member: \"version\" is missing",
-                path.display()
-            );
-            return None;
-        }
-        Some(Value::String(version)) => {
-            let Ok(version) = version.parse::<Version>() else {
-                warn!(
-                    "{}: not a workspace member: \"version\" {version:?} is not a valid semver",
-                    path.display()
-                );
-                return None;
-            };
-            version
-        }
-        Some(_) => {
-            warn!(
-                "{}: not a workspace member: \"version\" is not a string",
-                path.display()
-            );
-            return None;
-        }
-    };
-    Some(Member {
-        name,
+    Some(Package {
+        name: qualify_name(object.get("name"), path),
+        version: qualify_version(object.get("version"), path),
         dir,
         rel_dir,
-        version,
         private: object
             .get("private")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        versionable: false,
     })
 }
 
-// Qualification runs first, so a disqualified candidate sharing a real
-// package's name does not evict it. Aliases of one physical directory are
-// one package and collapse into the first. Expects `members` sorted by
-// (name, dir) with a stable sort: aliases collapse into the smallest dir, and
-// one directory spelled twice keeps its first listing.
-fn exclude_duplicate_names(members: &mut Vec<Member>) -> Result<()> {
-    let mut iter = std::mem::take(members).into_iter().peekable();
+fn qualify_name(value: Option<&Value>, path: &Path) -> Option<String> {
+    match value {
+        None => {
+            debug!("{}: has no \"name\"", path.display());
+            None
+        }
+        Some(Value::String(name)) if name.is_empty() => {
+            warn!("{}: \"name\" is an empty string: ignored", path.display());
+            None
+        }
+        Some(Value::String(name)) => Some(name.clone()),
+        Some(_) => {
+            warn!("{}: \"name\" is not a string: ignored", path.display());
+            None
+        }
+    }
+}
+
+fn qualify_version(value: Option<&Value>, path: &Path) -> Option<Version> {
+    match value {
+        None => {
+            debug!("{}: has no \"version\"", path.display());
+            None
+        }
+        Some(Value::String(version)) => {
+            let Ok(version) = version.parse::<Version>() else {
+                warn!(
+                    "{}: \"version\" {version:?} is not a valid semver: ignored",
+                    path.display()
+                );
+                return None;
+            };
+            Some(version)
+        }
+        Some(_) => {
+            warn!("{}: \"version\" is not a string: ignored", path.display());
+            None
+        }
+    }
+}
+
+// Aliases of one physical directory are one package and collapse into the
+// first. Expects `packages` sorted by (name, rel_dir) with a stable sort:
+// aliases collapse into the smallest rel_dir, and one directory spelled twice
+// keeps its first listing.
+fn collapse_aliases(packages: &mut Vec<Package>) -> Result<()> {
+    let mut iter = std::mem::take(packages).into_iter().peekable();
     while let Some(first) = iter.next() {
         if iter.peek().is_none_or(|next| next.name != first.name) {
-            members.push(first);
+            packages.push(first);
             continue;
         }
         let mut group = vec![(dir_id(&first.dir)?, first)];
-        while let Some(member) = iter.next_if(|next| next.name == group[0].1.name) {
-            let id = dir_id(&member.dir)?;
+        while let Some(package) = iter.next_if(|next| next.name == group[0].1.name) {
+            let id = dir_id(&package.dir)?;
             if !group.iter().any(|(kept, _)| *kept == id) {
-                group.push((id, member));
+                group.push((id, package));
             }
         }
-        if group.len() > 1 {
-            for (_, member) in group {
-                warn!(
-                    "{}: not a workspace member: the name `{}` is used by more than one package",
-                    member.dir.join("package.json").display(),
-                    member.name
-                );
-            }
-        } else {
-            members.extend(group.into_iter().map(|(_, member)| member));
-        }
+        packages.extend(group.into_iter().map(|(_, package)| package));
     }
     Ok(())
 }
 
-fn lists_dir(packages: &[Package], dir: &Path) -> Result<bool> {
+fn lists_dir(candidates: &[Candidate], dir: &Path) -> Result<bool> {
     let id = dir_id(dir)?;
-    for package in packages {
-        if dir_id(&package.dir)? == id {
+    for candidate in candidates {
+        if dir_id(&candidate.dir)? == id {
             return Ok(true);
         }
     }
