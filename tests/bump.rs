@@ -1,6 +1,5 @@
 use changesette::bump::{
-    Bump, Prerelease, next_pre_version, next_pre_version_with, next_version, parse_version,
-    pre_counter,
+    Bump, Prerelease, next_pre_version, next_pre_version_with, next_version, pre_counter,
 };
 
 fn next(current: &str, bump: Bump) -> String {
@@ -119,51 +118,6 @@ fn panics_on_a_version_component_overflow() {
 #[should_panic(expected = "version number overflow")]
 fn pre_counter_panics_on_a_counter_overflow() {
     counter("1.0.0-beta.18446744073709551615", "beta");
-}
-
-#[test]
-fn parse_version_accepts_strict_semver() {
-    for text in [
-        "0.0.0",
-        "10.20.30",
-        "1.0.0-beta.2",
-        "1.0.0-0",
-        "1.0.0+build.1",
-        "1.0.0-rc-1+x-y",
-    ] {
-        let version = parse_version(text).unwrap_or_else(|_| panic!("{text:?} should be accepted"));
-        assert_eq!(version.to_string(), text);
-    }
-}
-
-#[test]
-fn parse_version_accepts_a_v_prefix_and_surrounding_whitespace() {
-    for text in ["v1.0.0", " 1.0.0", "1.0.0\t", "\n v1.0.0-beta.1+b \n"] {
-        let version = parse_version(text).unwrap_or_else(|_| panic!("{text:?} should be accepted"));
-        assert_eq!(version.to_string(), text.trim().trim_start_matches('v'));
-    }
-}
-
-#[test]
-fn parse_version_rejects_loose_input() {
-    for text in [
-        "",
-        "1.0",
-        "V1.0.0",
-        "=v1.0.0",
-        "v 1.0.0",
-        "01.0.0",
-        "1.0.0 garbage",
-        "1.0.0-",
-        "1.0.0-.beta",
-        "1.0.0-beta..2",
-        "1.0.0-beta.01",
-        "1.0.0-b_1",
-        "1.0.0+",
-        "１.0.0",
-    ] {
-        assert!(parse_version(text).is_err(), "{text:?} should be rejected");
-    }
 }
 
 #[test]

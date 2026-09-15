@@ -103,7 +103,6 @@ enum Command {
         /// The name of the package
         package: String,
         /// The version whose section to print
-        #[arg(value_parser = changesette::bump::parse_version)]
         version: nodejs_semver::Version,
     },
     /// Rewrite a changeset's summary text

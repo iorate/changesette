@@ -16,7 +16,7 @@ use saphyr::{LoadableYamlNode, Yaml};
 use serde_json::{Map, Value};
 use tracing::{debug, warn};
 
-use crate::{bump::parse_version, config::Config};
+use crate::config::Config;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageManager {
@@ -855,7 +855,7 @@ fn qualify_version(value: Option<&Value>, path: &Path) -> Option<Version> {
             None
         }
         Some(Value::String(version)) => {
-            let Ok(version) = parse_version(version) else {
+            let Ok(version) = version.parse::<Version>() else {
                 warn!(
                     "{}: \"version\" {version:?} is not a valid semver: ignored",
                     path.display()
