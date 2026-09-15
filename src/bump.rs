@@ -1,21 +1,6 @@
-use std::{fmt, sync::LazyLock};
+use std::fmt;
 
-use anyhow::{Result, bail};
 use nodejs_semver::Version;
-use regex::Regex;
-
-// `\d` would also match non-ASCII digits, hence the explicit `[0-9]`.
-const PRE_RELEASE: &str = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*";
-
-static VERSION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!(
-        r"^v?(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-{PRE_RELEASE})?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
-    ))
-    .unwrap()
-});
-
-static PRERELEASE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(&format!("^{PRE_RELEASE}$")).unwrap());
 
 // Ordered so that `max` picks the widest bump.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -57,25 +42,21 @@ fn checked_inc(number: u64) -> u64 {
     number.checked_add(1).expect("version number overflow")
 }
 
-// `Version::parse` ignores the input past the first byte it cannot read and
-// folds a leading zero away (`01` becomes `1`), so it cannot validate a version
-// written by the user. What it accepts here is what npm's semver accepts in
-// strict mode: semver 2.0 plus a `v` prefix and surrounding whitespace.
-pub fn parse_version(text: &str) -> Result<Version> {
-    let text = text.trim();
-    if !VERSION.is_match(text) {
-        bail!("not a valid semver version");
-    }
-    Ok(Version::parse(text)?)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prerelease(String);
 
 impl Prerelease {
     #[must_use]
     pub fn new(text: &str) -> Option<Self> {
-        PRERELEASE.is_match(text).then(|| Self(text.to_string()))
+        // `Version::parse` ignores the input past the first byte it cannot read and
+        // folds a leading zero away (`01` becomes `1`), so it cannot validate
+        // a pre-release written by the user.
+        let valid = text.split('.').all(|id| {
+            !id.is_empty()
+                && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && !(id.len() > 1 && id.starts_with('0') && id.bytes().all(|b| b.is_ascii_digit()))
+        });
+        valid.then(|| Self(text.to_string()))
     }
 
     #[must_use]
