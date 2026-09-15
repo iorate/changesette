@@ -5,9 +5,10 @@ use fast_glob::{glob_match, validate};
 use serde_json::{Map, Value};
 use tracing::warn;
 
-use crate::workspace::read_json;
+use crate::{bump::Bump, workspace::read_json};
 
 #[derive(Debug, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     ignore: Vec<String>,
     fixed: Vec<Vec<String>>,
@@ -15,7 +16,27 @@ pub struct Config {
     pub private_packages_version: bool,
     pub snapshot_use_calculated_version: bool,
     pub snapshot_prerelease_template: Option<String>,
+    pub update_internal_dependencies: UpdateInternalDependencies,
+    pub bump_versions_with_workspace_protocol_only: bool,
     pub packages: Option<Vec<String>>,
+    pub ignore_internal_dependencies: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateInternalDependencies {
+    #[default]
+    Patch,
+    Minor,
+}
+
+impl UpdateInternalDependencies {
+    #[must_use]
+    pub fn allows(self, bump: Bump) -> bool {
+        match self {
+            UpdateInternalDependencies::Patch => true,
+            UpdateInternalDependencies::Minor => bump >= Bump::Minor,
+        }
+    }
 }
 
 impl Config {
@@ -121,6 +142,7 @@ pub fn load(changeset_dir: &Path) -> Result<Config> {
     load_value(&value).with_context(|| path.display().to_string())
 }
 
+#[allow(clippy::too_many_lines)]
 fn load_value(value: &Value) -> Result<Config> {
     let Some(object) = value.as_object() else {
         bail!("the root value must be an object")
@@ -213,7 +235,21 @@ fn load_value(value: &Value) -> Result<Config> {
         Some(_) => bail!("\"snapshot\" must be an object"),
     }
 
-    let packages = load_packages(object)?;
+    let update_internal_dependencies = match object.get("updateInternalDependencies") {
+        None => UpdateInternalDependencies::Patch,
+        Some(Value::String(level)) if level == "patch" => UpdateInternalDependencies::Patch,
+        Some(Value::String(level)) if level == "minor" => UpdateInternalDependencies::Minor,
+        Some(_) => bail!("\"updateInternalDependencies\" must be \"patch\" or \"minor\""),
+    };
+
+    let bump_versions_with_workspace_protocol_only =
+        match object.get("bumpVersionsWithWorkspaceProtocolOnly") {
+            None => false,
+            Some(Value::Bool(only)) => *only,
+            Some(_) => bail!("\"bumpVersionsWithWorkspaceProtocolOnly\" must be a boolean"),
+        };
+
+    let (packages, ignore_internal_dependencies) = load_changesette(object)?;
 
     Ok(Config {
         ignore,
@@ -222,16 +258,29 @@ fn load_value(value: &Value) -> Result<Config> {
         private_packages_version,
         snapshot_use_calculated_version,
         snapshot_prerelease_template,
+        update_internal_dependencies,
+        bump_versions_with_workspace_protocol_only,
         packages,
+        ignore_internal_dependencies,
     })
 }
 
-fn load_packages(object: &Map<String, Value>) -> Result<Option<Vec<String>>> {
+fn load_changesette(object: &Map<String, Value>) -> Result<(Option<Vec<String>>, bool)> {
     let changesette = match object.get("changesette") {
-        None => return Ok(None),
+        None => return Ok((None, false)),
         Some(Value::Object(changesette)) => changesette,
         Some(_) => bail!("\"changesette\" must be an object"),
     };
+    let ignore_internal_dependencies = match changesette.get("ignoreInternalDependencies") {
+        None => false,
+        Some(Value::Bool(ignore)) => *ignore,
+        Some(_) => bail!("\"ignoreInternalDependencies\" in \"changesette\" must be a boolean"),
+    };
+    let packages = load_packages(changesette)?;
+    Ok((packages, ignore_internal_dependencies))
+}
+
+fn load_packages(changesette: &Map<String, Value>) -> Result<Option<Vec<String>>> {
     let Some(value) = changesette.get("packages") else {
         return Ok(None);
     };

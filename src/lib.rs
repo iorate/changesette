@@ -12,6 +12,7 @@ pub mod changelog;
 pub mod changeset;
 pub mod commands;
 pub mod config;
+pub mod dependency;
 mod jsonc;
 pub mod output;
 pub mod package_json;
