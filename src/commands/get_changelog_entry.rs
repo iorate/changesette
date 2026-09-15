@@ -5,8 +5,8 @@ use anyhow::{Context, Result, bail};
 use crate::{changelog, output, workspace::Workspace};
 
 pub fn run(workspace: &Workspace, package: &str, version: &nodejs_semver::Version) -> Result<()> {
-    let member = workspace.member(package)?;
-    let path = member.dir().join("CHANGELOG.md");
+    let package = workspace.package(package)?;
+    let path = package.dir().join("CHANGELOG.md");
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => {

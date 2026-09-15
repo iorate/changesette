@@ -7,13 +7,13 @@ use std::{
 use tracing::{debug, warn};
 
 use super::pattern::{Pattern, Seg, seg_matches};
-use super::{probe_is_file, rel_dir_between, report_fs_error};
+use super::{RelDir, probe_is_file, rel_dir_between, report_fs_error};
 
 pub fn collect(
     root: &Path,
     positives: &[Pattern],
     negations: &[Pattern],
-) -> BTreeMap<String, PathBuf> {
+) -> BTreeMap<RelDir, PathBuf> {
     let mut walker = Walker {
         root,
         patterns: positives,
@@ -95,7 +95,7 @@ struct Walker<'a> {
     root: &'a Path,
     patterns: &'a [Pattern],
     negations: &'a [Pattern],
-    candidates: BTreeMap<String, PathBuf>,
+    candidates: BTreeMap<RelDir, PathBuf>,
 }
 
 impl Walker<'_> {
@@ -112,7 +112,9 @@ impl Walker<'_> {
             // collapses into the direct spelling, and the negations see the
             // same spelling that `dir` reports.
             let rel_dir = rel_dir_between(self.root, dir);
-            if probe_is_file(&dir.join("package.json")) && !excluded(&rel_dir, self.negations) {
+            if probe_is_file(&dir.join("package.json"))
+                && !excluded(rel_dir.as_str(), self.negations)
+            {
                 self.candidates
                     .entry(rel_dir)
                     .or_insert_with(|| dir.to_path_buf());

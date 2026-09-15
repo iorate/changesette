@@ -94,7 +94,7 @@ enum Command {
     },
     /// Print the workspace packages as JSON
     GetPackages {
-        /// List every workspace member, including the packages `version` skips
+        /// List every workspace package, including the ones `version` skips
         #[arg(long)]
         all: bool,
     },
@@ -162,12 +162,15 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> anyhow::Result<()> {
     let root = cli.root.filter(|dir| !dir.is_empty());
     let cwd = env::current_dir()?;
-    let (workspace, config) = changesette::load(&cwd, root.as_deref().map(Path::new))?;
+    let cli_ignore = match &cli.command {
+        Some(Command::Version { ignore, .. }) => ignore.clone(),
+        _ => Vec::new(),
+    };
+    let (workspace, config) = changesette::load(&cwd, root.as_deref().map(Path::new), &cli_ignore)?;
     match cli.command.unwrap_or(Command::Add(cli.add)) {
         Command::Init => commands::init::run(&workspace),
         Command::Add(args) => commands::add::run(
             &workspace,
-            &config,
             commands::add::AddArgs {
                 empty: args.empty,
                 open: args.open,
@@ -178,16 +181,15 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             },
         ),
         Command::Version {
-            ignore,
             snapshot,
             snapshot_prerelease_template,
             allow_no_changesets,
             output,
+            ..
         } => commands::version::run(
             workspace,
             &config,
             commands::version::VersionArgs {
-                ignore,
                 snapshot,
                 snapshot_prerelease_template,
                 allow_no_changesets,
@@ -201,7 +203,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Status { verbose, output } => {
             commands::status::run(workspace, &config, verbose, output.as_deref())
         }
-        Command::GetPackages { all } => commands::get_packages::run(&workspace, &config, all),
+        Command::GetPackages { all } => commands::get_packages::run(&workspace, all),
         Command::GetChangelogEntry { package, version } => {
             commands::get_changelog_entry::run(&workspace, &package, &version)
         }

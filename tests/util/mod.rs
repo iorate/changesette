@@ -205,8 +205,12 @@ pub(crate) fn write_file(root: &Path, rel: &str, text: &str) {
 
 pub(crate) fn names_and_rel_dirs(workspace: &Workspace) -> Vec<(&str, &str)> {
     workspace
-        .members()
-        .iter()
-        .map(|member| (member.name(), member.rel_dir()))
+        .packages()
+        .map(|package| {
+            (
+                package.name().unwrap_or("<unnamed>"),
+                package.rel_dir().as_str(),
+            )
+        })
         .collect()
 }

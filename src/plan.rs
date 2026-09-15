@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs, io,
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, bail};
@@ -15,9 +15,8 @@ use crate::{
     config::{Config, ResolvedGroups},
     package_json::PackageJson,
     pre::{PreJson, PreMode},
-    skip::SkipSet,
     snapshot::{Snapshot, SnapshotVersions},
-    workspace::{Member, Workspace},
+    workspace::{Package, Versionable, Workspace},
 };
 
 pub struct PlannedVersion {
@@ -51,15 +50,19 @@ impl PlannedVersion {
 pub fn plan_version(
     workspace: Workspace,
     config: &Config,
-    cli_ignore: &[String],
     snapshot: Option<&Snapshot>,
 ) -> Result<PlannedVersion> {
     let changeset_dir = workspace.changeset_dir();
-    let skip = SkipSet::load(&workspace, config, cli_ignore)?;
-    let names: Vec<&str> = workspace.members().iter().map(Member::name).collect();
+    let config_path = changeset_dir.join("config.json");
+    let names: Vec<&str> = workspace
+        .packages()
+        .filter_map(Package::name)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     let groups = config
         .resolve_groups(&names)
-        .with_context(|| changeset_dir.join("config.json").display().to_string())?;
+        .with_context(|| config_path.display().to_string())?;
 
     let pre = PreJson::load(&changeset_dir)?;
     let in_pre = pre_state(pre.as_ref());
@@ -85,13 +88,13 @@ pub fn plan_version(
         // cycle.
         changes.retain(|change| !change.in_pre);
     }
-    let consumed_changes = skip.filter_changes(&workspace, &changeset_dir, &changes)?;
+    let consumed_changes = filter_changes(&workspace, &changeset_dir, &changes)?;
     let releases = plan_releases(
         &workspace,
+        &config_path,
         &consumed_changes,
         pre.as_ref(),
         pre_tag.as_ref(),
-        &skip,
         snapshot_versions.as_ref(),
         &groups,
     )?;
@@ -106,6 +109,62 @@ pub fn plan_version(
     })
 }
 
+fn filter_changes(
+    workspace: &Workspace,
+    changeset_dir: &Path,
+    changes: &[LoadedChange],
+) -> Result<Vec<LoadedChange>> {
+    // Membership is checked before the skip judgment so that a changeset
+    // naming an unknown package always reports that rather than a
+    // mixed-changeset error.
+    for change in changes {
+        let path = changeset_dir.join(change.rel_path());
+        for (name, _) in &change.releases {
+            let package = workspace
+                .package(name)
+                .with_context(|| path.display().to_string())?;
+            if package.version().is_none() {
+                bail!(
+                    "{}: package `{name}` has no version in package.json",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    let mut consumed = Vec::new();
+    for change in changes {
+        let mut skipped = Vec::new();
+        let mut not_skipped = Vec::new();
+        for (name, _) in &change.releases {
+            if workspace.package(name)?.versionable().is_some() {
+                not_skipped.push(name.as_str());
+            } else {
+                skipped.push(name.as_str());
+            }
+        }
+        if skipped.is_empty() {
+            consumed.push(change.clone());
+        } else if !not_skipped.is_empty() {
+            bail!(
+                "{}: cannot mix skipped packages ({}) and not skipped packages ({})",
+                changeset_dir.join(change.rel_path()).display(),
+                quote_list(&skipped),
+                quote_list(&not_skipped)
+            );
+        }
+    }
+    Ok(consumed)
+}
+
+fn quote_list(names: &[&str]) -> String {
+    names
+        .iter()
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub struct PlannedRelease {
     pub name: String,
     pub bump: Option<Bump>,
@@ -117,27 +176,29 @@ pub struct PlannedRelease {
 
 fn plan_releases(
     workspace: &Workspace,
+    config_path: &Path,
     changes: &[LoadedChange],
     pre: Option<&PreJson>,
     pre_tag: Option<&Prerelease>,
-    skip: &SkipSet,
     snapshot: Option<&SnapshotVersions>,
     groups: &ResolvedGroups,
 ) -> Result<Vec<PlannedRelease>> {
     let mut max_bumps = changeset::max_bumps(changes);
     // The group passes run before the pre exit rescue so that a rescued
-    // member does not pull its group along.
-    let overrides = apply_groups(workspace, groups, skip, pre_tag, &mut max_bumps)?;
+    // package does not pull its group along.
+    let overrides = apply_groups(workspace, groups, pre_tag, &mut max_bumps)
+        .with_context(|| config_path.display().to_string())?;
     if matches!(pre, Some(pre) if pre.mode() == PreMode::Exit) {
-        rescue_prereleases(workspace, skip, groups, &mut max_bumps)?;
+        rescue_prereleases(workspace, groups, &mut max_bumps)
+            .with_context(|| config_path.display().to_string())?;
     }
 
     let mut releases = Vec::new();
     for (name, max_bump) in max_bumps {
-        let member = workspace.member(name)?;
+        let versionable = resolve_versionable(workspace, name)?;
         let old_version = match overrides.old_versions.get(name) {
             Some(version) => version.clone(),
-            None => member.version().clone(),
+            None => versionable.version().clone(),
         };
         let changeset_ids = changes
             .iter()
@@ -186,6 +247,22 @@ fn plan_releases(
     Ok(releases)
 }
 
+fn resolve_versionable<'a>(workspace: &'a Workspace, name: &str) -> Result<Versionable<'a>> {
+    workspace
+        .package(name)?
+        .versionable()
+        .with_context(|| format!("package `{name}` is not versionable"))
+}
+
+// The skipped packages of a group count too: their versions bound the group
+// even though the bump application excludes them.
+fn group_version<'a>(workspace: &'a Workspace, kind: &str, name: &str) -> Result<&'a Version> {
+    workspace
+        .package(name)?
+        .version()
+        .with_context(|| format!("package `{name}` in a {kind:?} group has no version"))
+}
+
 struct GroupOverrides {
     old_versions: BTreeMap<String, Version>,
     pre_counters: BTreeMap<String, u64>,
@@ -196,7 +273,6 @@ struct GroupOverrides {
 fn apply_groups<'a>(
     workspace: &'a Workspace,
     groups: &ResolvedGroups,
-    skip: &SkipSet,
     pre_tag: Option<&Prerelease>,
     max_bumps: &mut BTreeMap<&'a str, Option<Bump>>,
 ) -> Result<GroupOverrides> {
@@ -205,12 +281,12 @@ fn apply_groups<'a>(
         let Some(max_bump) = group_max_bump(group, max_bumps) else {
             continue;
         };
-        let highest = group_highest_version(workspace, group)?;
+        let highest = group_highest_version(workspace, "fixed", group)?;
         for name in group {
-            if skip.contains(name) {
+            let Some(versionable) = workspace.package(name)?.versionable() else {
                 continue;
-            }
-            let previous = max_bumps.insert(workspace.member(name)?.name(), Some(max_bump));
+            };
+            let previous = max_bumps.insert(versionable.name(), Some(max_bump));
             if previous.flatten() != Some(max_bump) {
                 debug!(
                     "`{name}`: the \"fixed\" group raises the bump to {} (planning against {highest})",
@@ -224,7 +300,7 @@ fn apply_groups<'a>(
         let Some(max_bump) = group_max_bump(group, max_bumps) else {
             continue;
         };
-        let highest = group_highest_version(workspace, group)?;
+        let highest = group_highest_version(workspace, "linked", group)?;
         for name in group {
             if let Some(entry) = max_bumps.get_mut(name.as_str())
                 && entry.is_some()
@@ -243,16 +319,21 @@ fn apply_groups<'a>(
 
     let mut pre_counters = BTreeMap::new();
     if let Some(tag) = pre_tag {
-        // The old_version override alone would miss a member whose version
+        // The old_version override alone would miss a package whose version
         // is low but whose counter is high, so the counter is aligned
         // separately.
-        for group in groups.fixed.iter().chain(&groups.linked) {
-            let mut counter = 0;
-            for name in group {
-                counter = counter.max(bump::pre_counter(workspace.member(name)?.version(), tag));
-            }
-            for name in group {
-                pre_counters.insert(name.clone(), counter);
+        for (kind, groups) in [("fixed", &groups.fixed), ("linked", &groups.linked)] {
+            for group in groups {
+                let mut counter = 0;
+                for name in group {
+                    counter = counter.max(bump::pre_counter(
+                        group_version(workspace, kind, name)?,
+                        tag,
+                    ));
+                }
+                for name in group {
+                    pre_counters.insert(name.clone(), counter);
+                }
             }
         }
     }
@@ -270,51 +351,51 @@ fn group_max_bump(group: &[String], max_bumps: &BTreeMap<&str, Option<Bump>>) ->
         .max()
 }
 
-// The skipped members count too; only the bump application excludes them.
-fn group_highest_version(workspace: &Workspace, group: &[String]) -> Result<Version> {
+fn group_highest_version(workspace: &Workspace, kind: &str, group: &[String]) -> Result<Version> {
     let mut highest: Option<&Version> = None;
     for name in group {
-        let version = workspace.member(name)?.version();
+        let version = group_version(workspace, kind, name)?;
         if highest.is_none_or(|h| version > h) {
             highest = Some(version);
         }
     }
     Ok(highest
-        .expect("a group with a releasing member is nonempty")
+        .expect("a group with a releasing package is nonempty")
         .clone())
 }
 
-// Each rescued member is planned at its own version: `next_version` then
+// Each rescued package is planned at its own version: `next_version` then
 // merely drops the pre-release, and the empty summary list renders a
 // heading-only changelog section.
 fn rescue_prereleases<'a>(
     workspace: &'a Workspace,
-    skip: &SkipSet,
     groups: &ResolvedGroups,
     max_bumps: &mut BTreeMap<&'a str, Option<Bump>>,
 ) -> Result<()> {
     let mut group_rescued = BTreeSet::new();
-    for group in groups.fixed.iter().chain(&groups.linked) {
-        // The skipped members count here too; only the rescue itself excludes
-        // them.
-        let mut on_prerelease = false;
-        for name in group {
-            if workspace.member(name)?.version().is_prerelease() {
-                on_prerelease = true;
-                break;
+    for (kind, groups) in [("fixed", &groups.fixed), ("linked", &groups.linked)] {
+        for group in groups {
+            let mut on_prerelease = false;
+            for name in group {
+                if group_version(workspace, kind, name)?.is_prerelease() {
+                    on_prerelease = true;
+                    break;
+                }
+            }
+            if on_prerelease {
+                group_rescued.extend(group.iter().map(String::as_str));
             }
         }
-        if on_prerelease {
-            group_rescued.extend(group.iter().map(String::as_str));
-        }
     }
-    for member in workspace.members() {
-        if skip.contains(member.name()) || max_bumps.get(member.name()).is_some_and(Option::is_some)
+    for versionable in workspace.versionables() {
+        if max_bumps
+            .get(versionable.name())
+            .is_some_and(Option::is_some)
         {
             continue;
         }
-        if group_rescued.contains(member.name()) || member.version().is_prerelease() {
-            max_bumps.insert(member.name(), Some(Bump::Patch));
+        if group_rescued.contains(versionable.name()) || versionable.version().is_prerelease() {
+            max_bumps.insert(versionable.name(), Some(Bump::Patch));
         }
     }
     Ok(())
@@ -340,15 +421,15 @@ pub fn stage_writes(
         let Some(entry) = &release.changelog_entry else {
             continue;
         };
-        let member = workspace.member(&release.name)?;
-        let mut package_json = PackageJson::load(member.dir())?;
+        let package = workspace.package(&release.name)?;
+        let mut package_json = PackageJson::load(package.dir())?;
         package_json.set_version(&release.new_version)?;
         writes.push(StagedWrite {
             path: package_json.path().to_owned(),
             content: package_json.text(),
         });
 
-        let changelog_path = member.dir().join("CHANGELOG.md");
+        let changelog_path = package.dir().join("CHANGELOG.md");
         let changelog_text = match fs::read_to_string(&changelog_path) {
             Ok(text) => text,
             Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),

@@ -6,7 +6,6 @@ use tracing::info;
 use crate::{config::Config, plan, release_plan, snapshot::Snapshot, workspace::Workspace};
 
 pub struct VersionArgs {
-    pub ignore: Vec<String>,
     pub snapshot: Option<Option<String>>,
     pub snapshot_prerelease_template: Option<String>,
     pub allow_no_changesets: bool,
@@ -18,7 +17,7 @@ pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<(
         tag,
         template: args.snapshot_prerelease_template,
     });
-    let planned = plan::plan_version(workspace, config, &args.ignore, snapshot.as_ref())?;
+    let planned = plan::plan_version(workspace, config, snapshot.as_ref())?;
     let pre = planned.in_pre();
     if let Some(pre) = pre {
         info!(

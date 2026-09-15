@@ -235,7 +235,7 @@ fn add_rejects_an_unknown_package_name() {
 }
 
 #[test]
-fn add_fails_without_versionable_packages() {
+fn add_fails_without_versionables() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("package.json"),
@@ -401,7 +401,7 @@ fn mixed_workspace_dir() -> TempDir {
 }
 
 #[test]
-fn get_packages_lists_skipped_members_only_with_all() {
+fn get_packages_lists_skipped_packages_only_with_all() {
     let dir = mixed_workspace_dir();
     let output = changesette(dir.path(), &["get-packages"]);
     assert!(output.status.success(), "{}", stderr(&output));
@@ -414,19 +414,19 @@ fn get_packages_lists_skipped_members_only_with_all() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[\n  {\n    \"name\": \"pkg-a\",\n    \"version\": \"3.1.4\",\n    \"private\": false,\n    \"dir\": \"packages/a\"\n  },\n  {\n    \"name\": \"pkg-b\",\n    \"version\": \"1.0.0\",\n    \"private\": true,\n    \"dir\": \"packages/b\"\n  },\n  {\n    \"name\": \"pkg-c\",\n    \"version\": \"2.0.0\",\n    \"private\": false,\n    \"dir\": \"packages/c\"\n  }\n]\n"
+        "[\n  {\n    \"name\": null,\n    \"version\": null,\n    \"private\": false,\n    \"dir\": \".\"\n  },\n  {\n    \"name\": \"pkg-a\",\n    \"version\": \"3.1.4\",\n    \"private\": false,\n    \"dir\": \"packages/a\"\n  },\n  {\n    \"name\": \"pkg-b\",\n    \"version\": \"1.0.0\",\n    \"private\": true,\n    \"dir\": \"packages/b\"\n  },\n  {\n    \"name\": \"pkg-c\",\n    \"version\": \"2.0.0\",\n    \"private\": false,\n    \"dir\": \"packages/c\"\n  }\n]\n"
     );
 }
 
 #[test]
-fn get_packages_debug_reports_the_member_list() {
+fn get_packages_debug_reports_the_package_list() {
     let dir = workspace_dir();
     let output = changesette(dir.path(), &["get-packages", "--log-level", "debug"]);
     assert!(output.status.success(), "{}", stderr(&output));
     let err = stderr(&output);
     assert!(
         err.contains(&format!(
-            "debug: {}: npm workspace, members: pkg-a (packages/a)",
+            "debug: {}: npm workspace, packages: <unnamed> (.), pkg-a@3.1.4 (packages/a)",
             expected_path(dir.path(), "")
         )),
         "{err}"

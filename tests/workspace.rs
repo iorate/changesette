@@ -3,7 +3,10 @@ mod util;
 use std::{fs, io, path::Path};
 
 use anyhow::Result;
-use changesette::workspace::{Member, Root, Workspace, resolve_root};
+use changesette::{
+    config::Config,
+    workspace::{Package, Root, Workspace, resolve_root},
+};
 use nodejs_semver::Version;
 use tempfile::TempDir;
 use util::{capture_output, names_and_rel_dirs, write_file};
@@ -13,7 +16,7 @@ fn pkg(name: &str) -> String {
 }
 
 fn discover(cwd: &Path) -> Result<Workspace> {
-    Workspace::load(Root::find(cwd)?, None)
+    Workspace::load(Root::find(cwd)?, &Config::default(), &[])
 }
 
 fn discover_ok(cwd: &Path) -> Workspace {
@@ -31,12 +34,13 @@ fn discover_captured(cwd: &Path) -> (Workspace, String) {
 }
 
 fn forced(root: &Path) -> Workspace {
-    Workspace::load(Root::new(root.to_path_buf()), None).unwrap()
+    Workspace::load(Root::new(root.to_path_buf()), &Config::default(), &[]).unwrap()
 }
 
 fn load_listed(root: &Path, packages: &[&str]) -> Result<Workspace> {
-    let packages: Vec<String> = packages.iter().map(|dir| (*dir).to_owned()).collect();
-    Workspace::load(Root::new(root.to_path_buf()), Some(&packages))
+    let mut config = Config::default();
+    config.packages = Some(packages.iter().map(|dir| (*dir).to_owned()).collect());
+    Workspace::load(Root::new(root.to_path_buf()), &config, &[])
 }
 
 fn load_listed_err(root: &Path, packages: &[&str]) -> String {
@@ -45,14 +49,23 @@ fn load_listed_err(root: &Path, packages: &[&str]) -> String {
 
 fn names_and_dirs(workspace: &Workspace) -> Vec<(&str, &Path)> {
     workspace
-        .members()
-        .iter()
-        .map(|member| (member.name(), member.dir()))
+        .packages()
+        .map(|package| (package.name().unwrap_or("<unnamed>"), package.dir()))
         .collect()
 }
 
 fn names(workspace: &Workspace) -> Vec<&str> {
-    workspace.members().iter().map(Member::name).collect()
+    workspace
+        .packages()
+        .map(|package| package.name().unwrap_or("<unnamed>"))
+        .collect()
+}
+
+fn versionable_names(workspace: &Workspace) -> Vec<&str> {
+    workspace
+        .versionables()
+        .map(|versionable| versionable.name())
+        .collect()
 }
 
 fn pnpm_dir(patterns: &[&str]) -> TempDir {
@@ -86,10 +99,10 @@ fn debug_lines(output: &str) -> Vec<&str> {
         .collect()
 }
 
-// Members and their qualification
+// Packages and their qualification
 
 #[test]
-fn members_are_sorted_by_name() {
+fn packages_are_sorted_by_directory() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
@@ -118,51 +131,66 @@ fn members_are_sorted_by_name() {
     assert_eq!(
         names_and_dirs(&workspace),
         [
-            ("alpha", dir.path().join("packages/two").as_path()),
+            ("<unnamed>", dir.path()),
             ("zeta", dir.path().join("packages/one").as_path()),
+            ("alpha", dir.path().join("packages/two").as_path()),
         ]
     );
     assert_eq!(
         names_and_rel_dirs(&workspace),
-        [("alpha", "packages/two"), ("zeta", "packages/one")]
+        [
+            ("<unnamed>", "."),
+            ("zeta", "packages/one"),
+            ("alpha", "packages/two")
+        ]
     );
-    let alpha = &workspace.members()[0];
-    assert_eq!(alpha.version(), &Version::from((2, 0, 0)));
+    let alpha = workspace.package("alpha").unwrap();
+    assert_eq!(alpha.version(), Some(&Version::from((2, 0, 0))));
     assert!(alpha.private());
-    assert!(!workspace.members()[1].private());
+    assert!(!workspace.package("zeta").unwrap().private());
+    let root = workspace.packages().next().unwrap();
+    assert_eq!(root.name(), None);
+    assert_eq!(root.version(), None);
+    assert!(!root.private());
 }
 
 #[test]
-fn resolves_a_member_by_name() {
+fn resolves_a_package_by_name() {
     let dir = pnpm_dir(&["packages/*"]);
     write_file(dir.path(), "packages/one/package.json", &pkg("zeta"));
     write_file(dir.path(), "packages/two/package.json", &pkg("alpha"));
     let workspace = discover_ok(dir.path());
     assert_eq!(
-        workspace.member("alpha").unwrap().dir(),
+        workspace.package("alpha").unwrap().dir(),
         dir.path().join("packages/two")
     );
 }
 
 #[test]
-fn member_lookup_fails_for_an_unknown_name() {
+fn package_lookup_fails_for_an_unknown_name() {
     let dir = pnpm_dir(&["packages/*"]);
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
     let err = format!(
         "{:#}",
-        discover_ok(dir.path()).member("missing").unwrap_err()
+        discover_ok(dir.path()).package("missing").unwrap_err()
     );
-    assert!(err.contains("not found"), "{err}");
+    assert!(
+        err.contains("`missing` not found; known packages: pkg-a"),
+        "{err}"
+    );
     let empty = tempfile::tempdir().unwrap();
     let err = format!(
         "{:#}",
-        discover_ok(empty.path()).member("missing").unwrap_err()
+        discover_ok(empty.path()).package("missing").unwrap_err()
     );
-    assert!(err.contains("not found"), "{err}");
+    assert!(
+        err.contains("`missing` not found: the workspace has no named packages"),
+        "{err}"
+    );
 }
 
 #[test]
-fn qualification_excludes_invalid_manifests() {
+fn qualification_keeps_packages_without_a_name_or_version() {
     for marker in ["pnpm", "npm"] {
         let dir = tempfile::tempdir().unwrap();
         match marker {
@@ -196,15 +224,26 @@ fn qualification_excludes_invalid_manifests() {
             );
         }
         let (workspace, output) = discover_captured(dir.path());
-        assert_eq!(
-            names_and_rel_dirs(&workspace),
-            [("pkg-a", "packages/a")],
-            "{marker}"
-        );
+        let mut expected = vec![
+            ("pkg-a", "packages/a"),
+            ("<unnamed>", "packages/b"),
+            ("pkg-c", "packages/c"),
+            ("pkg-d", "packages/d"),
+            ("dup", "packages/e"),
+            ("dup", "packages/f"),
+            ("<unnamed>", "packages/g"),
+            ("<unnamed>", "packages/h"),
+            ("pkg-i", "packages/i"),
+        ];
+        if marker == "npm" {
+            expected.insert(0, ("<unnamed>", "."));
+        }
+        assert_eq!(names_and_rel_dirs(&workspace), expected, "{marker}");
+        assert_eq!(versionable_names(&workspace), ["pkg-a"], "{marker}");
         let manifest = |name: &str| manifest_path(dir.path(), &format!("packages/{name}"));
         let warnings = warning_lines(&output);
         let debugs = debug_lines(&output);
-        for name in ["d", "e", "f", "g", "h", "i", "j"] {
+        for name in ["d", "g", "h", "i", "j"] {
             assert!(
                 warnings.iter().any(|line| line.contains(&manifest(name))),
                 "{marker} {name}: {output}"
@@ -214,18 +253,61 @@ fn qualification_excludes_invalid_manifests() {
                 "{marker} {name}: {output}"
             );
         }
-        for name in ["b", "c"] {
-            assert!(
-                debugs.iter().any(|line| line.contains(&manifest(name))),
-                "{marker} {name}: {output}"
-            );
+        for name in ["b", "c", "e", "f"] {
             assert!(
                 !warnings.iter().any(|line| line.contains(&manifest(name))),
                 "{marker} {name}: {output}"
             );
         }
-        assert!(output.contains("`dup`"), "{marker}: {output}");
+        for name in ["b", "c"] {
+            assert!(
+                debugs.iter().any(|line| line.contains(&manifest(name))),
+                "{marker} {name}: {output}"
+            );
+        }
     }
+}
+
+#[test]
+fn versionables_have_a_unique_name_and_a_version() {
+    let dir = pnpm_dir(&["packages/*"]);
+    write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        "{ \"version\": \"1.0.0\" }\n",
+    );
+    write_file(
+        dir.path(),
+        "packages/c/package.json",
+        "{ \"name\": \"pkg-c\" }\n",
+    );
+    write_file(dir.path(), "packages/d/package.json", &pkg("dup"));
+    write_file(
+        dir.path(),
+        "packages/e/package.json",
+        "{ \"name\": \"dup\", \"version\": \"2.0.0\" }\n",
+    );
+    let (workspace, output) = discover_captured(dir.path());
+    assert_eq!(versionable_names(&workspace), ["pkg-a"]);
+    let pkg_a = workspace.package("pkg-a").unwrap().versionable().unwrap();
+    assert_eq!(pkg_a.name(), "pkg-a");
+    assert_eq!(pkg_a.version(), &Version::from((1, 0, 0)));
+    assert_eq!(pkg_a.package().rel_dir().as_str(), "packages/a");
+    let skipped: Vec<&str> = debug_lines(&output)
+        .into_iter()
+        .filter(|line| line.contains(": skipped: "))
+        .collect();
+    assert_eq!(
+        skipped,
+        [
+            "debug: <unnamed>@1.0.0 (packages/b): skipped: no name",
+            "debug: pkg-c (packages/c): skipped: no version",
+            "debug: dup@1.0.0 (packages/d): skipped: the name is used by more than one package",
+            "debug: dup@2.0.0 (packages/e): skipped: the name is used by more than one package",
+        ],
+        "{output}"
+    );
 }
 
 #[test]
@@ -251,16 +333,15 @@ fn reads_private_leniently() {
     assert_eq!(names(&workspace), ["pkg-a", "pkg-b", "pkg-c", "pkg-d"]);
     assert_eq!(
         workspace
-            .members()
-            .iter()
-            .map(Member::private)
+            .packages()
+            .map(Package::private)
             .collect::<Vec<_>>(),
         [true, false, false, false]
     );
 }
 
 #[test]
-fn excludes_duplicate_package_names() {
+fn duplicate_names_are_packages_but_ambiguous_to_resolve() {
     let dir = pnpm_dir(&["packages/*"]);
     write_file(
         dir.path(),
@@ -274,13 +355,37 @@ fn excludes_duplicate_package_names() {
     );
     write_file(dir.path(), "packages/c/package.json", &pkg("unique"));
     let workspace = discover_ok(dir.path());
-    assert_eq!(names_and_rel_dirs(&workspace), [("unique", "packages/c")]);
-    assert!(workspace.member("unique").is_ok());
-    assert!(workspace.member("dup").is_err());
+    assert_eq!(
+        names_and_rel_dirs(&workspace),
+        [
+            ("dup", "packages/a"),
+            ("dup", "packages/b"),
+            ("unique", "packages/c")
+        ]
+    );
+    assert_eq!(
+        workspace
+            .find_package("unique")
+            .unwrap()
+            .map(|package| package.rel_dir().as_str()),
+        Some("packages/c")
+    );
+    assert!(workspace.find_package("missing").unwrap().is_none());
+    let err = format!("{:#}", workspace.find_package("dup").unwrap_err());
+    assert_eq!(
+        err,
+        "package `dup` is ambiguous: used by packages/a, packages/b"
+    );
+    assert!(workspace.package("unique").is_ok());
+    let err = format!("{:#}", workspace.package("dup").unwrap_err());
+    assert_eq!(
+        err,
+        "package `dup` is ambiguous: used by packages/a, packages/b"
+    );
 }
 
 #[test]
-fn a_disqualified_duplicate_does_not_evict_the_real_package() {
+fn a_versionless_namesake_makes_the_name_ambiguous() {
     let dir = pnpm_dir(&["packages/*"]);
     write_file(dir.path(), "packages/a/package.json", &pkg("dup"));
     write_file(
@@ -289,7 +394,12 @@ fn a_disqualified_duplicate_does_not_evict_the_real_package() {
         "{ \"name\": \"dup\" }\n",
     );
     let workspace = discover_ok(dir.path());
-    assert_eq!(names_and_rel_dirs(&workspace), [("dup", "packages/a")]);
+    assert_eq!(
+        names_and_rel_dirs(&workspace),
+        [("dup", "packages/a"), ("dup", "packages/b")]
+    );
+    let err = format!("{:#}", workspace.package("dup").unwrap_err());
+    assert!(err.contains("ambiguous"), "{err}");
 }
 
 #[cfg(unix)]
@@ -307,27 +417,34 @@ fn collapses_candidates_aliasing_the_same_directory() {
 
 #[cfg(unix)]
 #[test]
-fn a_true_duplicate_is_excluded_even_beside_an_aliased_pair() {
+fn a_true_duplicate_stays_beside_an_aliased_pair() {
     let dir = pnpm_dir(&["real/*", "link/*", "other/*"]);
     write_file(dir.path(), "real/a/package.json", &pkg("pkg-a"));
     write_file(dir.path(), "other/a/package.json", &pkg("pkg-a"));
     std::os::unix::fs::symlink("real", dir.path().join("link")).unwrap();
-    assert_eq!(names(&discover_ok(dir.path())), [] as [&str; 0]);
+    assert_eq!(
+        names_and_rel_dirs(&discover_ok(dir.path())),
+        [("pkg-a", "link/a"), ("pkg-a", "other/a")]
+    );
 }
 
 #[test]
-fn a_disqualified_nearest_package_yields_an_empty_workspace() {
-    for manifest in ["{ \"name\": \"app\" }\n", "{ \"version\": \"1.0.0\" }\n"] {
+fn a_nearest_package_without_a_name_or_version_is_still_a_package() {
+    for (manifest, expected) in [
+        ("{ \"name\": \"app\" }\n", ("app", ".")),
+        ("{ \"version\": \"1.0.0\" }\n", ("<unnamed>", ".")),
+    ] {
         let dir = tempfile::tempdir().unwrap();
         write_file(dir.path(), "package.json", manifest);
         let workspace = discover_ok(dir.path());
         assert_eq!(workspace.root(), dir.path(), "{manifest}");
-        assert_eq!(names(&workspace), [] as [&str; 0], "{manifest}");
+        assert_eq!(names_and_rel_dirs(&workspace), [expected], "{manifest}");
+        assert_eq!(versionable_names(&workspace), [] as [&str; 0], "{manifest}");
     }
 }
 
 #[test]
-fn a_nameless_root_is_not_a_member() {
+fn a_nameless_root_is_a_package() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
@@ -337,7 +454,7 @@ fn a_nameless_root_is_not_a_member() {
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("pkg-a", "packages/a")]
+        [("<unnamed>", "."), ("pkg-a", "packages/a")]
     );
 
     let dir = pnpm_dir(&[".", "packages/*"]);
@@ -345,7 +462,7 @@ fn a_nameless_root_is_not_a_member() {
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("pkg-a", "packages/a")]
+        [("<unnamed>", "."), ("pkg-a", "packages/a")]
     );
 }
 
@@ -373,7 +490,7 @@ fn a_pnpm_manifest_wins_in_the_same_directory() {
         let workspace = discover_ok(dir.path());
         assert_eq!(workspace.root(), dir.path(), "{yaml:?} lock={lock}");
         let expected: &[(&str, &str)] = if yaml.starts_with("packages") {
-            &[("pkg-a", "packages/a"), ("root", ".")]
+            &[("root", "."), ("pkg-a", "packages/a")]
         } else {
             &[("root", ".")]
         };
@@ -441,7 +558,7 @@ fn accepts_a_bom_prefixed_pnpm_manifest() {
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("pkg-a", "packages/a"), ("root", ".")]
+        [("root", "."), ("pkg-a", "packages/a")]
     );
 }
 
@@ -516,9 +633,9 @@ fn an_outer_yarn_lock_wins_over_an_inner_workspaces_field() {
     assert_eq!(
         names_and_rel_dirs(&workspace),
         [
+            ("root", "."),
             ("pkg-a", "packages/a"),
-            ("pkg-x", "packages/a/nested/x"),
-            ("root", ".")
+            ("pkg-x", "packages/a/nested/x")
         ]
     );
 }
@@ -541,12 +658,16 @@ fn the_nearest_yarn_lock_wins() {
     assert_eq!(names_and_rel_dirs(&workspace), [("example", ".")]);
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("example", "examples/e"), ("pkg-a", "packages/a")]
+        [
+            ("<unnamed>", "."),
+            ("example", "examples/e"),
+            ("pkg-a", "packages/a")
+        ]
     );
 }
 
 #[test]
-fn resolves_the_workspace_root_from_a_member_directory() {
+fn resolves_the_workspace_root_from_a_package_directory() {
     let dir = pnpm_dir(&["packages/*"]);
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
     write_file(dir.path(), "packages/b/package.json", &pkg("pkg-b"));
@@ -670,7 +791,7 @@ fn passes_over_an_invalid_workspaces_while_looking_for_an_npm_root() {
 }
 
 #[test]
-fn the_npm_root_is_always_a_member_candidate() {
+fn the_npm_root_is_always_a_package_candidate() {
     for workspaces in [
         "[\"packages/*\"]",
         "[\".\"]",
@@ -687,7 +808,7 @@ fn the_npm_root_is_always_a_member_candidate() {
         );
         write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
         let expected: &[(&str, &str)] = if workspaces.contains("packages/*") {
-            &[("pkg-a", "packages/a"), ("root", ".")]
+            &[("root", "."), ("pkg-a", "packages/a")]
         } else {
             &[("root", ".")]
         };
@@ -700,16 +821,16 @@ fn the_npm_root_is_always_a_member_candidate() {
 }
 
 #[test]
-fn the_pnpm_root_is_always_a_member_candidate() {
+fn the_pnpm_root_is_always_a_package_candidate() {
     for (patterns, expected) in [
         (
             &["packages/*"][..],
-            &[("pkg-a", "packages/a"), ("root", ".")][..],
+            &[("root", "."), ("pkg-a", "packages/a")][..],
         ),
         (&["."], &[("root", ".")]),
         (
             &["packages/*", "!."],
-            &[("pkg-a", "packages/a"), ("root", ".")],
+            &[("root", "."), ("pkg-a", "packages/a")],
         ),
         (&[], &[("root", ".")]),
     ] {
@@ -731,7 +852,7 @@ fn the_pnpm_root_is_always_a_member_candidate() {
 }
 
 #[test]
-fn a_pnpm_only_manifest_is_never_a_member() {
+fn a_pnpm_only_manifest_is_never_a_package() {
     let dir = pnpm_dir(&["packages/*"]);
     write_file(dir.path(), "package.yaml", "name: root\n");
     write_file(dir.path(), "package.json", &pkg("root"));
@@ -748,14 +869,14 @@ fn a_pnpm_only_manifest_is_never_a_member() {
     write_file(dir.path(), "packages/b/package.json", &pkg("pkg-b"));
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("pkg-b", "packages/b"), ("root", ".")]
+        [("root", "."), ("pkg-b", "packages/b")]
     );
 }
 
 // Re-rooting to an npm workspace root
 
 #[test]
-fn a_member_of_a_nested_npm_workspace_re_roots_only_to_the_inner_root() {
+fn a_package_of_a_nested_npm_workspace_re_roots_only_to_the_inner_root() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
@@ -782,7 +903,7 @@ fn a_member_of_a_nested_npm_workspace_re_roots_only_to_the_inner_root() {
 }
 
 #[test]
-fn re_roots_to_the_npm_root_listing_the_nearest_package_as_a_member() {
+fn re_roots_to_the_npm_root_listing_the_nearest_package_as_a_package() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
@@ -797,16 +918,16 @@ fn re_roots_to_the_npm_root_listing_the_nearest_package_as_a_member() {
     assert_eq!(
         names_and_rel_dirs(&workspace),
         [
+            ("root", "."),
             ("pkg-a", "packages/a"),
-            ("pkg-b", "packages/b"),
-            ("root", ".")
+            ("pkg-b", "packages/b")
         ]
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn re_roots_from_a_member_the_npm_root_lists_through_a_symlink() {
+fn re_roots_from_a_package_the_npm_root_lists_through_a_symlink() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
@@ -819,12 +940,12 @@ fn re_roots_from_a_member_the_npm_root_lists_through_a_symlink() {
     assert_eq!(workspace.root(), dir.path());
     assert_eq!(
         names_and_rel_dirs(&workspace),
-        [("pkg-a", "link/a"), ("root", ".")]
+        [("root", "."), ("pkg-a", "link/a")]
     );
 }
 
 #[test]
-fn re_roots_from_a_versionless_member_listed_by_the_npm_root() {
+fn re_roots_from_a_versionless_package_listed_by_the_npm_root() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
@@ -841,12 +962,12 @@ fn re_roots_from_a_versionless_member_listed_by_the_npm_root() {
     assert_eq!(workspace.root(), dir.path());
     assert_eq!(
         names_and_rel_dirs(&workspace),
-        [("lib", "packages/lib"), ("root", ".")]
+        [("root", "."), ("web", "apps/web"), ("lib", "packages/lib")]
     );
 }
 
 #[test]
-fn re_roots_from_a_member_whose_name_is_duplicated() {
+fn re_roots_from_a_package_whose_name_is_duplicated() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
@@ -864,7 +985,12 @@ fn re_roots_from_a_member_whose_name_is_duplicated() {
     assert_eq!(workspace.root(), dir.path());
     assert_eq!(
         names_and_rel_dirs(&workspace),
-        [("pkg-b", "packages/b"), ("root", ".")]
+        [
+            ("root", "."),
+            ("dup", "fixtures/a"),
+            ("dup", "packages/a"),
+            ("pkg-b", "packages/b")
+        ]
     );
 }
 
@@ -888,7 +1014,7 @@ fn a_package_the_npm_root_above_does_not_list_is_a_single_package() {
 }
 
 #[test]
-fn a_member_with_a_leftover_workspaces_field_re_roots_to_the_npm_root() {
+fn a_package_with_a_leftover_workspaces_field_re_roots_to_the_npm_root() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
@@ -909,12 +1035,12 @@ fn a_member_with_a_leftover_workspaces_field_re_roots_to_the_npm_root() {
     assert_eq!(workspace.root(), dir.path());
     assert_eq!(
         names_and_rel_dirs(&workspace),
-        [("pkg-a", "packages/a"), ("root", ".")]
+        [("root", "."), ("pkg-a", "packages/a")]
     );
 }
 
 #[test]
-fn an_npm_workspace_between_a_member_and_its_root_is_passed_over() {
+fn an_npm_workspace_between_a_package_and_its_root_is_passed_over() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
@@ -932,7 +1058,7 @@ fn an_npm_workspace_between_a_member_and_its_root_is_passed_over() {
     assert_eq!(workspace.root(), dir.path());
     assert_eq!(
         names_and_rel_dirs(&workspace),
-        [("pkg-b", "a/b"), ("root", ".")]
+        [("root", "."), ("pkg-b", "a/b")]
     );
 }
 
@@ -950,7 +1076,11 @@ fn re_roots_to_an_npm_root_with_a_parent_pattern() {
     assert_eq!(workspace.root(), dir.path().join("root"));
     assert_eq!(
         names_and_rel_dirs(&workspace),
-        [("pkg-a", "packages/a"), ("pkg-o", "../ext/o")]
+        [
+            ("<unnamed>", "."),
+            ("pkg-o", "../ext/o"),
+            ("pkg-a", "packages/a")
+        ]
     );
 }
 
@@ -985,7 +1115,7 @@ fn a_broken_ancestor_manifest_is_passed_over_with_a_warning() {
     assert_eq!(workspace.root(), dir.path());
     assert_eq!(
         names_and_rel_dirs(&workspace),
-        [("pkg-b", "a/b"), ("root", ".")]
+        [("root", "."), ("pkg-b", "a/b")]
     );
     let warnings = warning_lines(&output);
     assert_eq!(warnings.len(), 1, "{output}");
@@ -1039,7 +1169,7 @@ fn odd_manifests_during_the_root_search() {
 }
 
 #[test]
-fn a_broken_member_manifest_is_an_error_naming_the_file() {
+fn a_broken_package_manifest_is_an_error_naming_the_file() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
@@ -1078,13 +1208,16 @@ fn reads_manifests_through_a_bom() {
     );
     let workspace = discover_ok(dir.path());
     assert_eq!(workspace.root(), dir.path());
-    assert_eq!(names_and_rel_dirs(&workspace), [("pkg-a", "packages/a")]);
+    assert_eq!(
+        names_and_rel_dirs(&workspace),
+        [("<unnamed>", "."), ("pkg-a", "packages/a")]
+    );
 }
 
 // Yarn worktrees
 
 #[test]
-fn a_yarn_lock_alone_is_a_workspace_root_without_members() {
+fn a_yarn_lock_alone_is_a_workspace_root_without_packages() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "yarn.lock", "");
     write_file(dir.path(), "a/package.json", &pkg("pkg-a"));
@@ -1094,7 +1227,7 @@ fn a_yarn_lock_alone_is_a_workspace_root_without_members() {
 }
 
 #[test]
-fn a_yarn_lock_beside_a_manifest_makes_the_root_the_only_member() {
+fn a_yarn_lock_beside_a_manifest_makes_the_root_the_only_package() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "yarn.lock", "");
     write_file(dir.path(), "package.json", &pkg("root"));
@@ -1116,7 +1249,7 @@ fn a_yarn_lock_beside_workspaces_is_a_yarn_root() {
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("pkg-a", "packages/a"), ("root", ".")]
+        [("root", "."), ("pkg-a", "packages/a")]
     );
 }
 
@@ -1132,7 +1265,7 @@ fn a_yarn_root_reads_the_workspaces_object_form() {
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("pkg-a", "packages/a")]
+        [("<unnamed>", "."), ("pkg-a", "packages/a")]
     );
 }
 
@@ -1168,7 +1301,7 @@ fn a_yarn_root_ignores_an_invalid_workspaces() {
 }
 
 #[test]
-fn a_yarn_member_with_an_invalid_workspaces_declares_no_worktree() {
+fn a_yarn_package_with_an_invalid_workspaces_declares_no_worktree() {
     for workspaces in [
         "\"nested/*\"",
         "[\"nested/*\", 42]",
@@ -1195,14 +1328,14 @@ fn a_yarn_member_with_an_invalid_workspaces_declares_no_worktree() {
         );
         assert_eq!(
             names_and_rel_dirs(&discover_ok(dir.path())),
-            [("pkg-a", "packages/a")],
+            [("<unnamed>", "."), ("pkg-a", "packages/a")],
             "{workspaces}"
         );
     }
 }
 
 #[test]
-fn a_yarn_member_expands_its_own_workspaces_field() {
+fn a_yarn_package_expands_its_own_workspaces_field() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "yarn.lock", "");
     write_file(
@@ -1235,22 +1368,22 @@ fn a_yarn_member_expands_its_own_workspaces_field() {
     assert_eq!(
         names_and_rel_dirs(&workspace),
         [
-            ("pkg-a", "packages/a"),
-            ("pkg-b", "packages/b"),
-            ("pkg-x", "packages/a/nested/x"),
-            ("pkg-y", "packages/a/nested/y"),
-            ("pkg-z", "packages/a/nested/x/deep/z"),
             ("root", "."),
+            ("pkg-a", "packages/a"),
+            ("pkg-x", "packages/a/nested/x"),
+            ("pkg-z", "packages/a/nested/x/deep/z"),
+            ("pkg-y", "packages/a/nested/y"),
+            ("pkg-b", "packages/b"),
         ]
     );
     assert_eq!(
-        workspace.member("pkg-z").unwrap().dir(),
+        workspace.package("pkg-z").unwrap().dir(),
         dir.path().join("packages/a/nested/x/deep/z")
     );
 }
 
 #[test]
-fn a_yarn_member_reads_the_object_form_and_a_null_field() {
+fn a_yarn_package_reads_the_object_form_and_a_null_field() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "yarn.lock", "");
     write_file(
@@ -1276,6 +1409,7 @@ fn a_yarn_member_reads_the_object_form_and_a_null_field() {
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
         [
+            ("<unnamed>", "."),
             ("desktop", "packages/desktop"),
             ("desktop-app", "packages/desktop/app"),
             ("mobile", "packages/mobile"),
@@ -1284,7 +1418,7 @@ fn a_yarn_member_reads_the_object_form_and_a_null_field() {
 }
 
 #[test]
-fn a_root_negation_does_not_reach_a_yarn_member_declaration() {
+fn a_root_negation_does_not_reach_a_yarn_package_declaration() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "yarn.lock", "");
     write_file(
@@ -1306,13 +1440,17 @@ fn a_root_negation_does_not_reach_a_yarn_member_declaration() {
     }
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("pkg-a", "packages/a"), ("pkg-x", "packages/a/nested/x")]
+        [
+            ("<unnamed>", "."),
+            ("pkg-a", "packages/a"),
+            ("pkg-x", "packages/a/nested/x")
+        ]
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn a_yarn_member_symlinked_to_itself_is_expanded_once() {
+fn a_yarn_package_symlinked_to_itself_is_expanded_once() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "yarn.lock", "");
     write_file(
@@ -1328,7 +1466,7 @@ fn a_yarn_member_symlinked_to_itself_is_expanded_once() {
     std::os::unix::fs::symlink(".", dir.path().join("packages/x/loop")).unwrap();
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("pkg-x", "packages/x")]
+        [("<unnamed>", "."), ("pkg-x", "packages/x")]
     );
 }
 
@@ -1347,7 +1485,10 @@ fn a_yarn_root_listed_by_a_parent_pattern_is_expanded_once() {
         "{ \"name\": \"pkg-a\", \"version\": \"1.0\" }\n",
     );
     let (workspace, output) = discover_captured(&dir.path().join("root"));
-    assert_eq!(names(&workspace), [] as [&str; 0]);
+    assert_eq!(
+        names_and_rel_dirs(&workspace),
+        [("<unnamed>", "."), ("pkg-a", "packages/a")]
+    );
     let warnings = warning_lines(&output);
     assert_eq!(warnings.len(), 1, "{output}");
     assert!(
@@ -1357,7 +1498,7 @@ fn a_yarn_root_listed_by_a_parent_pattern_is_expanded_once() {
 }
 
 #[test]
-fn a_yarn_member_declaration_reaches_outside_its_directory() {
+fn a_yarn_package_declaration_reaches_outside_its_directory() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "root/yarn.lock", "");
     write_file(
@@ -1373,9 +1514,10 @@ fn a_yarn_member_declaration_reaches_outside_its_directory() {
     write_file(dir.path(), "root/packages/b/package.json", &pkg("pkg-b"));
     write_file(dir.path(), "ext/o/package.json", &pkg("pkg-o"));
     let expected = [
+        ("<unnamed>", "."),
+        ("pkg-o", "../ext/o"),
         ("pkg-a", "packages/a"),
         ("pkg-b", "packages/b"),
-        ("pkg-o", "../ext/o"),
     ];
     assert_eq!(
         names_and_rel_dirs(&discover_ok(&dir.path().join("root"))),
@@ -1389,17 +1531,17 @@ fn a_yarn_member_declaration_reaches_outside_its_directory() {
     let workspace = discover_ok(&dir.path().join("root"));
     assert_eq!(names_and_rel_dirs(&workspace), expected);
     assert_eq!(
-        workspace.member("pkg-b").unwrap().dir(),
+        workspace.package("pkg-b").unwrap().dir(),
         dir.path().join("root/packages/b")
     );
     assert_eq!(
-        workspace.member("pkg-o").unwrap().dir(),
+        workspace.package("pkg-o").unwrap().dir(),
         dir.path().join("ext/o")
     );
 }
 
 #[test]
-fn a_yarn_member_declaration_climbing_back_into_the_root_is_spelled_from_the_root() {
+fn a_yarn_package_declaration_climbing_back_into_the_root_is_spelled_from_the_root() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "root/yarn.lock", "");
     write_file(
@@ -1416,17 +1558,21 @@ fn a_yarn_member_declaration_climbing_back_into_the_root_is_spelled_from_the_roo
     let workspace = discover_ok(&dir.path().join("root"));
     assert_eq!(
         names_and_rel_dirs(&workspace),
-        [("pkg-a", "packages/a"), ("pkg-c", "other/c")]
+        [
+            ("<unnamed>", "."),
+            ("pkg-c", "other/c"),
+            ("pkg-a", "packages/a")
+        ]
     );
     assert_eq!(
-        workspace.member("pkg-c").unwrap().dir(),
+        workspace.package("pkg-c").unwrap().dir(),
         dir.path().join("root/other/c")
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn a_symlinked_yarn_member_declaration_climbs_the_lexical_parent() {
+fn a_symlinked_yarn_package_declaration_climbs_the_lexical_parent() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "root/yarn.lock", "");
     write_file(
@@ -1448,12 +1594,16 @@ fn a_symlinked_yarn_member_declaration_climbs_the_lexical_parent() {
     std::os::unix::fs::symlink("../../real/a", dir.path().join("root/packages/link")).unwrap();
     assert_eq!(
         names_and_rel_dirs(&discover_ok(&dir.path().join("root"))),
-        [("lexical-b", "packages/b"), ("pkg-a", "packages/link")]
+        [
+            ("<unnamed>", "."),
+            ("lexical-b", "packages/b"),
+            ("pkg-a", "packages/link")
+        ]
     );
 }
 
 #[test]
-fn a_yarn_member_declaration_takes_the_pattern_error() {
+fn a_yarn_package_declaration_takes_the_pattern_error() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "yarn.lock", "");
     write_file(
@@ -1476,7 +1626,7 @@ fn a_yarn_member_declaration_takes_the_pattern_error() {
 }
 
 #[test]
-fn an_npm_member_does_not_expand_its_workspaces_field() {
+fn an_npm_package_does_not_expand_its_workspaces_field() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
@@ -1495,7 +1645,7 @@ fn an_npm_member_does_not_expand_its_workspaces_field() {
     );
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("pkg-a", "packages/a")]
+        [("<unnamed>", "."), ("pkg-a", "packages/a")]
     );
 }
 
@@ -1523,9 +1673,9 @@ fn double_star_matches_zero_and_more_components() {
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
         [
-            ("deep", "packages/nested/deep"),
             ("direct", "packages"),
             ("old", "packages/bower_components/old"),
+            ("deep", "packages/nested/deep"),
         ]
     );
 
@@ -1564,16 +1714,16 @@ fn node_modules_is_never_entered_nor_named() {
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
         [
-            ("old", "bower_components/old"),
+            ("root", "."),
             ("pkg-a", "a"),
-            ("root", ".")
+            ("old", "bower_components/old")
         ]
     );
     for (patterns, expected) in [
         (&["node_modules/evil"][..], &[("root", ".")][..]),
         (&["node_modules/*"], &[("root", ".")]),
         (&[".yarn/x"], &[("root", "."), ("yarn-x", ".yarn/x")]),
-        (&[".git/c"], &[("git-c", ".git/c"), ("root", ".")]),
+        (&[".git/c"], &[("root", "."), ("git-c", ".git/c")]),
     ] {
         let list: Vec<String> = patterns.iter().map(|p| format!("  - \"{p}\"")).collect();
         write_file(
@@ -1670,9 +1820,18 @@ fn expands_brace_alternatives() {
             "packages/{a,b/c}/package.json",
             &pkg("pkg-braced"),
         );
+        let expected: &[(&str, &str)] = if npm {
+            &[
+                ("<unnamed>", "."),
+                ("pkg-a", "packages/a"),
+                ("pkg-bc", "packages/b/c"),
+            ]
+        } else {
+            &[("pkg-a", "packages/a"), ("pkg-bc", "packages/b/c")]
+        };
         assert_eq!(
             names_and_rel_dirs(&discover_ok(dir.path())),
-            [("pkg-a", "packages/a"), ("pkg-bc", "packages/b/c")],
+            expected,
             "npm={npm}"
         );
     }
@@ -1689,11 +1848,11 @@ fn a_leading_parent_pattern_reaches_outside_the_root() {
     write_file(dir.path(), "ws/package.json", &pkg("root"));
     write_file(dir.path(), "ws/app/package.json", &pkg("app"));
     write_file(dir.path(), "shared/package.json", &pkg("shared"));
-    let expected = [("app", "app"), ("root", "."), ("shared", "../shared")];
+    let expected = [("root", "."), ("shared", "../shared"), ("app", "app")];
     let workspace = discover_ok(&dir.path().join("ws"));
     assert_eq!(names_and_rel_dirs(&workspace), expected);
     assert_eq!(
-        workspace.member("shared").unwrap().dir(),
+        workspace.package("shared").unwrap().dir(),
         dir.path().join("shared")
     );
     assert_eq!(
@@ -1749,7 +1908,7 @@ fn the_root_listed_by_a_parent_pattern_keeps_its_dot_spelling() {
 }
 
 #[test]
-fn a_parent_detour_to_a_member_collapses_into_the_direct_spelling() {
+fn a_parent_detour_to_a_package_collapses_into_the_direct_spelling() {
     for patterns in [["../*/*", "*"], ["*", "../*/*"]] {
         for yarn in [false, true] {
             let dir = tempfile::tempdir().unwrap();
@@ -1774,9 +1933,14 @@ fn a_parent_detour_to_a_member_collapses_into_the_direct_spelling() {
                 );
             }
             write_file(dir.path(), "ws/a/package.json", &pkg("pkg-a"));
+            let expected: &[(&str, &str)] = if yarn {
+                &[("<unnamed>", "."), ("pkg-a", "a")]
+            } else {
+                &[("pkg-a", "a")]
+            };
             assert_eq!(
                 names_and_rel_dirs(&discover_ok(&dir.path().join("ws"))),
-                [("pkg-a", "a")],
+                expected,
                 "{patterns:?} yarn={yarn}"
             );
         }
@@ -1850,7 +2014,7 @@ fn a_negation_matches_the_spelling_relative_to_the_root() {
 }
 
 #[test]
-fn a_bare_parent_pattern_makes_the_parent_a_member() {
+fn a_bare_parent_pattern_makes_the_parent_a_package() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "parent/package.json", &pkg("parent"));
     write_file(
@@ -1877,7 +2041,7 @@ fn mixes_patterns_of_different_ascents() {
     }
     assert_eq!(
         names_and_rel_dirs(&discover_ok(&dir.path().join("g/p/ws"))),
-        [("a", "a"), ("x", "../x"), ("y", "../../y")]
+        [("y", "../../y"), ("x", "../x"), ("a", "a")]
     );
 }
 
@@ -1941,7 +2105,10 @@ fn filesystem_errors_warn_but_do_not_abort() {
         fs::set_permissions(dir.path().join(denied), fs::Permissions::from_mode(0o755)).unwrap();
     }
     let workspace = result.unwrap().unwrap();
-    assert_eq!(names_and_rel_dirs(&workspace), [("pkg-a", "packages/a")]);
+    assert_eq!(
+        names_and_rel_dirs(&workspace),
+        [("<unnamed>", "."), ("pkg-a", "packages/a")]
+    );
     let warnings = warning_lines(&output);
     assert_eq!(warnings.len(), 2, "{output}");
     let denied = dir.path().join("packages/denied").display().to_string();
@@ -1994,9 +2161,14 @@ fn negation_is_order_independent() {
             );
         }
         let (workspace, output) = discover_captured(dir.path());
+        let expected: &[(&str, &str)] = if marker == "package.json" {
+            &[("<unnamed>", "."), ("pkg-a", "packages/a")]
+        } else {
+            &[("pkg-a", "packages/a")]
+        };
         assert_eq!(
             names_and_rel_dirs(&workspace),
-            [("pkg-a", "packages/a")],
+            expected,
             "{marker} (yarn.lock: {lock}): {text}"
         );
         assert!(
@@ -2091,8 +2263,8 @@ fn a_wildcard_enters_a_symlink_one_level_and_a_double_star_never_does() {
             &["packages/*/**"],
             &[
                 ("pkg-a", "packages/a"),
-                ("sub", "packages/link/sub"),
                 ("target", "packages/link"),
+                ("sub", "packages/link/sub"),
             ],
         ),
     ] {
@@ -2126,6 +2298,7 @@ fn a_wildcard_enters_a_symlink_one_level_and_a_double_star_never_does() {
     assert_eq!(
         names_and_dirs(&discover_ok(dir.path())),
         [
+            ("<unnamed>", dir.path()),
             ("pkg-a", dir.path().join("packages/a").as_path()),
             ("pkg-b", dir.path().join("packages/b").as_path()),
         ]
@@ -2137,7 +2310,7 @@ fn a_wildcard_enters_a_symlink_one_level_and_a_double_star_never_does() {
     std::os::unix::fs::symlink(".", dir.path().join("packages/loop")).unwrap();
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("packages", "packages/loop"), ("pkg-a", "packages/a")]
+        [("pkg-a", "packages/a"), ("packages", "packages/loop")]
     );
     write_file(
         dir.path(),
@@ -2161,7 +2334,7 @@ fn a_literal_segment_follows_a_symlink() {
     let workspace = discover_ok(dir.path());
     assert_eq!(names_and_rel_dirs(&workspace), [("pkg-a", "link/a")]);
     assert_eq!(
-        workspace.member("pkg-a").unwrap().dir(),
+        workspace.package("pkg-a").unwrap().dir(),
         dir.path().join("link/a")
     );
     write_file(
@@ -2171,7 +2344,7 @@ fn a_literal_segment_follows_a_symlink() {
     );
     assert_eq!(
         names_and_rel_dirs(&discover_ok(dir.path())),
-        [("pkg-a", "link/a"), ("real", "link"), ("sub", "link/a/sub")]
+        [("real", "link"), ("pkg-a", "link/a"), ("sub", "link/a/sub")]
     );
 }
 
@@ -2211,15 +2384,15 @@ fn a_forced_root_reads_only_its_own_markers() {
     assert_eq!(
         names_and_rel_dirs(&workspace),
         [
-            ("inner", "packages/inner"),
             ("pkg-a", "packages/a"),
-            ("pkg-b", "packages/b")
+            ("pkg-b", "packages/b"),
+            ("inner", "packages/inner")
         ]
     );
 }
 
 #[test]
-fn a_forced_root_without_a_manifest_has_no_members() {
+fn a_forced_root_without_a_manifest_has_no_packages() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
     let mut result = None;
@@ -2275,14 +2448,14 @@ fn listed_packages_replace_the_enumeration() {
     assert_eq!(
         names_and_dirs(&workspace),
         [
-            ("pkg-c", root.join("other/c").as_path()),
             ("root", root.as_path()),
             ("shared", dir.path().join("shared").as_path()),
+            ("pkg-c", root.join("other/c").as_path()),
         ]
     );
     assert_eq!(
         names_and_rel_dirs(&workspace),
-        [("pkg-c", "other/c"), ("root", "."), ("shared", "../shared")]
+        [("root", "."), ("shared", "../shared"), ("pkg-c", "other/c")]
     );
     assert_eq!(names(&load_listed(&root, &[]).unwrap()), [] as [&str; 0]);
 
@@ -2319,8 +2492,9 @@ fn listed_packages_win_over_the_reroot_enumeration() {
     write_file(dir.path(), "packages/b/package.json", &pkg("pkg-b"));
     let root = Root::find(&dir.path().join("packages/a")).unwrap();
     assert_eq!(root.dir(), dir.path());
-    let packages = vec!["packages/b".to_owned()];
-    let workspace = Workspace::load(root, Some(&packages)).unwrap();
+    let mut config = Config::default();
+    config.packages = Some(vec!["packages/b".to_owned()]);
+    let workspace = Workspace::load(root, &config, &[]).unwrap();
     assert_eq!(names_and_rel_dirs(&workspace), [("pkg-b", "packages/b")]);
 }
 
@@ -2340,7 +2514,7 @@ fn a_listed_package_without_a_readable_manifest_is_an_error() {
 }
 
 #[test]
-fn listed_packages_take_the_member_qualification() {
+fn listed_packages_take_the_qualification() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
     write_file(
@@ -2359,12 +2533,21 @@ fn listed_packages_take_the_member_qualification() {
         &["packages/d", "packages/c", "packages/b", "packages/a"],
     )
     .unwrap();
-    assert_eq!(names_and_rel_dirs(&workspace), [("pkg-a", "packages/a")]);
+    assert_eq!(
+        names_and_rel_dirs(&workspace),
+        [
+            ("pkg-a", "packages/a"),
+            ("pkg-b", "packages/b"),
+            ("dup", "packages/c"),
+            ("dup", "packages/d")
+        ]
+    );
+    assert_eq!(versionable_names(&workspace), ["pkg-a"]);
 }
 
 #[cfg(unix)]
 #[test]
-fn listed_aliases_of_one_directory_collapse_into_one_member() {
+fn listed_aliases_of_one_directory_collapse_into_one_package() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "real/a/package.json", &pkg("pkg-a"));
     std::os::unix::fs::symlink("real", dir.path().join("link")).unwrap();
@@ -2408,14 +2591,14 @@ fn listed_packages_are_spelled_in_the_normal_form() {
     .unwrap();
     assert_eq!(
         names_and_rel_dirs(&workspace),
-        [("pkg-a", "packages/a"), ("pkg-b", "b"), ("root", ".")]
+        [("root", "."), ("pkg-b", "b"), ("pkg-a", "packages/a")]
     );
     assert_eq!(
-        workspace.member("pkg-a").unwrap().dir(),
+        workspace.package("pkg-a").unwrap().dir(),
         root.join("packages/a")
     );
-    assert_eq!(workspace.member("pkg-b").unwrap().dir(), root.join("b"));
-    assert_eq!(workspace.member("root").unwrap().dir(), root);
+    assert_eq!(workspace.package("pkg-b").unwrap().dir(), root.join("b"));
+    assert_eq!(workspace.package("root").unwrap().dir(), root);
 }
 
 #[test]
