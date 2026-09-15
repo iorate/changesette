@@ -9,7 +9,10 @@ use jsonc_parser::{
     cst::{CstRootNode, CstStringLit},
 };
 
-use crate::jsonc::{set_string_value, string_prop};
+use crate::{
+    bump::parse_version,
+    jsonc::{set_string_value, string_prop},
+};
 
 pub struct PackageJson {
     path: PathBuf,
@@ -49,11 +52,8 @@ impl PackageJson {
             let raw_version = version_lit
                 .decoded_value()
                 .context("top-level \"version\" must be a valid string")?;
-            raw_version
-                .parse::<nodejs_semver::Version>()
-                .with_context(|| {
-                    format!("top-level \"version\" ({raw_version:?}) is not a valid semver version")
-                })?;
+            parse_version(&raw_version)
+                .with_context(|| format!("invalid top-level \"version\" {raw_version:?}"))?;
         }
 
         Ok(Self {
