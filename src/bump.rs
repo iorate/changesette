@@ -1,4 +1,6 @@
-use semver::{Prerelease, Version};
+use std::fmt;
+
+use nodejs_semver::Version;
 
 // Ordered so that `max` picks the widest bump.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -21,16 +23,15 @@ impl Bump {
 
 #[must_use]
 pub fn next_version(current: &Version, bump: Bump) -> Version {
-    let pre = !current.pre.is_empty();
+    let (major, minor, patch) = (current.major(), current.minor(), current.patch());
+    let pre = current.is_prerelease();
     match bump {
-        Bump::Major if pre && current.minor == 0 && current.patch == 0 => {
-            Version::new(current.major, 0, 0)
-        }
-        Bump::Major => Version::new(checked_inc(current.major), 0, 0),
-        Bump::Minor if pre && current.patch == 0 => Version::new(current.major, current.minor, 0),
-        Bump::Minor => Version::new(current.major, checked_inc(current.minor), 0),
-        Bump::Patch if pre => Version::new(current.major, current.minor, current.patch),
-        Bump::Patch => Version::new(current.major, current.minor, checked_inc(current.patch)),
+        Bump::Major if pre && minor == 0 && patch == 0 => Version::from((major, 0, 0)),
+        Bump::Major => Version::from((checked_inc(major), 0, 0)),
+        Bump::Minor if pre && patch == 0 => Version::from((major, minor, 0)),
+        Bump::Minor => Version::from((major, checked_inc(minor), 0)),
+        Bump::Patch if pre => Version::from((major, minor, patch)),
+        Bump::Patch => Version::from((major, minor, checked_inc(patch))),
     }
 }
 
@@ -41,26 +42,76 @@ fn checked_inc(number: u64) -> u64 {
     number.checked_add(1).expect("version number overflow")
 }
 
-pub fn pre_counter(current: &Version, tag: &str) -> u64 {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prerelease(String);
+
+impl Prerelease {
+    #[must_use]
+    pub fn new(text: &str) -> Option<Self> {
+        // `Version::parse` ignores the input past the first byte it cannot read and
+        // folds a leading zero away (`01` becomes `1`), so it cannot validate
+        // a pre-release written by the user.
+        let valid = text.split('.').all(|id| {
+            !id.is_empty()
+                && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && !(id.len() > 1 && id.starts_with('0') && id.bytes().all(|b| b.is_ascii_digit()))
+        });
+        valid.then(|| Self(text.to_string()))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn with_counter(&self, counter: u64) -> Self {
+        Self(format!("{}.{}", self.0, counter))
+    }
+}
+
+impl fmt::Display for Prerelease {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+pub fn pre_counter(current: &Version, tag: &Prerelease) -> u64 {
     // Counting on the tag, rather than on the second pre-release identifier,
     // keeps a dotted tag (`beta.2`) counting and restarts on a tag switch.
-    current
-        .pre
-        .as_str()
-        .strip_prefix(&format!("{tag}."))
+    let pre = current
+        .pre_release()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(".");
+    pre.strip_prefix(&format!("{tag}."))
         .and_then(|rest| rest.parse::<u64>().ok())
         .map_or(0, checked_inc)
 }
 
 #[must_use]
-pub fn next_pre_version(current: &Version, bump: Bump, tag: &str) -> Version {
+pub fn next_pre_version(current: &Version, bump: Bump, tag: &Prerelease) -> Version {
     next_pre_version_with(current, bump, tag, pre_counter(current, tag))
 }
 
 #[must_use]
-pub fn next_pre_version_with(current: &Version, bump: Bump, tag: &str, counter: u64) -> Version {
-    let mut version = next_version(current, bump);
-    version.pre =
-        Prerelease::new(&format!("{tag}.{counter}")).expect("a validated tag stays valid");
-    version
+pub fn next_pre_version_with(
+    current: &Version,
+    bump: Bump,
+    tag: &Prerelease,
+    counter: u64,
+) -> Version {
+    with_pre(&next_version(current, bump), &tag.with_counter(counter))
+}
+
+#[must_use]
+pub fn with_pre(version: &Version, pre: &Prerelease) -> Version {
+    Version::parse(format!(
+        "{}.{}.{}-{pre}",
+        version.major(),
+        version.minor(),
+        version.patch()
+    ))
+    .expect("a valid pre-release parses")
 }

@@ -18,7 +18,7 @@ fn rewrite(case: &str) -> String {
     .unwrap();
     let mut package_json = PackageJson::load(dir.path()).unwrap();
     package_json
-        .set_version(&semver::Version::new(10, 1, 0))
+        .set_version(&nodejs_semver::Version::from((10, 1, 0)))
         .unwrap();
     fs::write(package_json.path(), package_json.text()).unwrap();
     fs::read_to_string(dir.path().join("package.json")).unwrap()
@@ -69,7 +69,7 @@ fn rejects_an_invalid_manifest() {
     let mut package_json = PackageJson::load(&fixture("version-missing")).unwrap();
     assert!(
         package_json
-            .set_version(&semver::Version::new(10, 1, 0))
+            .set_version(&nodejs_semver::Version::from((10, 1, 0)))
             .is_err()
     );
 }
