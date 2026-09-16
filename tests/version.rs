@@ -2024,10 +2024,7 @@ fn packages_rewritten_without_a_bump_are_none_releases() {
     );
     write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
     let root_release = json!({
-        "name": null,
         "type": "none",
-        "oldVersion": null,
-        "newVersion": null,
         "changesets": [],
         "dir": "."
     });

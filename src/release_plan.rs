@@ -37,10 +37,13 @@ pub struct ReleaseRef {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Release {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(rename = "type")]
     pub bump: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub old_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub new_version: Option<String>,
     pub changesets: Vec<String>,
     pub dir: String,
