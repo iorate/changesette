@@ -130,12 +130,7 @@ fn releases(planned: &PlannedVersion) -> Vec<String> {
 }
 
 fn plan_json(planned: &PlannedVersion) -> Value {
-    serde_json::to_value(release_plan::build(
-        &planned.changes,
-        &planned.releases,
-        planned.pre.as_ref(),
-    ))
-    .unwrap()
+    serde_json::to_value(release_plan::build(planned)).unwrap()
 }
 
 fn status_to_file(dir: &Path, path: &Path) -> Result<()> {
@@ -407,6 +402,7 @@ fn release_plan_lists_skipped_changesets_without_a_release() {
                     "oldVersion": "3.1.4",
                     "newVersion": "3.2.0",
                     "changesets": [ID_A],
+                    "dir": "packages/a",
                     "changelogEntry": "### Minor Changes\n\n- Improve pkg-a"
                 }
             ]
@@ -786,6 +782,7 @@ fn release_plan_reports_the_group_old_version() {
             "oldVersion": "3.1.4",
             "newVersion": "3.2.0",
             "changesets": [],
+            "dir": "packages/b",
             "changelogEntry": ""
         })
     );
@@ -1304,6 +1301,7 @@ fn status_writes_the_plan_without_modifying_files() {
                     "oldVersion": "1.2.3",
                     "newVersion": "1.3.0",
                     "changesets": [ID_B],
+                    "dir": ".",
                     "changelogEntry": "### Minor Changes\n\n- Add feature"
                 }
             ]
@@ -1871,6 +1869,7 @@ fn release_plan_reports_a_dependent_release() {
             "oldVersion": "2.0.0",
             "newVersion": "2.0.1",
             "changesets": [],
+            "dir": "packages/b",
             "changelogEntry": "### Patch Changes\n\n- Updated dependencies\n  - pkg-a@3.1.5"
         })
     );
@@ -2003,6 +2002,56 @@ fn ranges_are_raised_in_unreleased_dependents_and_the_unnamed_root() {
         b_manifest("~3.1.5")
     );
     assert!(!exists(dir.path(), "packages/b/CHANGELOG.md"));
+}
+
+#[test]
+fn packages_rewritten_without_a_bump_are_none_releases() {
+    let dir = workspace_dir();
+    write_file(
+        dir.path(),
+        "package.json",
+        "{\n  \"workspaces\": [\"packages/*\"],\n  \"dependencies\": {\n    \"pkg-a\": \"^3.1.4\"\n  }\n}\n",
+    );
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        &dependent_pkg("pkg-b", "2.0.0", "dependencies", "pkg-a", "~3.1.4"),
+    );
+    write_file(
+        dir.path(),
+        "packages/c/package.json",
+        &dependent_pkg("pkg-c", "1.0.0", "dependencies", "pkg-a", "workspace:^"),
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    let root_release = json!({
+        "name": null,
+        "type": "none",
+        "oldVersion": null,
+        "newVersion": null,
+        "changesets": [],
+        "dir": "."
+    });
+    let plan_value = plan_json(&plan(dir.path()));
+    assert_eq!(plan_value["releases"][0], root_release);
+    assert_eq!(plan_value["releases"][1]["name"], "pkg-a");
+    assert_eq!(
+        plan_value["releases"][2],
+        json!({
+            "name": "pkg-b",
+            "type": "none",
+            "oldVersion": "2.0.0",
+            "newVersion": "2.0.0",
+            "changesets": [],
+            "dir": "packages/b"
+        })
+    );
+    assert_eq!(plan_value["releases"].as_array().unwrap().len(), 3);
+
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "none")], "Note pkg-b");
+    let plan_value = plan_json(&plan(dir.path()));
+    assert_eq!(plan_value["releases"][2]["type"], "none");
+    assert_eq!(plan_value["releases"][2]["changesets"], json!([ID_B]));
+    assert_eq!(plan_value["releases"].as_array().unwrap().len(), 3);
 }
 
 #[test]

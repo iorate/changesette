@@ -81,10 +81,7 @@ pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<(
     }
 
     if let Some(path) = &args.output {
-        return release_plan::write_file(
-            path,
-            &release_plan::build(&planned.changes, &planned.releases, planned.pre.as_ref()),
-        );
+        return release_plan::write_file(path, &release_plan::build(&planned));
     }
 
     if planned.changes.is_empty() && !exiting {

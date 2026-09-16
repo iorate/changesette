@@ -107,13 +107,8 @@ pub fn plan_version(
         &releases,
         snapshot_versions.is_some(),
         config.update_internal_dependencies,
-    )?;
-    render_changelog_entries(
-        &workspace,
-        &consumed_changes,
-        &dependency_updates,
-        &mut releases,
-    )?;
+    );
+    render_changelog_entries(&consumed_changes, &dependency_updates, &mut releases);
 
     Ok(PlannedVersion {
         workspace,
@@ -143,7 +138,7 @@ fn plan_dependency_updates(
     releases: &[PlannedRelease],
     snapshot: bool,
     min: UpdateInternalDependencies,
-) -> Result<Vec<DependencyUpdate>> {
+) -> Vec<DependencyUpdate> {
     let mut targets = BTreeMap::new();
     for release in releases {
         let Some(bump) = release.bump else {
@@ -155,10 +150,7 @@ fn plan_dependency_updates(
         } else {
             Target::Release(new_version)
         };
-        targets.insert(
-            workspace.package(&release.name)?.rel_dir(),
-            (release.name.as_str(), bump, target),
-        );
+        targets.insert(&release.dir, (release.name.as_str(), bump, target));
     }
     let mut updates = Vec::new();
     for edge in graph.iter() {
@@ -189,7 +181,7 @@ fn plan_dependency_updates(
             b.field,
         ))
     });
-    Ok(updates)
+    updates
 }
 
 fn filter_changes(
@@ -249,6 +241,7 @@ fn quote_list(names: &[&str]) -> String {
 }
 
 pub struct PlannedRelease {
+    pub dir: RelDir,
     pub name: String,
     pub bump: Option<Bump>,
     pub old_version: Version,
@@ -324,6 +317,7 @@ fn plan_releases(
             None => draft.old_version.clone(),
         };
         releases.push(PlannedRelease {
+            dir: rel_dir.clone(),
             name: name.to_owned(),
             bump: draft.bump,
             old_version: draft.old_version.clone(),
@@ -338,18 +332,14 @@ fn plan_releases(
 }
 
 fn render_changelog_entries(
-    workspace: &Workspace,
     changes: &[LoadedChange],
     dependency_updates: &[DependencyUpdate],
     releases: &mut [PlannedRelease],
-) -> Result<()> {
+) {
     let mut new_versions = BTreeMap::new();
     for release in releases.iter() {
         if release.bump.is_some() {
-            new_versions.insert(
-                workspace.package(&release.name)?.rel_dir().clone(),
-                release.new_version.clone(),
-            );
+            new_versions.insert(release.dir.clone(), release.new_version.clone());
         }
     }
     for release in releases {
@@ -357,7 +347,7 @@ fn render_changelog_entries(
             continue;
         }
         let name = release.name.as_str();
-        let rel_dir = workspace.package(name)?.rel_dir();
+        let rel_dir = &release.dir;
         let summaries: Vec<(Bump, &str)> = changes
             .iter()
             .filter_map(|change| {
@@ -393,7 +383,6 @@ fn render_changelog_entries(
             .map(|(name, version)| (name.to_owned(), version.clone()))
             .collect();
     }
-    Ok(())
 }
 
 struct Draft<'a> {
@@ -713,7 +702,7 @@ pub fn stage_writes(
         let Some(entry) = &release.changelog_entry else {
             continue;
         };
-        let package = workspace.package(&release.name)?;
+        let package = &workspace[&release.dir];
         let mut package_json = PackageJson::load(package.dir())?;
         package_json.set_version(&release.new_version)?;
         manifests.insert(package.rel_dir().clone(), package_json);

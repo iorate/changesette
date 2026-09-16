@@ -34,7 +34,8 @@ pub fn run(workspace: &Workspace, args: AddArgs) -> Result<()> {
     );
 
     let changeset_dir = workspace.changeset_dir();
-    let versionables: Vec<Versionable> = workspace.versionables().collect();
+    let mut versionables: Vec<Versionable> = workspace.versionables().collect();
+    versionables.sort_by_key(Versionable::name);
     ensure!(
         !versionables.is_empty(),
         "no versionable packages found; ensure the packages are not private or ignored and have a version field in package.json"

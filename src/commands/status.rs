@@ -13,10 +13,7 @@ pub fn run(
     let planned = plan::plan_version(workspace, config, None)?;
 
     if let Some(path) = output_path {
-        return release_plan::write_file(
-            path,
-            &release_plan::build(&planned.changes, &planned.releases, planned.pre.as_ref()),
-        );
+        return release_plan::write_file(path, &release_plan::build(&planned));
     }
 
     let mut text = String::from("Packages to be bumped:");
