@@ -7,7 +7,7 @@ use tracing::warn;
 
 use crate::{bump::Bump, workspace::read_json};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     ignore: Vec<String>,
@@ -19,7 +19,24 @@ pub struct Config {
     pub update_internal_dependencies: UpdateInternalDependencies,
     pub bump_versions_with_workspace_protocol_only: bool,
     pub packages: Option<Vec<String>>,
-    pub ignore_internal_dependencies: bool,
+    pub manage_internal_dependencies: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            ignore: Vec::new(),
+            fixed: Vec::new(),
+            linked: Vec::new(),
+            private_packages_version: false,
+            snapshot_use_calculated_version: false,
+            snapshot_prerelease_template: None,
+            update_internal_dependencies: UpdateInternalDependencies::default(),
+            bump_versions_with_workspace_protocol_only: false,
+            packages: None,
+            manage_internal_dependencies: true,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -249,7 +266,7 @@ fn load_value(value: &Value) -> Result<Config> {
             Some(_) => bail!("\"bumpVersionsWithWorkspaceProtocolOnly\" must be a boolean"),
         };
 
-    let (packages, ignore_internal_dependencies) = load_changesette(object)?;
+    let (packages, manage_internal_dependencies) = load_changesette(object)?;
 
     Ok(Config {
         ignore,
@@ -261,23 +278,23 @@ fn load_value(value: &Value) -> Result<Config> {
         update_internal_dependencies,
         bump_versions_with_workspace_protocol_only,
         packages,
-        ignore_internal_dependencies,
+        manage_internal_dependencies,
     })
 }
 
 fn load_changesette(object: &Map<String, Value>) -> Result<(Option<Vec<String>>, bool)> {
     let changesette = match object.get("changesette") {
-        None => return Ok((None, false)),
+        None => return Ok((None, true)),
         Some(Value::Object(changesette)) => changesette,
         Some(_) => bail!("\"changesette\" must be an object"),
     };
-    let ignore_internal_dependencies = match changesette.get("ignoreInternalDependencies") {
-        None => false,
-        Some(Value::Bool(ignore)) => *ignore,
-        Some(_) => bail!("\"ignoreInternalDependencies\" in \"changesette\" must be a boolean"),
+    let manage_internal_dependencies = match changesette.get("manageInternalDependencies") {
+        None => true,
+        Some(Value::Bool(manage)) => *manage,
+        Some(_) => bail!("\"manageInternalDependencies\" in \"changesette\" must be a boolean"),
     };
     let packages = load_packages(changesette)?;
-    Ok((packages, ignore_internal_dependencies))
+    Ok((packages, manage_internal_dependencies))
 }
 
 fn load_packages(changesette: &Map<String, Value>) -> Result<Option<Vec<String>>> {

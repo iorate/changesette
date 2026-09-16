@@ -84,13 +84,13 @@ pub fn plan_version(
         changes.retain(|change| !change.in_pre);
     }
     let consumed_changes = filter_changes(&workspace, &changeset_dir, &changes)?;
-    let graph = if config.ignore_internal_dependencies {
-        DependentsGraph::default()
-    } else {
+    let graph = if config.manage_internal_dependencies {
         DependentsGraph::build(dependency::internal_dependencies(
             &workspace,
             config.bump_versions_with_workspace_protocol_only,
         )?)
+    } else {
+        DependentsGraph::default()
     };
     let mut releases = plan_releases(
         &workspace,
