@@ -37,6 +37,9 @@ pub fn run(
                 for id in &release.changeset_ids {
                     let _ = write!(text, "\n    - .changeset/{id}.md");
                 }
+                for (name, version) in &release.updated_dependencies {
+                    let _ = write!(text, "\n    - updated dependency {name}@{version}");
+                }
             }
         }
     }

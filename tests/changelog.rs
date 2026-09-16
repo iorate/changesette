@@ -5,11 +5,19 @@ use changesette::{
     bump::Bump,
     changelog::{extract_section, render_entry, render_section, upsert_section},
 };
+use nodejs_semver::Version;
 
 const ENTRY: &str = "### Minor Changes\n\n- Add SERPINFO satellites support";
+const UPDATED_DEPENDENCIES: &str = "- Updated dependencies\n  - pkg-a@1.2.3\n  - pkg-b@2.0.0";
 
 fn render(summaries: &[(Bump, &str)]) -> String {
-    render_section(&"10.1.0".parse().unwrap(), &render_entry(summaries))
+    render_section(&"10.1.0".parse().unwrap(), &render_entry(summaries, &[]))
+}
+
+fn render_with_updated_dependencies(summaries: &[(Bump, &str)]) -> String {
+    let a: Version = "1.2.3".parse().unwrap();
+    let b: Version = "2.0.0".parse().unwrap();
+    render_entry(summaries, &[("pkg-a", &a), ("pkg-b", &b)])
 }
 
 fn read_fixture(area: &str, case: &str, file: &str) -> String {
@@ -19,7 +27,7 @@ fn read_fixture(area: &str, case: &str, file: &str) -> String {
 fn upsert(case: &str, version: &str) -> String {
     let section = render_section(
         &version.parse().unwrap(),
-        &render_entry(&[(Bump::Minor, "Add SERPINFO satellites support")]),
+        &render_entry(&[(Bump::Minor, "Add SERPINFO satellites support")], &[]),
     );
     upsert_section(
         &read_fixture("changelog-insert", case, "CHANGELOG.md"),
@@ -75,11 +83,37 @@ fn orders_groups_and_omits_empty_ones() {
 fn renders_an_empty_summary_as_a_bare_bullet() {
     let section = render_section(
         &"1.3.0".parse().unwrap(),
-        &render_entry(&[(Bump::Minor, "")]),
+        &render_entry(&[(Bump::Minor, "")], &[]),
     );
     assert_eq!(
         upsert_section("", "ublacklist", "1.3.0", &section),
         "# ublacklist\n\n## 1.3.0\n\n### Minor Changes\n\n- \n"
+    );
+}
+
+#[test]
+fn lists_updated_dependencies_under_patch_changes() {
+    assert_eq!(
+        render_with_updated_dependencies(&[]),
+        format!("### Patch Changes\n\n{UPDATED_DEPENDENCIES}")
+    );
+}
+
+#[test]
+fn appends_updated_dependencies_after_the_patch_summaries() {
+    assert_eq!(
+        render_with_updated_dependencies(&[(Bump::Patch, "Fix something")]),
+        format!("### Patch Changes\n\n- Fix something\n\n{UPDATED_DEPENDENCIES}")
+    );
+}
+
+#[test]
+fn adds_a_patch_heading_for_updated_dependencies_after_the_other_groups() {
+    assert_eq!(
+        render_with_updated_dependencies(&[(Bump::Major, "Break something")]),
+        format!(
+            "### Major Changes\n\n- Break something\n\n### Patch Changes\n\n{UPDATED_DEPENDENCIES}"
+        )
     );
 }
 

@@ -7,27 +7,44 @@ pub enum Target {
     Snapshot(Version),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum Update {
+    Explicit(String),
+    // The text stays, but the version it resolves to changes, as with
+    // `workspace:*` or `*`, so the dependent still reports the release.
+    Implicit,
+}
+
 #[must_use]
-pub fn rewrite(
+pub fn update(
     spec: &Spec,
     target: &Target,
     bump: Bump,
     min: UpdateInternalDependencies,
-) -> Option<String> {
+) -> Option<Update> {
     match (spec, target) {
         (Spec::Any, Target::Release(new) | Target::Snapshot(new)) => {
-            new.is_prerelease().then(|| new.to_string())
+            if new.is_prerelease() {
+                Some(Update::Explicit(new.to_string()))
+            } else {
+                min.allows(bump).then_some(Update::Implicit)
+            }
         }
         (Spec::Range { workspace, .. }, Target::Snapshot(new)) => {
-            Some(with_protocol(*workspace, new.to_string()))
+            Some(Update::Explicit(with_protocol(*workspace, new.to_string())))
         }
         (Spec::Range { range, workspace }, Target::Release(new)) => {
             if range.satisfies(new) && !min.allows(bump) {
-                return None;
+                workspace.then_some(Update::Implicit)
+            } else {
+                Some(Update::Explicit(with_protocol(
+                    *workspace,
+                    raise(range, new),
+                )))
             }
-            Some(with_protocol(*workspace, raise(range, new)))
         }
-        (Spec::WorkspaceAlias(_) | Spec::WorkspacePath | Spec::External, _) => None,
+        (Spec::WorkspaceAlias(_) | Spec::WorkspacePath, _) => Some(Update::Implicit),
+        (Spec::External, _) => None,
     }
 }
 
