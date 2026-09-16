@@ -411,7 +411,7 @@ Settings specific to `changesette`. `manageInternalDependencies` set to `false` 
 
 ## Workspaces
 
-`changesette` works on npm / yarn / pnpm workspaces and manages the dependencies between their packages as changesets does: a package whose range on a released package no longer includes the new version is bumped as a patch, the ranges on a released package are raised to the new version (`workspace:` ranges are left alone), and a released package lists the new versions of its dependencies under "Updated dependencies" in its changelog. [`updateInternalDependencies`](#updateinternaldependencies), [`bumpVersionsWithWorkspaceProtocolOnly`](#bumpversionswithworkspaceprotocolonly), and [`changesette.manageInternalDependencies`](#changesette-1) adjust this.
+`changesette` works on npm / yarn / pnpm workspaces and manages the dependencies between their packages as changesets does: a package whose range on a released package no longer includes the new version is bumped as a patch, the ranges on a released package are raised to the new version (`workspace:*`, `workspace:^`, and `workspace:~` ranges are left alone), and a released package lists the new versions of its dependencies under "Updated dependencies" in its changelog. [`updateInternalDependencies`](#updateinternaldependencies), [`bumpVersionsWithWorkspaceProtocolOnly`](#bumpversionswithworkspaceprotocolonly), and [`changesette.manageInternalDependencies`](#changesette-1) adjust this.
 
 `changesette` resolves the workspace by rules of its own, which can differ from the package manager's. When they do, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
 
