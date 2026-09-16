@@ -539,6 +539,7 @@ fn pretty_plan(id: &str) -> String {
             "      \"changesets\": [\n",
             "        \"{0}\"\n",
             "      ],\n",
+            "      \"dir\": \".\",\n",
             "      \"changelogEntry\": \"### Minor Changes\\n\\n- Add feature\"\n",
             "    }}\n",
             "  ]\n",

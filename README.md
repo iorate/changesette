@@ -281,7 +281,7 @@ Applies all pending changesets: bumps each released package's `package.json`, in
 
 `--snapshot` and `--snapshot-prerelease-template` create a [snapshot release](#snapshot-releases) instead, bumping to throwaway `0.0.0-<suffix>` versions.
 
-`--output` (short form `-o`) suppresses the report and writes the release plan to the given file (`-` for stdout) as JSON, extending the changesets `ReleasePlan` type with `changelogEntry`:
+`--output` (short form `-o`) suppresses the report and writes the release plan to the given file (`-` for stdout) as JSON, extending the changesets `ReleasePlan` type with `dir` and `changelogEntry`:
 
 ```json
 {
@@ -306,6 +306,7 @@ Applies all pending changesets: bumps each released package's `package.json`, in
       "changesets": [
         "lovely-notable-rooster"
       ],
+      "dir": ".",
       "changelogEntry": "### Minor Changes\n\n- Add feature"
     }
   ]
@@ -411,7 +412,7 @@ Settings specific to `changesette`. `manageInternalDependencies` set to `false` 
 
 ## Workspaces
 
-`changesette` works on npm / yarn / pnpm workspaces and manages the dependencies between their packages as changesets does: a package whose range on a released package no longer includes the new version is bumped as a patch, the ranges on a released package are raised to the new version (`workspace:*`, `workspace:^`, and `workspace:~` ranges are left alone), and a released package lists the new versions of its dependencies under "Updated dependencies" in its changelog. [`updateInternalDependencies`](#updateinternaldependencies), [`bumpVersionsWithWorkspaceProtocolOnly`](#bumpversionswithworkspaceprotocolonly), and [`changesette.manageInternalDependencies`](#changesette-1) adjust this.
+`changesette` works on npm / yarn / pnpm workspaces and manages the dependencies between their packages. When a workspace package is released, the packages that depend on it are updated as well: a dependent whose range on it no longer includes the new version is bumped as a patch, and the range on the released package in every dependent's `package.json` is raised to the new version (`workspace:*`, `workspace:^`, and `workspace:~` ranges are left alone). Each dependent that is released, whether by its own changesets or by that patch bump, lists the new version under "Updated dependencies" in its changelog. [`updateInternalDependencies`](#updateinternaldependencies), [`bumpVersionsWithWorkspaceProtocolOnly`](#bumpversionswithworkspaceprotocolonly), and [`changesette.manageInternalDependencies`](#changesette-1) adjust this.
 
 `changesette` resolves the workspace by rules of its own, which can differ from the package manager's. When they do, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
 
