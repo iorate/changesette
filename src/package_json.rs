@@ -3,18 +3,21 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, bail};
 use jsonc_parser::{
     ParseOptions,
-    cst::{CstRootNode, CstStringLit},
+    cst::{CstObject, CstRootNode},
 };
 
-use crate::jsonc::{set_string_value, string_prop};
+use crate::{
+    jsonc::{object_prop, set_string_value, string_prop},
+    workspace::DependencyField,
+};
 
 pub struct PackageJson {
     path: PathBuf,
     root: CstRootNode,
-    version_lit: Option<CstStringLit>,
+    object: CstObject,
 }
 
 impl PackageJson {
@@ -36,38 +39,31 @@ impl PackageJson {
         let object = root
             .object_value()
             .context("the root value must be an object")?;
-
-        let name_lit = string_prop(&object, "name", "top-level \"name\"")?
-            .context("missing top-level \"name\"")?;
-        let name = name_lit
-            .decoded_value()
-            .context("top-level \"name\" must be a valid string")?;
-        ensure!(!name.is_empty(), "top-level \"name\" must not be empty");
-
-        let version_lit = string_prop(&object, "version", "top-level \"version\"")?;
-        if let Some(version_lit) = &version_lit {
-            let raw_version = version_lit
-                .decoded_value()
-                .context("top-level \"version\" must be a valid string")?;
-            raw_version
-                .parse::<nodejs_semver::Version>()
-                .with_context(|| {
-                    format!("top-level \"version\" ({raw_version:?}) is not a valid semver version")
-                })?;
-        }
-
-        Ok(Self {
-            path,
-            root,
-            version_lit,
-        })
+        Ok(Self { path, root, object })
     }
 
     pub fn set_version(&mut self, version: &nodejs_semver::Version) -> Result<()> {
-        let Some(version_lit) = &self.version_lit else {
+        let Some(version_lit) = string_prop(&self.object, "version", "top-level \"version\"")
+            .with_context(|| self.path.display().to_string())?
+        else {
             bail!("{}: missing top-level \"version\"", self.path.display())
         };
-        set_string_value(version_lit, &version.to_string());
+        set_string_value(&version_lit, &version.to_string());
+        Ok(())
+    }
+
+    pub fn set_dependency(&mut self, field: DependencyField, name: &str, spec: &str) -> Result<()> {
+        let field = field.as_str();
+        let lit = object_prop(&self.object, field, &format!("top-level {field:?}"))
+            .and_then(|deps| match deps {
+                Some(deps) => string_prop(&deps, name, &format!("{name:?} in {field:?}")),
+                None => Ok(None),
+            })
+            .with_context(|| self.path.display().to_string())?;
+        let Some(lit) = lit else {
+            bail!("{}: missing {name:?} in {field:?}", self.path.display())
+        };
+        set_string_value(&lit, spec);
         Ok(())
     }
 

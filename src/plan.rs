@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     fs, io,
     path::{Path, PathBuf},
 };
@@ -12,10 +12,11 @@ use crate::{
     bump::{self, Bump, Prerelease},
     changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
-    config::{Config, ResolvedGroups},
+    config::{Config, ResolvedGroups, UpdateInternalDependencies},
     dependency::{self, DependentsGraph, effective_range},
     package_json::PackageJson,
     pre::{PreJson, PreMode},
+    range::{self, Target},
     snapshot::{Snapshot, SnapshotVersions},
     workspace::{DependencyField, Package, RelDir, Versionable, Workspace},
 };
@@ -31,6 +32,7 @@ pub struct PlannedVersion {
     pub consumed_changes: Vec<LoadedChange>,
     pub releases: Vec<PlannedRelease>,
     pub graph: DependentsGraph,
+    pub range_updates: Vec<RangeUpdate>,
 }
 
 fn pre_state(pre: Option<&PreJson>) -> Option<&PreJson> {
@@ -99,6 +101,13 @@ pub fn plan_version(
         &groups,
         &graph,
     )?;
+    let range_updates = plan_range_updates(
+        &workspace,
+        &graph,
+        &releases,
+        snapshot_versions.is_some(),
+        config.update_internal_dependencies,
+    )?;
 
     Ok(PlannedVersion {
         workspace,
@@ -108,7 +117,60 @@ pub fn plan_version(
         consumed_changes,
         releases,
         graph,
+        range_updates,
     })
+}
+
+pub struct RangeUpdate {
+    pub dependent: RelDir,
+    pub dependency: RelDir,
+    pub dependency_name: String,
+    pub field: DependencyField,
+    pub old: String,
+    pub new: String,
+}
+
+fn plan_range_updates(
+    workspace: &Workspace,
+    graph: &DependentsGraph,
+    releases: &[PlannedRelease],
+    snapshot: bool,
+    min: UpdateInternalDependencies,
+) -> Result<Vec<RangeUpdate>> {
+    let mut targets = BTreeMap::new();
+    for release in releases {
+        let Some(bump) = release.bump else {
+            continue;
+        };
+        let new_version = release.new_version.clone();
+        let target = if snapshot {
+            Target::Snapshot(new_version)
+        } else {
+            Target::Release(new_version)
+        };
+        targets.insert(
+            workspace.package(&release.name)?.rel_dir(),
+            (release.name.as_str(), bump, target),
+        );
+    }
+    let mut updates = Vec::new();
+    for edge in graph.iter() {
+        let Some((name, bump, target)) = targets.get(&edge.dependency) else {
+            continue;
+        };
+        let Some(new) = range::rewrite(&edge.spec, target, *bump, min) else {
+            continue;
+        };
+        updates.push(RangeUpdate {
+            dependent: edge.dependent.clone(),
+            dependency: edge.dependency.clone(),
+            dependency_name: (*name).to_owned(),
+            field: edge.field,
+            old: edge.spec_text.clone(),
+            new,
+        });
+    }
+    Ok(updates)
 }
 
 fn filter_changes(
@@ -577,7 +639,9 @@ impl StagedWrite {
 pub fn stage_writes(
     workspace: &Workspace,
     releases: &[PlannedRelease],
+    range_updates: &[RangeUpdate],
 ) -> Result<Vec<StagedWrite>> {
+    let mut manifests: BTreeMap<RelDir, PackageJson> = BTreeMap::new();
     let mut writes = Vec::new();
     for release in releases {
         let Some(entry) = &release.changelog_entry else {
@@ -586,10 +650,7 @@ pub fn stage_writes(
         let package = workspace.package(&release.name)?;
         let mut package_json = PackageJson::load(package.dir())?;
         package_json.set_version(&release.new_version)?;
-        writes.push(StagedWrite {
-            path: package_json.path().to_owned(),
-            content: package_json.text(),
-        });
+        manifests.insert(package.rel_dir().clone(), package_json);
 
         let changelog_path = package.dir().join("CHANGELOG.md");
         let changelog_text = match fs::read_to_string(&changelog_path) {
@@ -608,5 +669,18 @@ pub fn stage_writes(
             ),
         });
     }
+    for update in range_updates {
+        let package_json = match manifests.entry(update.dependent.clone()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                entry.insert(PackageJson::load(workspace[&update.dependent].dir())?)
+            }
+        };
+        package_json.set_dependency(update.field, &update.dependency_name, &update.new)?;
+    }
+    writes.extend(manifests.into_values().map(|package_json| StagedWrite {
+        path: package_json.path().to_owned(),
+        content: package_json.text(),
+    }));
     Ok(writes)
 }

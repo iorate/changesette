@@ -248,6 +248,7 @@ fn dependents_graph_lists_every_field_of_a_dependent() {
         dependent: rel_dir(dependent),
         dependency: rel_dir(dependency),
         field,
+        spec_text: String::new(),
         spec: Spec::Any,
     };
     let graph = DependentsGraph::build(vec![

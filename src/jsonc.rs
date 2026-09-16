@@ -1,6 +1,17 @@
 use anyhow::{Context, Result};
 use jsonc_parser::cst::{CstObject, CstStringLit};
 
+pub fn object_prop(object: &CstObject, key: &str, location: &str) -> Result<Option<CstObject>> {
+    let Some(prop) = object.get(key) else {
+        return Ok(None);
+    };
+    let object = prop
+        .value()
+        .and_then(|value| value.as_object())
+        .with_context(|| format!("{location} must be an object"))?;
+    Ok(Some(object))
+}
+
 pub fn string_prop(object: &CstObject, key: &str, location: &str) -> Result<Option<CstStringLit>> {
     let Some(prop) = object.get(key) else {
         return Ok(None);
@@ -13,7 +24,7 @@ pub fn string_prop(object: &CstObject, key: &str, location: &str) -> Result<Opti
 }
 
 // `value` must not contain characters that need escaping; semver versions
-// and validated pre tags never do.
+// and ranges and validated pre tags never do.
 pub fn set_string_value(lit: &CstStringLit, value: &str) {
     lit.set_raw_value(format!("\"{value}\""));
 }
