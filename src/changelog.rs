@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{fmt::Write as _, ops::Range};
 
 use anyhow::{Context, Result};
 use nodejs_semver::Version;
@@ -7,7 +7,10 @@ use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 use crate::bump::Bump;
 
 #[must_use]
-pub fn render_entry(summaries: &[(Bump, &str)]) -> String {
+pub fn render_entry(
+    summaries: &[(Bump, &str)],
+    updated_dependencies: &[(&str, &Version)],
+) -> String {
     let mut blocks = Vec::new();
     for (bump, heading) in [
         (Bump::Major, "### Major Changes"),
@@ -23,6 +26,12 @@ pub fn render_entry(summaries: &[(Bump, &str)]) -> String {
             }
             blocks.push(render_release_line(body));
         }
+        if bump == Bump::Patch && !updated_dependencies.is_empty() {
+            if !has_heading {
+                blocks.push(heading.to_owned());
+            }
+            blocks.push(render_updated_dependencies(updated_dependencies));
+        }
     }
     blocks.join("\n\n")
 }
@@ -34,6 +43,14 @@ pub fn render_section(version: &Version, entry: &str) -> String {
     } else {
         format!("## {version}\n\n{entry}")
     }
+}
+
+fn render_updated_dependencies(updated_dependencies: &[(&str, &Version)]) -> String {
+    let mut text = String::from("- Updated dependencies");
+    for (name, version) in updated_dependencies {
+        let _ = write!(text, "\n  - {name}@{version}");
+    }
+    text
 }
 
 fn render_release_line(body: &str) -> String {

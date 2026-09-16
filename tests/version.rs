@@ -1583,7 +1583,7 @@ fn dependents_are_bumped_when_the_next_version_leaves_the_range() {
 }
 
 #[test]
-fn dependents_are_bumped_transitively_with_a_heading_only_changelog() {
+fn dependents_are_bumped_transitively_listing_the_updated_dependencies() {
     let dir = workspace_dir();
     let b_manifest = |version, spec| dependent_pkg("pkg-b", version, "dependencies", "pkg-a", spec);
     let d_manifest = |spec| dependent_pkg("pkg-d", "1.0.0", "dependencies", "pkg-c", spec);
@@ -1630,7 +1630,11 @@ fn dependents_are_bumped_transitively_with_a_heading_only_changelog() {
     );
     assert_eq!(
         read(dir.path(), "packages/b/CHANGELOG.md"),
-        "# pkg-b\n\n## 2.0.1\n"
+        "# pkg-b\n\n## 2.0.1\n\n### Patch Changes\n\n- Updated dependencies\n  - pkg-a@4.0.0\n"
+    );
+    assert_eq!(
+        read(dir.path(), "packages/c/CHANGELOG.md"),
+        "# pkg-c\n\n## 1.0.1\n\n### Patch Changes\n\n- Updated dependencies\n  - pkg-b@2.0.1\n"
     );
     assert_eq!(
         read(dir.path(), "packages/d/package.json"),
@@ -1867,7 +1871,7 @@ fn release_plan_reports_a_dependent_release() {
             "oldVersion": "2.0.0",
             "newVersion": "2.0.1",
             "changesets": [],
-            "changelogEntry": ""
+            "changelogEntry": "### Patch Changes\n\n- Updated dependencies\n  - pkg-a@3.1.5"
         })
     );
 
@@ -1875,7 +1879,96 @@ fn release_plan_reports_a_dependent_release() {
     let release = &plan_json(&plan(dir.path()))["releases"][1];
     assert_eq!(release["type"], "patch");
     assert_eq!(release["changesets"], json!([ID_B]));
-    assert_eq!(release["changelogEntry"], "");
+    assert_eq!(
+        release["changelogEntry"],
+        "### Patch Changes\n\n- Updated dependencies\n  - pkg-a@3.1.5"
+    );
+}
+
+#[test]
+fn only_dependencies_and_peer_dependencies_are_listed_as_updated() {
+    for (field, listed) in [
+        ("dependencies", true),
+        ("peerDependencies", true),
+        ("optionalDependencies", false),
+        ("devDependencies", false),
+    ] {
+        let dir = workspace_dir();
+        let b_manifest = |version, spec| dependent_pkg("pkg-b", version, field, "pkg-a", spec);
+        write_file(
+            dir.path(),
+            "packages/b/package.json",
+            &b_manifest("2.0.0", "3.1.4"),
+        );
+        write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+        write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
+        let planned = plan(dir.path());
+        let release = &planned.releases[1];
+        let updated: Vec<String> = release
+            .updated_dependencies
+            .iter()
+            .map(|(name, version)| format!("{name}@{version}"))
+            .collect();
+        let expected_entry = if listed {
+            "### Patch Changes\n\n- Fix pkg-b\n\n- Updated dependencies\n  - pkg-a@3.1.5"
+        } else {
+            "### Patch Changes\n\n- Fix pkg-b"
+        };
+        assert_eq!(
+            updated,
+            if listed { vec!["pkg-a@3.1.5"] } else { vec![] },
+            "{field}"
+        );
+        assert_eq!(
+            release.changelog_entry.as_deref(),
+            Some(expected_entry),
+            "{field}"
+        );
+        run_ok(dir.path());
+        assert_eq!(
+            read(dir.path(), "packages/b/package.json"),
+            b_manifest("2.0.1", "3.1.5"),
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn kept_ranges_are_listed_as_updated_dependencies() {
+    for (spec, min, listed) in [
+        ("workspace:*", "patch", true),
+        ("*", "patch", true),
+        ("*", "minor", false),
+        ("workspace:^3.1.4", "minor", true),
+        ("^3.1.4", "minor", false),
+    ] {
+        let dir = workspace_dir();
+        let b_manifest = |version| dependent_pkg("pkg-b", version, "dependencies", "pkg-a", spec);
+        write_file(dir.path(), "packages/b/package.json", &b_manifest("2.0.0"));
+        write_config(
+            dir.path(),
+            &format!("{{ \"updateInternalDependencies\": \"{min}\" }}\n"),
+        );
+        write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+        write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
+        let output = capture_output(|| run_ok(dir.path()));
+        assert!(!output.contains("Updated pkg-b"), "{spec} {min}: {output}");
+        assert_eq!(
+            read(dir.path(), "packages/b/package.json"),
+            b_manifest("2.0.1"),
+            "{spec} {min}"
+        );
+        let expected = if listed {
+            "# pkg-b\n\n## 2.0.1\n\n### Patch Changes\n\n- Fix pkg-b\n\n- Updated dependencies\n  - pkg-a@3.1.5\n"
+        } else {
+            "# pkg-b\n\n## 2.0.1\n\n### Patch Changes\n\n- Fix pkg-b\n"
+        };
+        assert_eq!(
+            read(dir.path(), "packages/b/CHANGELOG.md"),
+            expected,
+            "{spec} {min}"
+        );
+    }
 }
 
 #[test]
@@ -1926,7 +2019,7 @@ fn a_released_dependent_gets_its_version_and_ranges_in_one_write() {
     let writes = plan::stage_writes(
         &planned.workspace,
         &planned.releases,
-        &planned.range_updates,
+        &planned.dependency_updates,
     )
     .unwrap();
     let mut paths: Vec<String> = writes

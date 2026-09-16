@@ -9,7 +9,7 @@ use std::{
 use tempfile::TempDir;
 use util::{
     dir_snapshot, expected_path, package_dir, read_pre_json, two_package_workspace_dir,
-    workspace_dir, write_changeset, write_config, write_pre_json,
+    workspace_dir, write_changeset, write_config, write_file, write_pre_json,
 };
 
 const CHANGELOG: &str = "# ublacklist\n\n## 1.1.0\n\n### Minor Changes\n\n- Add feature\n\n## 1.0.0\n\n### Patch Changes\n\n- Fix bug\n";
@@ -691,6 +691,25 @@ fn status_verbose_adds_versions_and_changeset_files() {
             )
         );
     }
+}
+
+#[test]
+fn status_verbose_lists_the_updated_dependencies() {
+    let dir = workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        "{\n  \"name\": \"pkg-b\",\n  \"version\": \"2.0.0\",\n  \"dependencies\": {\n    \"pkg-a\": \"3.1.4\"\n  }\n}\n",
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    let output = changesette(dir.path(), &["status", "--verbose"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        format!(
+            "Packages to be bumped:\n- patch\n  - pkg-a -> 3.1.5\n    - .changeset/{FILE_A}\n  - pkg-b -> 2.0.1\n    - updated dependency pkg-a@3.1.5\n"
+        )
+    );
 }
 
 #[test]
