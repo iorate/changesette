@@ -97,7 +97,7 @@ pub fn internal_dependencies(
             }
             let Some(version) = target.version() else {
                 debug!(
-                    "{dependent}: depends on `{name}`, which has no version; treated as an external dependency"
+                    "{dependent}: depends on `{name}`, which has no version and is never released; the dependency is ignored"
                 );
                 continue;
             };
@@ -112,7 +112,7 @@ pub fn internal_dependencies(
             };
             if !range.satisfies(version) {
                 warn!(
-                    "{dependent}: depends on `{name}` at {:?}, which does not include the current version {version}; treated as an external dependency",
+                    "{dependent}: depends on `{name}` at {:?}, which does not include the workspace's {name}@{version}; the dependency is ignored",
                     dependency.spec
                 );
                 continue;

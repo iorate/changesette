@@ -168,14 +168,14 @@ fn internal_dependencies_keep_edges_to_versioned_workspace_packages() {
         ]
     );
     assert!(
-        output.contains("debug: pkg-a@1.0.0 (packages/a): depends on `pkg-c`, which has no version; treated as an external dependency"),
+        output.contains("debug: pkg-a@1.0.0 (packages/a): depends on `pkg-c`, which has no version and is never released; the dependency is ignored"),
         "{output}"
     );
     assert!(!output.contains("warning: "), "{output}");
 }
 
 #[test]
-fn internal_dependencies_treat_a_range_missing_the_current_version_as_external() {
+fn internal_dependencies_ignore_a_range_missing_the_current_version() {
     let dir = workspace_dir(&[
         (
             "packages/a",
@@ -195,7 +195,7 @@ fn internal_dependencies_treat_a_range_missing_the_current_version_as_external()
     );
     assert_eq!(
         output,
-        "warning: pkg-a@1.0.0 (packages/a): depends on `pkg-b` at \"^1.0.0\", which does not include the current version 2.0.0; treated as an external dependency\n"
+        "warning: pkg-a@1.0.0 (packages/a): depends on `pkg-b` at \"^1.0.0\", which does not include the workspace's pkg-b@2.0.0; the dependency is ignored\n"
     );
 }
 
