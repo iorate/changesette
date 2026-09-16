@@ -2006,6 +2006,39 @@ fn ranges_are_raised_in_unreleased_dependents_and_the_unnamed_root() {
 }
 
 #[test]
+fn dependency_updates_are_ordered_by_dependent_name_then_dependency_name() {
+    let dir = two_package_workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/c/package.json",
+        &dependent_pkg("pkg-y", "1.0.0", "dependencies", "pkg-a", "^3.1.4"),
+    );
+    write_file(
+        dir.path(),
+        "packages/d/package.json",
+        "{\n  \"name\": \"pkg-x\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"pkg-b\": \"^2.0.0\",\n    \"pkg-a\": \"^3.1.4\"\n  }\n}\n",
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    let output = capture_output(|| run_ok(dir.path()));
+    let lines: Vec<&str> = output
+        .lines()
+        .filter(|line| !line.starts_with("debug: "))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "Bumped pkg-a 3.1.4 -> 3.1.5",
+            "Bumped pkg-b 2.0.0 -> 2.0.1",
+            "Updated pkg-x@1.0.0 (packages/d): pkg-a ^3.1.4 -> ^3.1.5",
+            "Updated pkg-x@1.0.0 (packages/d): pkg-b ^2.0.0 -> ^2.0.1",
+            "Updated pkg-y@1.0.0 (packages/c): pkg-a ^3.1.4 -> ^3.1.5",
+        ],
+        "{output}"
+    );
+}
+
+#[test]
 fn a_released_dependent_gets_its_version_and_ranges_in_one_write() {
     let dir = workspace_dir();
     let b_manifest = |version, spec| dependent_pkg("pkg-b", version, "dependencies", "pkg-a", spec);
