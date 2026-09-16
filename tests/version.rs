@@ -1807,13 +1807,13 @@ fn skipped_dependents_are_not_released() {
 }
 
 #[test]
-fn ignore_internal_dependencies_leaves_the_dependents_alone() {
+fn manage_internal_dependencies_false_leaves_the_dependents_alone() {
     let dir = workspace_dir();
     let b_manifest = dependent_pkg("pkg-b", "2.0.0", "dependencies", "pkg-a", "3.1.4");
     write_file(dir.path(), "packages/b/package.json", &b_manifest);
     write_config(
         dir.path(),
-        "{ \"changesette\": { \"ignoreInternalDependencies\": true } }\n",
+        "{ \"changesette\": { \"manageInternalDependencies\": false } }\n",
     );
     write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
     assert_eq!(releases(&plan(dir.path())), ["pkg-a patch 3.1.4 -> 3.1.5"]);

@@ -31,7 +31,7 @@ fn assert_default(config: &Config) {
     );
     assert!(!config.bump_versions_with_workspace_protocol_only);
     assert!(config.packages.is_none());
-    assert!(!config.ignore_internal_dependencies);
+    assert!(config.manage_internal_dependencies);
 }
 
 fn resolve(text: &str, names: &[&str]) -> Vec<String> {
@@ -239,16 +239,16 @@ fn resolves_bump_versions_with_workspace_protocol_only() {
 }
 
 #[test]
-fn resolves_changesette_ignore_internal_dependencies() {
+fn resolves_changesette_manage_internal_dependencies() {
     assert!(
-        load_ok("{ \"changesette\": { \"ignoreInternalDependencies\": true } }\n")
-            .ignore_internal_dependencies
+        load_ok("{ \"changesette\": { \"manageInternalDependencies\": true } }\n")
+            .manage_internal_dependencies
     );
     assert!(
-        !load_ok("{ \"changesette\": { \"ignoreInternalDependencies\": false } }\n")
-            .ignore_internal_dependencies
+        !load_ok("{ \"changesette\": { \"manageInternalDependencies\": false } }\n")
+            .manage_internal_dependencies
     );
-    assert!(!load_ok("{ \"changesette\": {} }\n").ignore_internal_dependencies);
+    assert!(load_ok("{ \"changesette\": {} }\n").manage_internal_dependencies);
 }
 
 #[test]
@@ -333,8 +333,8 @@ fn rejects_wrong_types() {
         ),
         ("{ \"changesette\": [] }\n", "\"changesette\""),
         (
-            "{ \"changesette\": { \"ignoreInternalDependencies\": \"no\" } }\n",
-            "\"ignoreInternalDependencies\"",
+            "{ \"changesette\": { \"manageInternalDependencies\": \"no\" } }\n",
+            "\"manageInternalDependencies\"",
         ),
         (
             "{ \"changesette\": { \"packages\": null } }\n",
