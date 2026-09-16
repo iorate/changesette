@@ -129,6 +129,7 @@ pub fn plan_version(
 
 pub struct DependencyUpdate {
     pub dependent: RelDir,
+    pub dependent_name: Option<String>,
     pub dependency: RelDir,
     pub dependency_name: String,
     pub field: DependencyField,
@@ -169,6 +170,7 @@ fn plan_dependency_updates(
         };
         updates.push(DependencyUpdate {
             dependent: edge.dependent.clone(),
+            dependent_name: workspace[&edge.dependent].name().map(str::to_owned),
             dependency: edge.dependency.clone(),
             dependency_name: (*name).to_owned(),
             field: edge.field,
@@ -179,6 +181,14 @@ fn plan_dependency_updates(
             },
         });
     }
+    updates.sort_by(|a, b| {
+        (&a.dependent_name, &a.dependent, &a.dependency_name, a.field).cmp(&(
+            &b.dependent_name,
+            &b.dependent,
+            &b.dependency_name,
+            b.field,
+        ))
+    });
     Ok(updates)
 }
 

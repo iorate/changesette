@@ -420,7 +420,7 @@ impl<'a> Versionable<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DependencyField {
     Dependencies,
     DevDependencies,
