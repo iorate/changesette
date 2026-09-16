@@ -21,7 +21,9 @@ const CONFIG: &str = "{
   \"privatePackages\": {
     \"version\": false
   },
+  \"updateInternalDependencies\": \"patch\",
   \"ignore\": [],
+  \"bumpVersionsWithWorkspaceProtocolOnly\": false,
   \"snapshot\": {
     \"useCalculatedVersion\": false
   }

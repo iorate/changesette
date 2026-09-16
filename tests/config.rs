@@ -20,20 +20,6 @@ fn load_err(text: &str) -> String {
     format!("{:#}", config::load(dir.path()).unwrap_err())
 }
 
-fn assert_default(config: &Config) {
-    assert!(!config.has_ignore());
-    assert!(!config.private_packages_version);
-    assert!(!config.snapshot_use_calculated_version);
-    assert!(config.snapshot_prerelease_template.is_none());
-    assert_eq!(
-        config.update_internal_dependencies,
-        UpdateInternalDependencies::Patch
-    );
-    assert!(!config.bump_versions_with_workspace_protocol_only);
-    assert!(config.packages.is_none());
-    assert!(config.manage_internal_dependencies);
-}
-
 fn resolve(text: &str, names: &[&str]) -> Vec<String> {
     load_ok(text).resolve_ignore(names.iter().copied())
 }
@@ -54,8 +40,8 @@ fn packages_config(entry: &str) -> String {
 #[test]
 fn a_missing_or_empty_config_yields_the_defaults() {
     let dir = tempfile::tempdir().unwrap();
-    assert_default(&config::load(dir.path()).unwrap());
-    assert_default(&load_ok("{}\n"));
+    assert_eq!(config::load(dir.path()).unwrap(), Config::default());
+    assert_eq!(load_ok("{}\n"), Config::default());
 }
 
 #[test]

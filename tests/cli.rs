@@ -6,6 +6,7 @@ use std::{
     process::{Command, Output},
 };
 
+use changesette::config::{self, Config};
 use tempfile::TempDir;
 use util::{
     dir_snapshot, expected_path, package_dir, read_pre_json, two_package_workspace_dir,
@@ -82,8 +83,8 @@ fn init_creates_backfills_and_then_reports_initialized() {
     assert!(readme.starts_with("# Changesets\n"), "{readme}");
     let config = fs::read_to_string(dir.path().join(".changeset/config.json")).unwrap();
     assert_eq!(
-        config,
-        "{\n  \"fixed\": [],\n  \"linked\": [],\n  \"privatePackages\": {\n    \"version\": false\n  },\n  \"ignore\": [],\n  \"snapshot\": {\n    \"useCalculatedVersion\": false\n  }\n}\n"
+        config::load(&dir.path().join(".changeset")).unwrap(),
+        Config::default()
     );
 
     fs::write(dir.path().join(".changeset/README.md"), "custom\n").unwrap();
