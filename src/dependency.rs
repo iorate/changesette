@@ -77,6 +77,7 @@ pub struct InternalDependency {
     pub dependent: RelDir,
     pub dependency: RelDir,
     pub field: DependencyField,
+    pub spec_text: String,
     pub spec: Spec,
 }
 
@@ -120,6 +121,7 @@ pub fn internal_dependencies(
                 dependent: dependent.rel_dir().clone(),
                 dependency: target.rel_dir().clone(),
                 field: dependency.field,
+                spec_text: dependency.spec.clone(),
                 spec,
             });
         }

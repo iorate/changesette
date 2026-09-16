@@ -18,6 +18,7 @@ pub mod output;
 pub mod package_json;
 pub mod plan;
 pub mod pre;
+pub mod range;
 pub mod release_plan;
 pub mod snapshot;
 pub mod workspace;

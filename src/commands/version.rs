@@ -46,7 +46,11 @@ pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<(
         }
     }
 
-    let writes = plan::stage_writes(&planned.workspace, &planned.releases)?;
+    let writes = plan::stage_writes(
+        &planned.workspace,
+        &planned.releases,
+        &planned.range_updates,
+    )?;
     for write in &writes {
         write.apply()?;
     }
@@ -99,6 +103,12 @@ pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<(
     }
     if !bumped && !planned.changes.is_empty() {
         info!("No packages to bump.");
+    }
+    for update in &planned.range_updates {
+        info!(
+            "Updated {}: {} {} -> {}",
+            planned.workspace[&update.dependent], update.dependency_name, update.old, update.new
+        );
     }
     Ok(())
 }

@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use changesette::package_json::PackageJson;
+use changesette::{package_json::PackageJson, workspace::DependencyField};
 
 fn fixture(case: &str) -> PathBuf {
     Path::new("tests/fixtures/package-json").join(case)
@@ -57,19 +57,48 @@ fn leaves_nested_version_keys_untouched() {
 }
 
 #[test]
-fn rejects_an_invalid_manifest() {
-    for case in [
-        "no-package-json",
-        "name-missing",
-        "version-not-string",
-        "version-invalid-semver",
-    ] {
-        assert!(PackageJson::load(&fixture(case)).is_err(), "{case}");
-    }
-    let mut package_json = PackageJson::load(&fixture("version-missing")).unwrap();
+fn rewrites_a_dependency_range_of_the_given_field_only() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::copy(
+        fixture("dependencies").join("package.json"),
+        dir.path().join("package.json"),
+    )
+    .unwrap();
+    let mut package_json = PackageJson::load(dir.path()).unwrap();
+    package_json
+        .set_dependency(DependencyField::Dependencies, "pkg-a", "^1.0.1")
+        .unwrap();
+    assert_eq!(
+        package_json.text(),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"10.0.2\",\n  \"dependencies\": {\n    \"pkg-a\": \"^1.0.1\",\n    \"pkg-b\": \"workspace:*\"\n  },\n  \"devDependencies\": {\n    \"pkg-a\": \"^1.0.0\"\n  }\n}\n"
+    );
     assert!(
         package_json
-            .set_version(&nodejs_semver::Version::from((10, 1, 0)))
+            .set_dependency(DependencyField::PeerDependencies, "pkg-a", "^1.0.1")
             .is_err()
     );
+    assert!(
+        package_json
+            .set_dependency(DependencyField::Dependencies, "pkg-c", "^1.0.1")
+            .is_err()
+    );
+}
+
+#[test]
+fn loads_a_manifest_without_a_name() {
+    assert!(PackageJson::load(&fixture("name-missing")).is_ok());
+}
+
+#[test]
+fn rejects_an_invalid_manifest() {
+    assert!(PackageJson::load(&fixture("no-package-json")).is_err());
+    for case in ["version-missing", "version-not-string"] {
+        let mut package_json = PackageJson::load(&fixture(case)).unwrap();
+        assert!(
+            package_json
+                .set_version(&nodejs_semver::Version::from((10, 1, 0)))
+                .is_err(),
+            "{case}"
+        );
+    }
 }
