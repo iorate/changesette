@@ -6,7 +6,7 @@
 
 A version and changelog manager using the same changeset file format as [changesets](https://github.com/changesets/changesets) and shipped as a single dependency-free Rust binary. The name is changeset + the diminutive suffix -ette (as in diskette).
 
-`changesette` reads changeset files, bumps the version in each released package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / yarn / pnpm workspaces. It does no dependency management ([Workspaces](#workspaces) covers what happens instead) and never touches lockfiles; regenerating lockfiles such as `package-lock.json` belongs to the package-manager layer.
+`changesette` reads changeset files, bumps the version in each released package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / yarn / pnpm workspaces. It never touches lockfiles; regenerating lockfiles such as `package-lock.json` belongs to the package-manager layer.
 
 `changesette` performs **no git operations and no network access**; commits, pull requests, tags, and releases belong to your workflows. The CLI feeds those workflows structured data — a machine-readable release plan (`version --output`), the workspace package list (`get-packages`), and per-version changelog sections (`get-changelog-entry`) — and accepts summary rewrites (`set-summary`). The [example workflows](#example-workflows) build the whole release loop from these outputs — no changesets-specific action or bot required.
 
@@ -379,11 +379,23 @@ Default: `{ "version": false }`.
 
 Whether private packages (`"private": true` in `package.json`) are versioned. Set `{ "version": true }` (or the shorthand `true`) to version them; by default they are skipped.
 
+### `updateInternalDependencies`
+
+Default: `"patch"`.
+
+The smallest bump of a dependency that updates the ranges on it in the other packages. With `"minor"`, a patch bump leaves a range that still includes the new version alone.
+
 ### `ignore`
 
 Default: `[]`.
 
 Names of packages to skip.
+
+### `bumpVersionsWithWorkspaceProtocolOnly`
+
+Default: `false`.
+
+Whether only `workspace:` ranges count as internal dependencies. By default any range that resolves to the workspace package does.
 
 ### `snapshot`
 
@@ -393,17 +405,13 @@ Options for [snapshot releases](#snapshot-releases). `useCalculatedVersion` base
 
 ### `changesette`
 
-Default: `{}`.
+Default: `{ "manageInternalDependencies": true }`.
 
-Settings specific to `changesette`. `packages`, unset by default, lists the directories of the workspace packages as literal `/`-separated paths relative to the root (`.` for the root itself), used instead of discovering them (see [Workspaces](#workspaces)).
+Settings specific to `changesette`. `manageInternalDependencies` set to `false` makes `version` leave the dependency ranges and the dependents of a released package alone; `packages`, unset by default, lists the directories of the workspace packages as literal `/`-separated paths relative to the root (`.` for the root itself), used instead of discovering them (see [Workspaces](#workspaces)).
 
 ## Workspaces
 
-`changesette` works on npm / yarn / pnpm workspaces, and its changeset files are format-compatible with changesets — but `version` deliberately does not behave like `changeset version` in a workspace. The dependency management changesets performs is two separate jobs, and `changesette` does neither: **internal dependency ranges are never rewritten, and dependents of a bumped package are never bumped** (so no "Updated dependencies" changelog lines either).
-
-Ranges are a mechanical job, and the `workspace:` protocol of yarn and pnpm makes it the package manager's: in development a `workspace:` dependency always resolves to the local copy, and at publish the range is derived from the dependency's current version (`workspace:^` becomes a caret range, `workspace:*` an exact pin, and so on), so published ranges always reflect the versions the dependent was actually built against. Plain npm workspaces work too, but literal ranges like `^1.2.0` are then yours to maintain: rewrite them when the dependency moves to a new major (otherwise npm stops linking the local copy), and raise them when the dependent starts relying on newer behavior.
-
-Dependent releases are a judgment, not bookkeeping. Already-published dependents keep working after an internal dependency's major release: their published ranges still resolve to the old, compatible versions. So release a dependent when it has changes of its own; the one other reason is a consumer who cannot run two copies of the dependency side by side (a peer dependency conflict, a shared singleton) and so needs a published range that accepts the new major. Either way, name the dependent in a changeset like any other change.
+`changesette` works on npm / yarn / pnpm workspaces and manages the dependencies between their packages as changesets does: a package whose range on a released package no longer includes the new version is bumped as a patch, the ranges on a released package are raised to the new version (`workspace:` ranges are left alone), and a released package lists the new versions of its dependencies under "Updated dependencies" in its changelog. [`updateInternalDependencies`](#updateinternaldependencies), [`bumpVersionsWithWorkspaceProtocolOnly`](#bumpversionswithworkspaceprotocolonly), and [`changesette.manageInternalDependencies`](#changesette-1) adjust this.
 
 `changesette` resolves the workspace by rules of its own, which can differ from the package manager's. When they do, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
 
@@ -442,7 +450,6 @@ By default the suffix is `<tag>-<datetime>`, or just `<datetime>` when no tag is
 
 `changesette` shares the changeset file format with changesets, but is deliberately much smaller. Coming from changesets, expect the following:
 
-- No dependency management: dependents of a bumped package are never bumped, and dependency ranges are never rewritten (see [Workspaces](#workspaces)).
 - No git operations: nothing is committed or tagged, and changelog sections are built from the plain changeset summaries, without auto-generated commit / pull request / author attributions (see [Adding commit, pull request, and author attributions](#adding-commit-pull-request-and-author-attributions)).
 - No npm publishing: publishing belongs to your workflows (see [Example workflows](#example-workflows)).
 

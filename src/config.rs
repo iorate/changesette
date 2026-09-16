@@ -7,7 +7,7 @@ use tracing::warn;
 
 use crate::{bump::Bump, workspace::read_json};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     ignore: Vec<String>,
