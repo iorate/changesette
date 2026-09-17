@@ -21,7 +21,7 @@ pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<(
     let pre = planned.in_pre();
     if let Some(pre) = pre {
         info!(
-            "In pre mode with tag `{}`; versions will be prereleases.",
+            "In pre mode with tag `{}`\nVersions will be prereleases",
             pre.tag()
         );
     }
@@ -85,7 +85,7 @@ pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<(
     }
 
     if planned.changes.is_empty() && !exiting {
-        info!("No unreleased changesets found.");
+        info!("No unreleased changesets found");
         return Ok(());
     }
     let mut bumped = false;
@@ -99,7 +99,7 @@ pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<(
         }
     }
     if !bumped && !planned.changes.is_empty() {
-        info!("No packages to bump.");
+        info!("No packages to bump");
     }
     for update in &planned.dependency_updates {
         if let Some(new) = &update.new {
