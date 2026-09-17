@@ -396,12 +396,12 @@ fn release_plan_lists_skipped_changesets_without_a_release() {
             ],
             "releases": [
                 {
+                    "dir": "packages/a",
                     "name": "pkg-a",
                     "type": "minor",
                     "oldVersion": "3.1.4",
                     "newVersion": "3.2.0",
                     "changesets": [ID_A],
-                    "dir": "packages/a",
                     "changelogEntry": "### Minor Changes\n\n- Improve pkg-a"
                 }
             ]
@@ -711,12 +711,12 @@ fn release_plan_reports_the_group_old_version() {
     assert_eq!(
         plan_json(&planned)["releases"][1],
         json!({
+            "dir": "packages/b",
             "name": "pkg-b",
             "type": "minor",
             "oldVersion": "3.1.4",
             "newVersion": "3.2.0",
             "changesets": [],
-            "dir": "packages/b",
             "changelogEntry": ""
         })
     );
@@ -1230,12 +1230,12 @@ fn status_writes_the_plan_without_modifying_files() {
             ],
             "releases": [
                 {
+                    "dir": ".",
                     "name": "ublacklist",
                     "type": "minor",
                     "oldVersion": "1.2.3",
                     "newVersion": "1.3.0",
                     "changesets": [ID_B],
-                    "dir": ".",
                     "changelogEntry": "### Minor Changes\n\n- Add feature"
                 }
             ]
@@ -1851,12 +1851,12 @@ fn release_plan_reports_a_dependent_release() {
     assert_eq!(
         plan_json(&plan(dir.path()))["releases"][1],
         json!({
+            "dir": "packages/b",
             "name": "pkg-b",
             "type": "patch",
             "oldVersion": "2.0.0",
             "newVersion": "2.0.1",
             "changesets": [],
-            "dir": "packages/b",
             "changelogEntry": "### Patch Changes\n\n- Updated dependencies\n  - pkg-a@3.1.5"
         })
     );
@@ -2011,9 +2011,9 @@ fn packages_rewritten_without_a_bump_are_none_releases() {
     );
     write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
     let root_release = json!({
+        "dir": ".",
         "type": "none",
-        "changesets": [],
-        "dir": "."
+        "changesets": []
     });
     let plan_value = plan_json(&plan(dir.path()));
     assert_eq!(plan_value["releases"][0], root_release);
@@ -2021,12 +2021,12 @@ fn packages_rewritten_without_a_bump_are_none_releases() {
     assert_eq!(
         plan_value["releases"][2],
         json!({
+            "dir": "packages/b",
             "name": "pkg-b",
             "type": "none",
             "oldVersion": "2.0.0",
             "newVersion": "2.0.0",
-            "changesets": [],
-            "dir": "packages/b"
+            "changesets": []
         })
     );
     assert_eq!(plan_value["releases"].as_array().unwrap().len(), 3);

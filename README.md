@@ -299,6 +299,7 @@ Applies all pending changesets: bumps each released package's `package.json`, in
   ],
   "releases": [
     {
+      "dir": ".",
       "name": "my-package",
       "type": "minor",
       "oldVersion": "1.2.3",
@@ -306,7 +307,6 @@ Applies all pending changesets: bumps each released package's `package.json`, in
       "changesets": [
         "lovely-notable-rooster"
       ],
-      "dir": ".",
       "changelogEntry": "### Minor Changes\n\n- Add feature"
     }
   ]
@@ -334,21 +334,21 @@ Prints the packages managed by `version` as a JSON array:
 ```json
 [
   {
+    "dir": "packages/a",
     "name": "pkg-a",
     "version": "3.1.4",
-    "private": false,
-    "dir": "packages/a"
+    "private": false
   },
   {
+    "dir": "packages/b",
     "name": "pkg-b",
     "version": "1.0.0",
-    "private": false,
-    "dir": "packages/b"
+    "private": false
   }
 ]
 ```
 
-With `--all`, skipped packages are included too.
+With `--all`, skipped packages are included too; `name` and `version` are omitted for a package without them.
 
 ### `changesette get-changelog-entry <package> <version>`
 
