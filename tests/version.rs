@@ -1562,6 +1562,73 @@ fn dependents_are_bumped_transitively_listing_the_updated_dependencies() {
 }
 
 #[test]
+fn mutually_dependent_packages_bump_each_other_once() {
+    let dir = workspace_dir();
+    let a_manifest = |version, spec| dependent_pkg("pkg-a", version, "dependencies", "pkg-b", spec);
+    let b_manifest = |version, spec| dependent_pkg("pkg-b", version, "dependencies", "pkg-a", spec);
+    write_file(
+        dir.path(),
+        "packages/a/package.json",
+        &a_manifest("3.1.4", "^2.0.0"),
+    );
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        &b_manifest("2.0.0", "^3.1.4"),
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "major")], "Break pkg-a");
+    assert_eq!(
+        releases(&plan(dir.path())),
+        ["pkg-a major 3.1.4 -> 4.0.0", "pkg-b patch 2.0.0 -> 2.0.1"]
+    );
+
+    run_ok(dir.path());
+    assert_eq!(
+        read(dir.path(), "packages/a/package.json"),
+        a_manifest("4.0.0", "^2.0.1")
+    );
+    assert_eq!(
+        read(dir.path(), "packages/b/package.json"),
+        b_manifest("2.0.1", "^4.0.0")
+    );
+    assert_eq!(
+        read(dir.path(), "packages/a/CHANGELOG.md"),
+        "# pkg-a\n\n## 4.0.0\n\n### Major Changes\n\n- Break pkg-a\n\n### Patch Changes\n\n- Updated dependencies\n  - pkg-b@2.0.1\n"
+    );
+    assert_eq!(
+        read(dir.path(), "packages/b/CHANGELOG.md"),
+        "# pkg-b\n\n## 2.0.1\n\n### Patch Changes\n\n- Updated dependencies\n  - pkg-a@4.0.0\n"
+    );
+}
+
+#[test]
+fn a_dependent_keeps_its_own_higher_bump() {
+    let dir = workspace_dir();
+    let b_manifest = |version, spec| dependent_pkg("pkg-b", version, "dependencies", "pkg-a", spec);
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        &b_manifest("2.0.0", "^3.1.4"),
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "major")], "Break pkg-a");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "minor")], "Improve pkg-b");
+    assert_eq!(
+        releases(&plan(dir.path())),
+        ["pkg-a major 3.1.4 -> 4.0.0", "pkg-b minor 2.0.0 -> 2.1.0"]
+    );
+
+    run_ok(dir.path());
+    assert_eq!(
+        read(dir.path(), "packages/b/package.json"),
+        b_manifest("2.1.0", "^4.0.0")
+    );
+    assert_eq!(
+        read(dir.path(), "packages/b/CHANGELOG.md"),
+        "# pkg-b\n\n## 2.1.0\n\n### Minor Changes\n\n- Improve pkg-b\n\n### Patch Changes\n\n- Updated dependencies\n  - pkg-a@4.0.0\n"
+    );
+}
+
+#[test]
 fn a_fixed_partner_bumps_its_dependents() {
     let dir = two_package_workspace_dir();
     write_file(
