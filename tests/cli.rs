@@ -380,7 +380,7 @@ fn get_packages_prints_the_single_package_with_a_dot_dir() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[\n  {\n    \"name\": \"ublacklist\",\n    \"version\": \"1.2.3\",\n    \"private\": false,\n    \"dir\": \".\"\n  }\n]\n"
+        "[\n  {\n    \"dir\": \".\",\n    \"name\": \"ublacklist\",\n    \"version\": \"1.2.3\",\n    \"private\": false\n  }\n]\n"
     );
 }
 
@@ -408,14 +408,14 @@ fn get_packages_lists_skipped_packages_only_with_all() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[\n  {\n    \"name\": \"pkg-a\",\n    \"version\": \"3.1.4\",\n    \"private\": false,\n    \"dir\": \"packages/a\"\n  },\n  {\n    \"name\": \"pkg-c\",\n    \"version\": \"2.0.0\",\n    \"private\": false,\n    \"dir\": \"packages/c\"\n  }\n]\n"
+        "[\n  {\n    \"dir\": \"packages/a\",\n    \"name\": \"pkg-a\",\n    \"version\": \"3.1.4\",\n    \"private\": false\n  },\n  {\n    \"dir\": \"packages/c\",\n    \"name\": \"pkg-c\",\n    \"version\": \"2.0.0\",\n    \"private\": false\n  }\n]\n"
     );
 
     let output = changesette(dir.path(), &["get-packages", "--all"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[\n  {\n    \"name\": null,\n    \"version\": null,\n    \"private\": false,\n    \"dir\": \".\"\n  },\n  {\n    \"name\": \"pkg-a\",\n    \"version\": \"3.1.4\",\n    \"private\": false,\n    \"dir\": \"packages/a\"\n  },\n  {\n    \"name\": \"pkg-b\",\n    \"version\": \"1.0.0\",\n    \"private\": true,\n    \"dir\": \"packages/b\"\n  },\n  {\n    \"name\": \"pkg-c\",\n    \"version\": \"2.0.0\",\n    \"private\": false,\n    \"dir\": \"packages/c\"\n  }\n]\n"
+        "[\n  {\n    \"dir\": \".\",\n    \"private\": false\n  },\n  {\n    \"dir\": \"packages/a\",\n    \"name\": \"pkg-a\",\n    \"version\": \"3.1.4\",\n    \"private\": false\n  },\n  {\n    \"dir\": \"packages/b\",\n    \"name\": \"pkg-b\",\n    \"version\": \"1.0.0\",\n    \"private\": true\n  },\n  {\n    \"dir\": \"packages/c\",\n    \"name\": \"pkg-c\",\n    \"version\": \"2.0.0\",\n    \"private\": false\n  }\n]\n"
     );
 }
 
@@ -526,6 +526,7 @@ fn pretty_plan(id: &str) -> String {
             "  ],\n",
             "  \"releases\": [\n",
             "    {{\n",
+            "      \"dir\": \".\",\n",
             "      \"name\": \"ublacklist\",\n",
             "      \"type\": \"minor\",\n",
             "      \"oldVersion\": \"1.2.3\",\n",
@@ -533,7 +534,6 @@ fn pretty_plan(id: &str) -> String {
             "      \"changesets\": [\n",
             "        \"{0}\"\n",
             "      ],\n",
-            "      \"dir\": \".\",\n",
             "      \"changelogEntry\": \"### Minor Changes\\n\\n- Add feature\"\n",
             "    }}\n",
             "  ]\n",
@@ -845,7 +845,7 @@ fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "[\n  {\n    \"name\": \"root\",\n    \"version\": \"1.0.0\",\n    \"private\": false,\n    \"dir\": \".\"\n  }\n]\n"
+        "[\n  {\n    \"dir\": \".\",\n    \"name\": \"root\",\n    \"version\": \"1.0.0\",\n    \"private\": false\n  }\n]\n"
     );
     assert_eq!(
         stderr(&output),
@@ -856,7 +856,7 @@ fn get_packages_warns_about_an_invalid_workspaces_type_under_yarn() {
     );
 }
 
-const PKG_A_JSON: &str = "[\n  {\n    \"name\": \"pkg-a\",\n    \"version\": \"3.1.4\",\n    \"private\": false,\n    \"dir\": \"packages/a\"\n  }\n]\n";
+const PKG_A_JSON: &str = "[\n  {\n    \"dir\": \"packages/a\",\n    \"name\": \"pkg-a\",\n    \"version\": \"3.1.4\",\n    \"private\": false\n  }\n]\n";
 
 #[test]
 fn root_option_takes_a_relative_directory() {

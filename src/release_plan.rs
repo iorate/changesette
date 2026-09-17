@@ -37,6 +37,7 @@ pub struct ReleaseRef {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Release {
+    pub dir: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(rename = "type")]
@@ -46,7 +47,6 @@ pub struct Release {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub new_version: Option<String>,
     pub changesets: Vec<String>,
-    pub dir: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub changelog_entry: Option<String>,
 }
@@ -57,12 +57,12 @@ pub fn build(planned: &PlannedVersion) -> ReleasePlan {
         .releases
         .iter()
         .map(|release| Release {
+            dir: release.dir.as_str().to_owned(),
             name: Some(release.name.clone()),
             bump: release.bump.map_or("none", Bump::as_str),
             old_version: Some(release.old_version.to_string()),
             new_version: Some(release.new_version.to_string()),
             changesets: release.changeset_ids.clone(),
-            dir: release.dir.as_str().to_owned(),
             changelog_entry: release.changelog_entry.clone(),
         })
         .collect();
@@ -81,12 +81,12 @@ pub fn build(planned: &PlannedVersion) -> ReleasePlan {
         let package = &planned.workspace[dir];
         let version = package.version().map(ToString::to_string);
         Release {
+            dir: dir.as_str().to_owned(),
             name: package.name().map(str::to_owned),
             bump: "none",
             old_version: version.clone(),
             new_version: version,
             changesets: Vec::new(),
-            dir: dir.as_str().to_owned(),
             changelog_entry: None,
         }
     }));
