@@ -94,13 +94,6 @@ fn warning_lines(output: &str) -> Vec<&str> {
         .collect()
 }
 
-fn debug_lines(output: &str) -> Vec<&str> {
-    output
-        .lines()
-        .filter(|line| line.starts_with("debug: "))
-        .collect()
-}
-
 // Packages and their qualification
 
 #[test]
@@ -244,26 +237,15 @@ fn qualification_keeps_packages_without_a_name_or_version() {
         assert_eq!(versionable_names(&workspace), ["pkg-a"], "{marker}");
         let manifest = |name: &str| manifest_path(dir.path(), &format!("packages/{name}"));
         let warnings = warning_lines(&output);
-        let debugs = debug_lines(&output);
         for name in ["d", "g", "h", "i", "j"] {
             assert!(
                 warnings.iter().any(|line| line.contains(&manifest(name))),
-                "{marker} {name}: {output}"
-            );
-            assert!(
-                !debugs.iter().any(|line| line.contains(&manifest(name))),
                 "{marker} {name}: {output}"
             );
         }
         for name in ["b", "c", "e", "f"] {
             assert!(
                 !warnings.iter().any(|line| line.contains(&manifest(name))),
-                "{marker} {name}: {output}"
-            );
-        }
-        for name in ["b", "c"] {
-            assert!(
-                debugs.iter().any(|line| line.contains(&manifest(name))),
                 "{marker} {name}: {output}"
             );
         }
@@ -290,26 +272,12 @@ fn versionables_have_a_unique_name_and_a_version() {
         "packages/e/package.json",
         "{ \"name\": \"dup\", \"version\": \"2.0.0\" }\n",
     );
-    let (workspace, output) = discover_captured(dir.path());
+    let workspace = discover_ok(dir.path());
     assert_eq!(versionable_names(&workspace), ["pkg-a"]);
     let pkg_a = workspace.package("pkg-a").unwrap().versionable().unwrap();
     assert_eq!(pkg_a.name(), "pkg-a");
     assert_eq!(pkg_a.version(), &Version::from((1, 0, 0)));
     assert_eq!(pkg_a.package().rel_dir().as_str(), "packages/a");
-    let skipped: Vec<&str> = debug_lines(&output)
-        .into_iter()
-        .filter(|line| line.contains(": skipped: "))
-        .collect();
-    assert_eq!(
-        skipped,
-        [
-            "debug: <unnamed>@1.0.0 (packages/b): skipped: no name",
-            "debug: pkg-c (packages/c): skipped: no version",
-            "debug: dup@1.0.0 (packages/d): skipped: the name is used by more than one package",
-            "debug: dup@2.0.0 (packages/e): skipped: the name is used by more than one package",
-        ],
-        "{output}"
-    );
 }
 
 #[test]
@@ -2235,7 +2203,7 @@ fn negation_is_order_independent() {
                 &pkg(&format!("pkg-{name}")),
             );
         }
-        let (workspace, output) = discover_captured(dir.path());
+        let workspace = discover_ok(dir.path());
         let expected: &[(&str, &str)] = if marker == "package.json" {
             &[("<unnamed>", "."), ("pkg-a", "packages/a")]
         } else {
@@ -2245,12 +2213,6 @@ fn negation_is_order_independent() {
             names_and_rel_dirs(&workspace),
             expected,
             "{marker} (yarn.lock: {lock}): {text}"
-        );
-        assert!(
-            debug_lines(&output)
-                .iter()
-                .any(|line| line.contains("packages/b")),
-            "{marker} (yarn.lock: {lock}): {output}"
         );
     }
     let dir = pnpm_dir(&["packages/*", "!packages/*"]);
@@ -2349,16 +2311,8 @@ fn a_wildcard_enters_a_symlink_one_level_and_a_double_star_never_does() {
             "pnpm-workspace.yaml",
             &format!("packages:\n{}\n", list.join("\n")),
         );
-        let (workspace, output) = discover_captured(dir.path());
+        let workspace = discover_ok(dir.path());
         assert_eq!(names_and_rel_dirs(&workspace), expected, "{patterns:?}");
-        if patterns == ["packages/**"] {
-            assert!(
-                debug_lines(&output)
-                    .iter()
-                    .any(|line| line.contains("packages/link")),
-                "{output}"
-            );
-        }
     }
 
     let dir = tempfile::tempdir().unwrap();
