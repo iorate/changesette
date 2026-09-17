@@ -102,7 +102,6 @@ pub fn plan_version(
         &graph,
     )?;
     let dependency_updates = plan_dependency_updates(
-        &workspace,
         &graph,
         &releases,
         snapshot_versions.is_some(),
@@ -124,7 +123,6 @@ pub fn plan_version(
 
 pub struct DependencyUpdate {
     pub dependent: RelDir,
-    pub dependent_name: Option<String>,
     pub dependency: RelDir,
     pub dependency_name: String,
     pub field: DependencyField,
@@ -133,7 +131,6 @@ pub struct DependencyUpdate {
 }
 
 fn plan_dependency_updates(
-    workspace: &Workspace,
     graph: &DependentsGraph,
     releases: &[PlannedRelease],
     snapshot: bool,
@@ -162,7 +159,6 @@ fn plan_dependency_updates(
         };
         updates.push(DependencyUpdate {
             dependent: edge.dependent.clone(),
-            dependent_name: workspace[&edge.dependent].name().map(str::to_owned),
             dependency: edge.dependency.clone(),
             dependency_name: (*name).to_owned(),
             field: edge.field,
@@ -174,12 +170,7 @@ fn plan_dependency_updates(
         });
     }
     updates.sort_by(|a, b| {
-        (&a.dependent_name, &a.dependent, &a.dependency_name, a.field).cmp(&(
-            &b.dependent_name,
-            &b.dependent,
-            &b.dependency_name,
-            b.field,
-        ))
+        (&a.dependent, &a.dependency, a.field).cmp(&(&b.dependent, &b.dependency, b.field))
     });
     updates
 }
@@ -327,7 +318,6 @@ fn plan_releases(
             changelog_entry: None,
         });
     }
-    releases.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(releases)
 }
 
@@ -370,12 +360,15 @@ fn render_changelog_entries(
             })
             .map(|update| {
                 (
-                    update.dependency_name.as_str(),
-                    &new_versions[&update.dependency],
+                    &update.dependency,
+                    (
+                        update.dependency_name.as_str(),
+                        &new_versions[&update.dependency],
+                    ),
                 )
             })
             .collect::<BTreeMap<_, _>>()
-            .into_iter()
+            .into_values()
             .collect();
         release.changelog_entry = Some(render_entry(&summaries, &updated_dependencies));
         release.updated_dependencies = updated_dependencies

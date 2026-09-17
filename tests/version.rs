@@ -2052,7 +2052,7 @@ fn packages_rewritten_without_a_bump_are_none_releases() {
 }
 
 #[test]
-fn dependency_updates_are_ordered_by_dependent_name_then_dependency_name() {
+fn dependency_updates_are_ordered_by_dependent_dir_then_dependency_dir() {
     let dir = two_package_workspace_dir();
     write_file(
         dir.path(),
@@ -2076,9 +2076,9 @@ fn dependency_updates_are_ordered_by_dependent_name_then_dependency_name() {
         [
             "Bumped pkg-a 3.1.4 -> 3.1.5",
             "Bumped pkg-b 2.0.0 -> 2.0.1",
+            "Updated pkg-y@1.0.0 (packages/c): pkg-a ^3.1.4 -> ^3.1.5",
             "Updated pkg-x@1.0.0 (packages/d): pkg-a ^3.1.4 -> ^3.1.5",
             "Updated pkg-x@1.0.0 (packages/d): pkg-b ^2.0.0 -> ^2.0.1",
-            "Updated pkg-y@1.0.0 (packages/c): pkg-a ^3.1.4 -> ^3.1.5",
         ],
         "{output}"
     );
