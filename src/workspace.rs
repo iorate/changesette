@@ -388,11 +388,12 @@ impl Package {
 
 impl fmt::Display for Package {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name.as_deref().unwrap_or("<unnamed>"))?;
-        if let Some(version) = &self.version {
-            write!(f, "@{version}")?;
-        }
-        write!(f, " ({})", self.rel_dir)
+        write!(
+            f,
+            "{} ({})",
+            self.name.as_deref().unwrap_or("<unnamed>"),
+            self.rel_dir
+        )
     }
 }
 

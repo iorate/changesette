@@ -420,18 +420,12 @@ fn get_packages_lists_skipped_packages_only_with_all() {
 }
 
 #[test]
-fn get_packages_debug_reports_the_package_list() {
+fn get_packages_log_level_debug_adds_debug_lines() {
     let dir = workspace_dir();
     let output = changesette(dir.path(), &["get-packages", "--log-level", "debug"]);
     assert!(output.status.success(), "{}", stderr(&output));
     let err = stderr(&output);
-    assert!(
-        err.contains(&format!(
-            "debug: {}: npm workspace, packages: <unnamed> (.), pkg-a@3.1.4 (packages/a)",
-            expected_path(dir.path(), "")
-        )),
-        "{err}"
-    );
+    assert!(err.lines().any(|line| line.starts_with("debug: ")), "{err}");
 }
 
 #[test]

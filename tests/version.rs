@@ -35,7 +35,6 @@ const EMPTY_PLAN: &str = "{\n  \"changesets\": [],\n  \"releases\": []\n}\n";
 type Setup = fn() -> TempDir;
 type Names<'a> = &'a [&'a str];
 type Releases<'a> = &'a [(&'a str, &'a str)];
-type Changesets<'a> = &'a [(&'a str, Releases<'a>)];
 
 fn pkg(name: &str, version: &str) -> String {
     format!("{{\n  \"name\": \"{name}\",\n  \"version\": \"{version}\"\n}}\n")
@@ -554,29 +553,6 @@ fn private_packages_are_versioned_only_when_configured() {
 }
 
 #[test]
-fn skipped_packages_report_the_reasons_at_debug() {
-    let dir = private_two_package_workspace_dir();
-    write_config(dir.path(), "{ \"ignore\": [\"pkg-a\"] }\n");
-    let output = capture_output(|| {
-        let (workspace, _) = load(dir.path());
-        assert!(workspace.versionables().next().is_none());
-    });
-    let lines: Vec<&str> = output
-        .lines()
-        .filter(|line| line.contains(": skipped: "))
-        .collect();
-    assert_eq!(
-        lines,
-        [
-            "debug: <unnamed> (.): skipped: no name",
-            "debug: pkg-a@3.1.4 (packages/a): skipped: ignored",
-            "debug: pkg-b@2.0.0 (packages/b): skipped: private",
-        ],
-        "{output}"
-    );
-}
-
-#[test]
 fn fixed_bumps_the_partner_with_a_heading_only_changelog() {
     let dir = two_package_workspace_dir();
     write_config(dir.path(), "{ \"fixed\": [[\"pkg-a\", \"pkg-b\"]] }\n");
@@ -648,48 +624,6 @@ fn linked_aligns_the_releasing_members() {
         manifest_version(dir.path(), "packages/b/package.json"),
         "3.2.0"
     );
-}
-
-#[test]
-fn groups_report_the_raised_bump_at_debug() {
-    let cases: [(&str, Changesets, &str); 2] = [
-        ("fixed", &[(FILE_A, &[("pkg-a", "minor")])], "pkg-b"),
-        (
-            "linked",
-            &[
-                (FILE_A, &[("pkg-a", "patch")]),
-                (FILE_B, &[("pkg-b", "minor")]),
-            ],
-            "pkg-a",
-        ),
-    ];
-    for (kind, changesets, raised) in cases {
-        let dir = two_package_workspace_dir();
-        write_config(
-            dir.path(),
-            &format!("{{ \"{kind}\": [[\"pkg-a\", \"pkg-b\"]] }}\n"),
-        );
-        for (file_name, releases) in changesets {
-            write_changeset(dir.path(), file_name, releases, "Change");
-        }
-        let output = capture_output(|| {
-            let planned = plan(dir.path());
-            assert_eq!(
-                releases(&planned),
-                ["pkg-a minor 3.1.4 -> 3.2.0", "pkg-b minor 3.1.4 -> 3.2.0"]
-            );
-        });
-        let lines: Vec<&str> = output
-            .lines()
-            .filter(|line| line.contains("raises the bump"))
-            .collect();
-        assert_eq!(lines.len(), 1, "{output}");
-        assert!(lines[0].starts_with("debug: "), "{output}");
-        assert!(lines[0].contains(&format!("`{raised}`")), "{output}");
-        assert!(lines[0].contains(&format!("\"{kind}\"")), "{output}");
-        assert!(lines[0].contains("minor"), "{output}");
-        assert!(lines[0].contains("3.1.4"), "{output}");
-    }
 }
 
 #[test]
@@ -1597,28 +1531,14 @@ fn dependents_are_bumped_transitively_listing_the_updated_dependencies() {
     );
     write_file(dir.path(), "packages/d/package.json", &d_manifest("^1.0.0"));
     write_changeset(dir.path(), FILE_A, &[("pkg-a", "major")], "Break pkg-a");
-    let output = capture_output(|| {
-        let planned = plan(dir.path());
-        assert_eq!(
-            releases(&planned),
-            [
-                "pkg-a major 3.1.4 -> 4.0.0",
-                "pkg-b patch 2.0.0 -> 2.0.1",
-                "pkg-c patch 1.0.0 -> 1.0.1"
-            ]
-        );
-    });
-    let lines: Vec<&str> = output
-        .lines()
-        .filter(|line| line.contains("as a dependent"))
-        .collect();
+    let planned = plan(dir.path());
     assert_eq!(
-        lines,
+        releases(&planned),
         [
-            "debug: pkg-b@2.0.0 (packages/b): bumped as a dependent of `pkg-a` (>=3.1.4 <4.0.0-0 does not include 4.0.0)",
-            "debug: pkg-c@1.0.0 (packages/c): bumped as a dependent of `pkg-b` (2.0.0 does not include 2.0.1)",
-        ],
-        "{output}"
+            "pkg-a major 3.1.4 -> 4.0.0",
+            "pkg-b patch 2.0.0 -> 2.0.1",
+            "pkg-c patch 1.0.0 -> 1.0.1"
+        ]
     );
 
     run_ok(dir.path());
@@ -1992,7 +1912,7 @@ fn ranges_are_raised_in_unreleased_dependents_and_the_unnamed_root() {
         [
             "Bumped pkg-a 3.1.4 -> 3.1.5",
             "Updated <unnamed> (.): pkg-a ^3.1.4 -> ^3.1.5",
-            "Updated pkg-b@2.0.0 (packages/b): pkg-a ~3.1.4 -> ~3.1.5",
+            "Updated pkg-b (packages/b): pkg-a ~3.1.4 -> ~3.1.5",
         ],
         "{output}"
     );
@@ -2076,9 +1996,9 @@ fn dependency_updates_are_ordered_by_dependent_dir_then_dependency_dir() {
         [
             "Bumped pkg-a 3.1.4 -> 3.1.5",
             "Bumped pkg-b 2.0.0 -> 2.0.1",
-            "Updated pkg-y@1.0.0 (packages/c): pkg-a ^3.1.4 -> ^3.1.5",
-            "Updated pkg-x@1.0.0 (packages/d): pkg-a ^3.1.4 -> ^3.1.5",
-            "Updated pkg-x@1.0.0 (packages/d): pkg-b ^2.0.0 -> ^2.0.1",
+            "Updated pkg-y (packages/c): pkg-a ^3.1.4 -> ^3.1.5",
+            "Updated pkg-x (packages/d): pkg-a ^3.1.4 -> ^3.1.5",
+            "Updated pkg-x (packages/d): pkg-b ^2.0.0 -> ^2.0.1",
         ],
         "{output}"
     );

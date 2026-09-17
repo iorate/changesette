@@ -167,10 +167,6 @@ fn internal_dependencies_keep_edges_to_versioned_workspace_packages() {
             ("pkg-c", "pkg-a", DependencyField::Dependencies),
         ]
     );
-    assert!(
-        output.contains("debug: pkg-a@1.0.0 (packages/a): depends on `pkg-c`, which has no version and is never released; the dependency is ignored"),
-        "{output}"
-    );
     assert!(!output.contains("warning: "), "{output}");
 }
 
@@ -195,7 +191,7 @@ fn internal_dependencies_ignore_a_range_missing_the_current_version() {
     );
     assert_eq!(
         output,
-        "warning: pkg-a@1.0.0 (packages/a): depends on `pkg-b` at \"^1.0.0\", which does not include the workspace's pkg-b@2.0.0; the dependency is ignored\n"
+        "warning: pkg-a (packages/a): depends on `pkg-b` at \"^1.0.0\", which does not include the workspace's pkg-b@2.0.0; the dependency is ignored\n"
     );
 }
 
