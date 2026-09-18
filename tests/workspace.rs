@@ -352,7 +352,7 @@ fn duplicate_names_resolve_to_the_last_directory_with_a_warning() {
     );
     assert_eq!(
         warning_lines(&output),
-        ["warning: the name `dup` is used by packages/a, packages/b; `dup` resolves to packages/b"]
+        ["warning: dup (packages/a): shadowed by packages/b"]
     );
     let dup = workspace.package("dup").unwrap();
     assert_eq!(dup.rel_dir().as_str(), "packages/b");
@@ -380,7 +380,7 @@ fn a_versionless_last_namesake_shadows_the_versioned_one() {
         "packages/b/package.json",
         "{ \"name\": \"dup\" }\n",
     );
-    let workspace = discover_ok(dir.path());
+    let (workspace, output) = discover_captured(dir.path());
     assert_eq!(
         names_and_rel_dirs(&workspace),
         [("dup", "packages/a"), ("dup", "packages/b")]
@@ -395,6 +395,29 @@ fn a_versionless_last_namesake_shadows_the_versioned_one() {
         .filter_map(|package| package.skip_reason().map(ToString::to_string))
         .collect();
     assert_eq!(reasons, ["shadowed by packages/b", "no version"]);
+    assert_eq!(
+        warning_lines(&output),
+        ["warning: dup (packages/a): shadowed by packages/b"]
+    );
+}
+
+#[test]
+fn a_namesake_skipped_for_another_reason_is_not_reported_as_shadowed() {
+    let dir = pnpm_dir(&["packages/*"]);
+    write_file(dir.path(), "package.json", "{ \"name\": \"dup\" }\n");
+    write_file(dir.path(), "packages/a/package.json", &pkg("dup"));
+    let (workspace, output) = discover_captured(dir.path());
+    assert_eq!(
+        names_and_rel_dirs(&workspace),
+        [("dup", "."), ("dup", "packages/a")]
+    );
+    assert_eq!(versioned_names(&workspace), ["dup"]);
+    let reasons: Vec<String> = workspace
+        .packages()
+        .filter_map(|package| package.skip_reason().map(ToString::to_string))
+        .collect();
+    assert_eq!(reasons, ["no version"]);
+    assert_eq!(warning_lines(&output), [] as [&str; 0]);
 }
 
 #[cfg(unix)]
