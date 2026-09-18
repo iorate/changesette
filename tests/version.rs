@@ -308,22 +308,6 @@ fn fails_for_a_changeset_naming_an_unknown_package_leaving_the_tree_untouched() 
 }
 
 #[test]
-fn fails_for_a_changeset_naming_a_versionless_package_leaving_the_tree_untouched() {
-    let dir = tempfile::tempdir().unwrap();
-    write_file(
-        dir.path(),
-        "package.json",
-        "{\n  \"name\": \"ublacklist\"\n}\n",
-    );
-    write_changeset(dir.path(), FILE_B, &[("ublacklist", "patch")], "Fix bug");
-    let before = dir_snapshot(dir.path());
-    let err = run_err(dir.path());
-    assert!(err.contains(FILE_B), "{err}");
-    assert!(err.contains("`ublacklist` has no version"), "{err}");
-    assert_eq!(dir_snapshot(dir.path()), before);
-}
-
-#[test]
 fn leaves_the_package_lock_untouched() {
     let dir = package_dir();
     let package_lock = "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\",\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"\": {\n      \"name\": \"ublacklist\",\n      \"version\": \"1.2.3\"\n    }\n  }\n}\n";
@@ -339,9 +323,19 @@ fn leaves_the_package_lock_untouched() {
     assert_eq!(read(dir.path(), "package-lock.json"), package_lock);
 }
 
+fn versionless_two_package_workspace_dir() -> TempDir {
+    let dir = workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        "{\n  \"name\": \"pkg-b\"\n}\n",
+    );
+    dir
+}
+
 #[test]
 fn skipped_packages_keep_their_changesets() {
-    let cases: [(Setup, Option<&str>, Names); 3] = [
+    let cases: [(Setup, Option<&str>, Names); 4] = [
         (two_package_workspace_dir, None, &["pkg-b"]),
         (
             two_package_workspace_dir,
@@ -349,6 +343,7 @@ fn skipped_packages_keep_their_changesets() {
             &[],
         ),
         (private_two_package_workspace_dir, None, &[]),
+        (versionless_two_package_workspace_dir, None, &[]),
     ];
     for (make_dir, config, ignore) in cases {
         let dir = make_dir();
@@ -426,19 +421,20 @@ fn ignore_rejects_an_unknown_package() {
 }
 
 #[test]
-fn ignore_rejects_a_duplicated_name() {
+fn ignore_covers_every_namesake() {
     let dir = workspace_dir();
     write_file(
         dir.path(),
         "packages/b/package.json",
         &pkg("pkg-a", "1.0.0"),
     );
-    let err = format!("{:#}", load_with(dir.path(), &["pkg-a"]).unwrap_err());
-    assert!(err.contains("--ignore"), "{err}");
-    assert!(
-        err.contains("`pkg-a` is ambiguous: used by packages/a, packages/b"),
-        "{err}"
-    );
+    let (workspace, _) = load_with(dir.path(), &["pkg-a"]).unwrap();
+    let reasons: Vec<String> = workspace
+        .packages()
+        .filter_map(|package| package.skip_reason().map(ToString::to_string))
+        .collect();
+    assert_eq!(reasons, ["no name", "shadowed by packages/b", "ignored"]);
+    assert_eq!(workspace.versioned().count(), 0);
 }
 
 #[test]
@@ -467,32 +463,33 @@ fn succeeds_when_every_changeset_is_skipped() {
 
 #[test]
 fn filter_changes_rejects_a_mixed_changeset() {
-    let cases: [(Setup, Releases, Names); 3] = [
+    let cases: [(Setup, Releases, Names, &str); 3] = [
         (
             two_package_workspace_dir,
             &[("pkg-a", "minor"), ("pkg-b", "none")],
             &["pkg-a"],
+            "cannot mix skipped packages (`pkg-a`: ignored) and not skipped packages (`pkg-b`)",
         ),
         (
             two_package_workspace_dir,
             &[("pkg-a", "minor"), ("pkg-b", "patch")],
             &["pkg-a"],
+            "cannot mix skipped packages (`pkg-a`: ignored) and not skipped packages (`pkg-b`)",
         ),
         (
             private_two_package_workspace_dir,
             &[("pkg-a", "minor"), ("pkg-b", "patch")],
             &[],
+            "cannot mix skipped packages (`pkg-b`: private) and not skipped packages (`pkg-a`)",
         ),
     ];
-    for (make_dir, changeset, ignore) in cases {
+    for (make_dir, changeset, ignore, message) in cases {
         let dir = make_dir();
         write_changeset(dir.path(), FILE_B, changeset, "Improve things");
         let before = dir_snapshot(dir.path());
         let err = run_err_with(dir.path(), ignore, args());
         assert!(err.contains(FILE_B), "{err}");
-        assert!(err.contains("cannot mix skipped packages"), "{err}");
-        assert!(err.contains("`pkg-a`"), "{err}");
-        assert!(err.contains("`pkg-b`"), "{err}");
+        assert!(err.contains(message), "{err}");
         assert_eq!(dir_snapshot(dir.path()), before);
     }
 }
@@ -533,15 +530,15 @@ fn the_ignore_flag_and_a_config_ignore_are_exclusive() {
 fn private_packages_are_versioned_only_when_configured() {
     let dir = private_two_package_workspace_dir();
     let (workspace, _) = load(dir.path());
-    assert!(workspace.package("pkg-a").unwrap().versionable().is_some());
-    assert!(workspace.package("pkg-b").unwrap().versionable().is_none());
+    assert!(workspace.package("pkg-a").unwrap().versioned().is_some());
+    assert!(workspace.package("pkg-b").unwrap().versioned().is_none());
 
     write_config(
         dir.path(),
         "{ \"privatePackages\": { \"version\": true } }\n",
     );
     let (workspace, _) = load(dir.path());
-    assert!(workspace.package("pkg-b").unwrap().versionable().is_some());
+    assert!(workspace.package("pkg-b").unwrap().versioned().is_some());
 
     write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
     run_ok(dir.path());
@@ -643,6 +640,33 @@ fn fixed_counts_a_skipped_member_without_adding_it() {
     );
     assert_eq!(read(dir.path(), "packages/b/package.json"), b_manifest);
     assert!(!exists(dir.path(), "packages/b/CHANGELOG.md"));
+}
+
+#[test]
+fn groups_count_a_versionless_member_as_nothing() {
+    for (kind, pre) in [
+        ("fixed", false),
+        ("linked", false),
+        ("fixed", true),
+        ("linked", true),
+    ] {
+        let dir = versionless_two_package_workspace_dir();
+        write_config(
+            dir.path(),
+            &format!("{{ \"{kind}\": [[\"pkg-a\", \"pkg-b\"]] }}\n"),
+        );
+        if pre {
+            write_pre_json(dir.path(), PRE_JSON);
+        }
+        write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+        let planned = plan(dir.path());
+        let new_version = if pre { "3.2.0-beta.0" } else { "3.2.0" };
+        assert_eq!(
+            releases(&planned),
+            [format!("pkg-a minor 3.1.4 -> {new_version}")],
+            "{kind} pre={pre}"
+        );
+    }
 }
 
 #[test]

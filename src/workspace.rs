@@ -227,11 +227,11 @@ impl Workspace {
                     .join(", ")
             );
         }
-        workspace.mark_versionable(config, cli_ignore)?;
+        workspace.mark_skipped(config, cli_ignore)?;
         Ok(workspace)
     }
 
-    fn mark_versionable(&mut self, config: &Config, cli_ignore: &[String]) -> Result<()> {
+    fn mark_skipped(&mut self, config: &Config, cli_ignore: &[String]) -> Result<()> {
         let ignore = if config.has_ignore() {
             ensure!(
                 cli_ignore.is_empty(),
@@ -240,32 +240,48 @@ impl Workspace {
             config.resolve_ignore(self.packages.values().filter_map(Package::name))
         } else {
             for name in cli_ignore {
-                self.package(name).context("invalid `--ignore` value")?;
+                self.package(name)
+                    .ok_or_else(|| PackageNotFound::new(name, self))
+                    .context("invalid `--ignore` value")?;
             }
             cli_ignore.to_vec()
         };
-        let mut seen = BTreeSet::new();
-        let mut duplicates = BTreeSet::new();
-        for name in self.packages.values().filter_map(Package::name) {
-            if !seen.insert(name) {
-                duplicates.insert(name.to_owned());
+        let mut namesakes: BTreeMap<&str, Vec<&RelDir>> = BTreeMap::new();
+        for package in self.packages.values() {
+            if let Some(name) = package.name() {
+                namesakes.entry(name).or_default().push(&package.rel_dir);
             }
+        }
+        let mut resolved = BTreeMap::new();
+        for (name, rel_dirs) in namesakes {
+            let winner = rel_dirs
+                .last()
+                .expect("a name is recorded with the package using it");
+            if rel_dirs.len() > 1 {
+                warn!(
+                    "the name `{name}` is used by {}; `{name}` resolves to {winner}",
+                    rel_dirs
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            resolved.insert(name.to_owned(), (*winner).clone());
         }
         for package in self.packages.values_mut() {
             let reason = match (&package.name, &package.version) {
-                (None, _) => "no name",
-                (_, None) => "no version",
-                (Some(name), _) if duplicates.contains(name) => {
-                    "the name is used by more than one package"
+                (None, _) => SkipReason::NoName,
+                (Some(name), _) if resolved[name.as_str()] != package.rel_dir => {
+                    SkipReason::Shadowed(resolved[name.as_str()].clone())
                 }
-                (Some(name), _) if ignore.contains(name) => "ignored",
-                _ if package.private && !config.private_packages_version => "private",
-                _ => {
-                    package.versionable = true;
-                    continue;
-                }
+                (Some(name), _) if ignore.contains(name) => SkipReason::Ignored,
+                (_, None) => SkipReason::NoVersion,
+                _ if package.private && !config.private_packages_version => SkipReason::Private,
+                _ => continue,
             };
             debug!("{package}: skipped: {reason}");
+            package.skip_reason = Some(reason);
         }
         Ok(())
     }
@@ -284,44 +300,60 @@ impl Workspace {
         self.packages.values()
     }
 
-    pub fn versionables(&self) -> impl Iterator<Item = Versionable<'_>> {
-        self.packages.values().filter_map(Package::versionable)
+    pub fn versioned(&self) -> impl Iterator<Item = Versioned<'_>> {
+        self.packages.values().filter_map(Package::versioned)
     }
 
-    pub fn find_package(&self, name: &str) -> Result<Option<&Package>> {
-        let found: Vec<&Package> = self
-            .packages
+    #[must_use]
+    pub fn package(&self, name: &str) -> Option<&Package> {
+        self.packages
             .values()
-            .filter(|package| package.name.as_deref() == Some(name))
-            .collect();
-        match found.as_slice() {
-            [] => Ok(None),
-            [package] => Ok(Some(package)),
-            _ => {
-                let rel_dirs = found
-                    .iter()
-                    .map(|package| package.rel_dir.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                bail!("package `{name}` is ambiguous: used by {rel_dirs}")
-            }
-        }
-    }
-
-    pub fn package(&self, name: &str) -> Result<&Package> {
-        if let Some(package) = self.find_package(name)? {
-            return Ok(package);
-        }
-        let known: BTreeSet<&str> = self.packages.values().filter_map(Package::name).collect();
-        if known.is_empty() {
-            bail!("package `{name}` not found: the workspace has no named packages")
-        }
-        bail!(
-            "package `{name}` not found; known packages: {}",
-            known.into_iter().collect::<Vec<_>>().join(", ")
-        )
+            .rev()
+            .find(|package| package.name.as_deref() == Some(name))
     }
 }
+
+#[derive(Debug)]
+pub struct PackageNotFound {
+    name: String,
+    known: Vec<String>,
+}
+
+impl PackageNotFound {
+    #[must_use]
+    pub fn new(name: &str, workspace: &Workspace) -> PackageNotFound {
+        let known: BTreeSet<&str> = workspace
+            .packages
+            .values()
+            .filter_map(Package::name)
+            .collect();
+        PackageNotFound {
+            name: name.to_owned(),
+            known: known.into_iter().map(str::to_owned).collect(),
+        }
+    }
+}
+
+impl fmt::Display for PackageNotFound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.known.is_empty() {
+            write!(
+                f,
+                "package `{}` not found: the workspace has no named packages",
+                self.name
+            )
+        } else {
+            write!(
+                f,
+                "package `{}` not found; known packages: {}",
+                self.name,
+                self.known.join(", ")
+            )
+        }
+    }
+}
+
+impl std::error::Error for PackageNotFound {}
 
 impl Index<&RelDir> for Workspace {
     type Output = Package;
@@ -339,7 +371,7 @@ pub struct Package {
     rel_dir: RelDir,
     private: bool,
     dependencies: Vec<Dependency>,
-    versionable: bool,
+    skip_reason: Option<SkipReason>,
 }
 
 impl Package {
@@ -374,11 +406,16 @@ impl Package {
     }
 
     #[must_use]
-    pub fn versionable(&self) -> Option<Versionable<'_>> {
-        if !self.versionable {
+    pub fn skip_reason(&self) -> Option<&SkipReason> {
+        self.skip_reason.as_ref()
+    }
+
+    #[must_use]
+    pub fn versioned(&self) -> Option<Versioned<'_>> {
+        if self.skip_reason.is_some() {
             return None;
         }
-        Some(Versionable {
+        Some(Versioned {
             package: self,
             name: self.name.as_deref()?,
             version: self.version.as_ref()?,
@@ -397,14 +434,35 @@ impl fmt::Display for Package {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkipReason {
+    NoName,
+    Shadowed(RelDir),
+    Ignored,
+    NoVersion,
+    Private,
+}
+
+impl fmt::Display for SkipReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SkipReason::NoName => f.write_str("no name"),
+            SkipReason::Shadowed(rel_dir) => write!(f, "shadowed by {rel_dir}"),
+            SkipReason::Ignored => f.write_str("ignored"),
+            SkipReason::NoVersion => f.write_str("no version"),
+            SkipReason::Private => f.write_str("private"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
-pub struct Versionable<'a> {
+pub struct Versioned<'a> {
     package: &'a Package,
     name: &'a str,
     version: &'a Version,
 }
 
-impl<'a> Versionable<'a> {
+impl<'a> Versioned<'a> {
     #[must_use]
     pub fn package(&self) -> &'a Package {
         self.package
@@ -794,7 +852,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: RelDir, path: &Path) -> Option<
             .and_then(Value::as_bool)
             .unwrap_or(false),
         dependencies: qualify_dependencies(object, path),
-        versionable: false,
+        skip_reason: None,
     })
 }
 

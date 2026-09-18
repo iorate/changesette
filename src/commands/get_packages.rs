@@ -16,7 +16,7 @@ struct Row<'a> {
 pub fn run(workspace: &Workspace, all: bool) -> Result<()> {
     let rows: Vec<Row> = workspace
         .packages()
-        .filter(|package| all || package.versionable().is_some())
+        .filter(|package| all || package.versioned().is_some())
         .map(|package| Row {
             dir: package.rel_dir().as_str(),
             name: package.name(),

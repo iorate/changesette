@@ -56,7 +56,6 @@ fn load(dir: &Path) -> Workspace {
 
 fn edges(workspace: &Workspace, workspace_only: bool) -> Vec<(&str, &str, DependencyField)> {
     internal_dependencies(workspace, workspace_only)
-        .unwrap()
         .iter()
         .map(|edge| {
             (
@@ -196,7 +195,7 @@ fn internal_dependencies_ignore_a_range_missing_the_current_version() {
 }
 
 #[test]
-fn internal_dependencies_fail_on_a_dependency_with_a_duplicated_name() {
+fn internal_dependencies_resolve_a_duplicated_name_to_the_last_directory() {
     let dir = workspace_dir(&[
         (
             "packages/a",
@@ -212,11 +211,10 @@ fn internal_dependencies_fail_on_a_dependency_with_a_duplicated_name() {
         ),
     ]);
     let workspace = load(dir.path());
-    let err = internal_dependencies(&workspace, false).unwrap_err();
-    assert_eq!(
-        format!("{err:#}"),
-        "package `dup` is ambiguous: used by packages/b, packages/c"
-    );
+    let dependencies = internal_dependencies(&workspace, false);
+    assert_eq!(dependencies.len(), 1);
+    assert_eq!(dependencies[0].dependent, rel_dir("packages/a"));
+    assert_eq!(dependencies[0].dependency, rel_dir("packages/c"));
 }
 
 #[test]
