@@ -81,6 +81,7 @@ pub fn upsert_section(text: &str, package_name: &str, version: &str, section: &s
 
     // The collected byte ranges are invalidated whenever `text` changes, so
     // each mutation below re-parses; the happy path parses only once.
+    let newline = detect_newline(text);
     let mut text = text.to_owned();
     let mut headings = parse_headings(&text);
 
@@ -94,7 +95,7 @@ pub fn upsert_section(text: &str, package_name: &str, version: &str, section: &s
         heading.level == HeadingLevel::H1 && text[..heading.range.start].trim().is_empty()
     });
     if !has_top_h1 {
-        text = format!("# {package_name}\n\n{text}");
+        text = format!("# {package_name}{newline}{newline}{text}");
         headings = parse_headings(&text);
     }
 
@@ -107,15 +108,23 @@ pub fn upsert_section(text: &str, package_name: &str, version: &str, section: &s
         .map_or(text.len(), |heading| heading.range.start);
     let (before, after) = text.split_at(position);
     let mut result = String::new();
-    result.push_str(before.trim_end_matches('\n'));
-    result.push_str("\n\n");
-    result.push_str(section);
-    result.push('\n');
+    result.push_str(before.trim_end_matches(['\r', '\n']));
+    result.push_str(newline);
+    result.push_str(newline);
+    result.push_str(&section.replace('\n', newline));
+    result.push_str(newline);
     if !after.is_empty() {
-        result.push('\n');
+        result.push_str(newline);
         result.push_str(after);
     }
     result
+}
+
+fn detect_newline(text: &str) -> &'static str {
+    match text.find('\n') {
+        Some(index) if text[..index].ends_with('\r') => "\r\n",
+        _ => "\n",
+    }
 }
 
 pub fn extract_section(text: &str, version: &str) -> Result<String> {
