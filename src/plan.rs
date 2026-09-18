@@ -94,7 +94,6 @@ pub fn plan_version(
     };
     let mut releases = plan_releases(
         &workspace,
-        &config_path,
         &consumed_changes,
         pre.as_ref(),
         snapshot_versions.as_ref(),
@@ -192,12 +191,6 @@ fn filter_changes(
                 .package(name)
                 .ok_or_else(|| PackageNotFound::new(name, workspace))
                 .with_context(|| path.display().to_string())?;
-            if package.version().is_none() {
-                bail!(
-                    "{}: package `{name}` has no version in package.json",
-                    path.display()
-                );
-            }
             packages.push((name.as_str(), package));
         }
         resolved.push(packages);
@@ -240,7 +233,6 @@ pub struct PlannedRelease {
 
 fn plan_releases(
     workspace: &Workspace,
-    config_path: &Path,
     changes: &[LoadedChange],
     pre: Option<&PreJson>,
     snapshot: Option<&SnapshotVersions>,
@@ -253,8 +245,7 @@ fn plan_releases(
         })
         .transpose()?;
     let pre_counters = match &pre_tag {
-        Some(tag) => group_pre_counters(workspace, groups, tag)
-            .with_context(|| config_path.display().to_string())?,
+        Some(tag) => group_pre_counters(workspace, groups, tag),
         None => BTreeMap::new(),
     };
 
@@ -270,10 +261,8 @@ fn plan_releases(
             &pre_counters,
             &mut drafts,
         );
-        let fixed = apply_fixed(workspace, &groups.fixed, &mut drafts)
-            .with_context(|| config_path.display().to_string())?;
-        let linked = apply_linked(workspace, &groups.linked, &mut drafts)
-            .with_context(|| config_path.display().to_string())?;
+        let fixed = apply_fixed(workspace, &groups.fixed, &mut drafts);
+        let linked = apply_linked(workspace, &groups.linked, &mut drafts);
         if !(dependents || fixed || linked) {
             break;
         }
@@ -281,8 +270,7 @@ fn plan_releases(
     // The group passes run before the pre exit rescue so that a rescued
     // package does not pull its group along.
     if matches!(pre, Some(pre) if pre.mode() == PreMode::Exit) {
-        rescue_prereleases(workspace, groups, &mut drafts)
-            .with_context(|| config_path.display().to_string())?;
+        rescue_prereleases(workspace, groups, &mut drafts);
     }
 
     let mut releases = Vec::new();
@@ -435,11 +423,10 @@ fn next_version_of(
 }
 
 // The skipped packages of a group count too: their versions bound the group
-// even though the bump application excludes them.
-fn group_version<'a>(workspace: &'a Workspace, kind: &str, name: &str) -> Result<&'a Version> {
-    member(workspace, name)
-        .version()
-        .with_context(|| format!("package `{name}` in a {kind:?} group has no version"))
+// even though the bump application excludes them. A member without a version
+// has nothing to count.
+fn group_version<'a>(workspace: &'a Workspace, name: &str) -> Option<&'a Version> {
+    member(workspace, name).version()
 }
 
 // The judgment uses the plain next version even for a snapshot release, so a
@@ -509,13 +496,13 @@ fn apply_fixed<'a>(
     workspace: &'a Workspace,
     groups: &[Vec<String>],
     drafts: &mut Drafts<'a>,
-) -> Result<bool> {
+) -> bool {
     let mut changed = false;
     for group in groups {
         let Some(max_bump) = group_max_bump(workspace, group, drafts) else {
             continue;
         };
-        let highest = group_highest_version(workspace, "fixed", group)?;
+        let highest = group_highest_version(workspace, group);
         for name in group {
             let Some(versioned) = member(workspace, name).versioned() else {
                 continue;
@@ -544,20 +531,16 @@ fn apply_fixed<'a>(
             changed = true;
         }
     }
-    Ok(changed)
+    changed
 }
 
-fn apply_linked(
-    workspace: &Workspace,
-    groups: &[Vec<String>],
-    drafts: &mut Drafts<'_>,
-) -> Result<bool> {
+fn apply_linked(workspace: &Workspace, groups: &[Vec<String>], drafts: &mut Drafts<'_>) -> bool {
     let mut changed = false;
     for group in groups {
         let Some(max_bump) = group_max_bump(workspace, group, drafts) else {
             continue;
         };
-        let highest = group_highest_version(workspace, "linked", group)?;
+        let highest = group_highest_version(workspace, group);
         for name in group {
             let Some(draft) = drafts.get_mut(member(workspace, name).rel_dir()) else {
                 continue;
@@ -578,7 +561,7 @@ fn apply_linked(
             changed = true;
         }
     }
-    Ok(changed)
+    changed
 }
 
 fn group_max_bump(workspace: &Workspace, group: &[String], drafts: &Drafts<'_>) -> Option<Bump> {
@@ -592,17 +575,13 @@ fn group_max_bump(workspace: &Workspace, group: &[String], drafts: &Drafts<'_>) 
     max_bump
 }
 
-fn group_highest_version(workspace: &Workspace, kind: &str, group: &[String]) -> Result<Version> {
-    let mut highest: Option<&Version> = None;
-    for name in group {
-        let version = group_version(workspace, kind, name)?;
-        if highest.is_none_or(|h| version > h) {
-            highest = Some(version);
-        }
-    }
-    Ok(highest
-        .expect("a group with a releasing package is nonempty")
-        .clone())
+fn group_highest_version(workspace: &Workspace, group: &[String]) -> Version {
+    group
+        .iter()
+        .filter_map(|name| group_version(workspace, name))
+        .max()
+        .expect("a releasing group member has a version")
+        .clone()
 }
 
 // The old_version override alone would miss a package whose version is low
@@ -611,23 +590,20 @@ fn group_pre_counters(
     workspace: &Workspace,
     groups: &ResolvedGroups,
     tag: &Prerelease,
-) -> Result<BTreeMap<RelDir, u64>> {
+) -> BTreeMap<RelDir, u64> {
     let mut pre_counters = BTreeMap::new();
-    for (kind, groups) in [("fixed", &groups.fixed), ("linked", &groups.linked)] {
-        for group in groups {
-            let mut counter = 0;
-            for name in group {
-                counter = counter.max(bump::pre_counter(
-                    group_version(workspace, kind, name)?,
-                    tag,
-                ));
-            }
-            for name in group {
-                pre_counters.insert(member(workspace, name).rel_dir().clone(), counter);
-            }
+    for group in groups.fixed.iter().chain(&groups.linked) {
+        let counter = group
+            .iter()
+            .filter_map(|name| group_version(workspace, name))
+            .map(|version| bump::pre_counter(version, tag))
+            .max()
+            .unwrap_or(0);
+        for name in group {
+            pre_counters.insert(member(workspace, name).rel_dir().clone(), counter);
         }
     }
-    Ok(pre_counters)
+    pre_counters
 }
 
 // Each rescued package is planned at its own version: `next_version` then
@@ -637,21 +613,15 @@ fn rescue_prereleases<'a>(
     workspace: &'a Workspace,
     groups: &ResolvedGroups,
     drafts: &mut Drafts<'a>,
-) -> Result<()> {
+) {
     let mut group_rescued = BTreeSet::new();
-    for (kind, groups) in [("fixed", &groups.fixed), ("linked", &groups.linked)] {
-        for group in groups {
-            let mut on_prerelease = false;
+    for group in groups.fixed.iter().chain(&groups.linked) {
+        let on_prerelease = group
+            .iter()
+            .any(|name| group_version(workspace, name).is_some_and(Version::is_prerelease));
+        if on_prerelease {
             for name in group {
-                if group_version(workspace, kind, name)?.is_prerelease() {
-                    on_prerelease = true;
-                    break;
-                }
-            }
-            if on_prerelease {
-                for name in group {
-                    group_rescued.insert(member(workspace, name).rel_dir());
-                }
+                group_rescued.insert(member(workspace, name).rel_dir());
             }
         }
     }
@@ -667,7 +637,6 @@ fn rescue_prereleases<'a>(
             drafts.insert(rel_dir.clone(), Draft::new(versioned, Some(Bump::Patch)));
         }
     }
-    Ok(())
 }
 
 pub struct StagedWrite {

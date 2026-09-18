@@ -308,22 +308,6 @@ fn fails_for_a_changeset_naming_an_unknown_package_leaving_the_tree_untouched() 
 }
 
 #[test]
-fn fails_for_a_changeset_naming_a_versionless_package_leaving_the_tree_untouched() {
-    let dir = tempfile::tempdir().unwrap();
-    write_file(
-        dir.path(),
-        "package.json",
-        "{\n  \"name\": \"ublacklist\"\n}\n",
-    );
-    write_changeset(dir.path(), FILE_B, &[("ublacklist", "patch")], "Fix bug");
-    let before = dir_snapshot(dir.path());
-    let err = run_err(dir.path());
-    assert!(err.contains(FILE_B), "{err}");
-    assert!(err.contains("`ublacklist` has no version"), "{err}");
-    assert_eq!(dir_snapshot(dir.path()), before);
-}
-
-#[test]
 fn leaves_the_package_lock_untouched() {
     let dir = package_dir();
     let package_lock = "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.2.3\",\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"\": {\n      \"name\": \"ublacklist\",\n      \"version\": \"1.2.3\"\n    }\n  }\n}\n";
@@ -339,9 +323,19 @@ fn leaves_the_package_lock_untouched() {
     assert_eq!(read(dir.path(), "package-lock.json"), package_lock);
 }
 
+fn versionless_two_package_workspace_dir() -> TempDir {
+    let dir = workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        "{\n  \"name\": \"pkg-b\"\n}\n",
+    );
+    dir
+}
+
 #[test]
 fn skipped_packages_keep_their_changesets() {
-    let cases: [(Setup, Option<&str>, Names); 3] = [
+    let cases: [(Setup, Option<&str>, Names); 4] = [
         (two_package_workspace_dir, None, &["pkg-b"]),
         (
             two_package_workspace_dir,
@@ -349,6 +343,7 @@ fn skipped_packages_keep_their_changesets() {
             &[],
         ),
         (private_two_package_workspace_dir, None, &[]),
+        (versionless_two_package_workspace_dir, None, &[]),
     ];
     for (make_dir, config, ignore) in cases {
         let dir = make_dir();
@@ -645,6 +640,33 @@ fn fixed_counts_a_skipped_member_without_adding_it() {
     );
     assert_eq!(read(dir.path(), "packages/b/package.json"), b_manifest);
     assert!(!exists(dir.path(), "packages/b/CHANGELOG.md"));
+}
+
+#[test]
+fn groups_count_a_versionless_member_as_nothing() {
+    for (kind, pre) in [
+        ("fixed", false),
+        ("linked", false),
+        ("fixed", true),
+        ("linked", true),
+    ] {
+        let dir = versionless_two_package_workspace_dir();
+        write_config(
+            dir.path(),
+            &format!("{{ \"{kind}\": [[\"pkg-a\", \"pkg-b\"]] }}\n"),
+        );
+        if pre {
+            write_pre_json(dir.path(), PRE_JSON);
+        }
+        write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+        let planned = plan(dir.path());
+        let new_version = if pre { "3.2.0-beta.0" } else { "3.2.0" };
+        assert_eq!(
+            releases(&planned),
+            [format!("pkg-a minor 3.1.4 -> {new_version}")],
+            "{kind} pre={pre}"
+        );
+    }
 }
 
 #[test]
