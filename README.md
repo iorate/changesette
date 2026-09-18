@@ -6,7 +6,7 @@
 
 A version and changelog manager using the same changeset file format as [changesets](https://github.com/changesets/changesets) and shipped as a single dependency-free Rust binary. The name is changeset + the diminutive suffix -ette (as in diskette).
 
-`changesette` reads changeset files, bumps the version in each released package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / yarn / pnpm workspaces. It never touches lockfiles; regenerating lockfiles such as `package-lock.json` belongs to the package-manager layer.
+`changesette` reads changeset files, bumps the version in each released package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / yarn / pnpm workspaces.
 
 `changesette` performs **no git operations and no network access**; commits, pull requests, tags, and releases belong to your workflows. The CLI feeds those workflows structured data — a machine-readable release plan (`version --output`), the workspace package list (`get-packages`), and per-version changelog sections (`get-changelog-entry`) — and accepts summary rewrites (`set-summary`). The [example workflows](#example-workflows) build the whole release loop from these outputs — no changesets-specific action or bot required.
 
@@ -52,7 +52,7 @@ cargo install changesette
 
 ### Single package (npm)
 
-On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the package to the npm registry and creates a GitHub Release (and its tag) with the changelog section as the notes. A version whose section is missing from the changelog (for example one released before adopting `changesette`) gets no GitHub Release. Replace `my-package` with the `name` declared in your `package.json`.
+On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the package to the npm registry and creates a GitHub Release (and its tag) with the changelog section as the notes. Replace `my-package` with the `name` declared in your `package.json`.
 
 ```yaml
 name: Version
@@ -126,7 +126,7 @@ jobs:
 
 ### Workspace (pnpm)
 
-On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the bumped packages to the npm registry with pnpm and creates a GitHub Release (and its tag, `<name>@<version>`) per package with the changelog section as the notes. `pnpm publish -r` publishes every workspace package whose version is not on the registry yet and skips the rest, so no per-package bookkeeping is needed; insert a build step before it if your packages need one. A package whose changelog has no section for its current version (for example a package never named in a changeset) gets no GitHub Release. With npm instead of pnpm, there is no equivalent of `pnpm publish -r`; iterate over `changesette get-packages` and publish each package whose version is not on the registry yet.
+On every push to `main`, maintains a Version PR that applies the pending changesets; merging it publishes the bumped packages to the npm registry with pnpm and creates a GitHub Release (and its tag, `<name>@<version>`) per package with the changelog section as the notes. With npm instead of pnpm, there is no equivalent of `pnpm publish -r`; iterate over `changesette get-packages` and publish each package whose version is not on the registry yet.
 
 ```yaml
 name: Version
@@ -362,7 +362,7 @@ Rewrites the summary of the changeset `.changeset/<id>.md`, leaving its releases
 
 ## Configuration
 
-`.changeset/config.json` is read when present and is format-compatible with the changesets config; a missing file means the defaults, and unknown keys are ignored. Wherever a setting lists package names, glob patterns like `"@scope/*"` also work, and a `!`-prefixed pattern un-matches, in order, so `["pkg-*", "!pkg-b"]` selects every `pkg-*` package except `pkg-b`.
+`.changeset/config.json` is read when present and is format-compatible with the changesets config. Wherever a setting lists package names, glob patterns like `"@scope/*"` also work.
 
 ### `fixed`
 
