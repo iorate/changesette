@@ -2,10 +2,15 @@ use std::{fs, io};
 
 use anyhow::{Context, Result, bail};
 
-use crate::{changelog, output, workspace::Workspace};
+use crate::{
+    changelog, output,
+    workspace::{PackageNotFound, Workspace},
+};
 
 pub fn run(workspace: &Workspace, package: &str, version: &nodejs_semver::Version) -> Result<()> {
-    let package = workspace.package(package)?;
+    let package = workspace
+        .package(package)
+        .ok_or_else(|| PackageNotFound::new(package, workspace))?;
     let path = package.dir().join("CHANGELOG.md");
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,

@@ -249,11 +249,25 @@ fn add_fails_without_versioned_packages() {
     );
     assert!(!output.status.success());
     assert!(
-        stderr(&output).contains("no versionable packages found"),
+        stderr(&output)
+            .contains("no packages to version; every package is skipped (ublacklist (.): private)"),
         "{}",
         stderr(&output)
     );
     assert!(!dir.path().join(".changeset").exists());
+
+    let empty = tempfile::tempdir().unwrap();
+    let output = changesette(
+        empty.path(),
+        &["add", "--patch", "ublacklist", "-m", "Fix bug"],
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("error: no packages to version\n"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!empty.path().join(".changeset").exists());
 }
 
 #[test]

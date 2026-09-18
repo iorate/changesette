@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use anyhow::Result;
 use nodejs_semver::{Range, Version};
 use tracing::{debug, warn};
 
@@ -81,15 +80,16 @@ pub struct InternalDependency {
     pub spec: Spec,
 }
 
+#[must_use]
 pub fn internal_dependencies(
     workspace: &Workspace,
     workspace_only: bool,
-) -> Result<Vec<InternalDependency>> {
+) -> Vec<InternalDependency> {
     let mut internal = Vec::new();
     for dependent in workspace.packages() {
         for dependency in dependent.dependencies() {
             let name = &dependency.name;
-            let Some(target) = workspace.find_package(name)? else {
+            let Some(target) = workspace.package(name) else {
                 continue;
             };
             if target.rel_dir() == dependent.rel_dir() {
@@ -126,7 +126,7 @@ pub fn internal_dependencies(
             });
         }
     }
-    Ok(internal)
+    internal
 }
 
 #[derive(Debug, Default)]

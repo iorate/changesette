@@ -6,7 +6,8 @@ use anyhow::Result;
 use changesette::{
     config::Config,
     workspace::{
-        Dependency, DependencyField, Package, Root, Workspace, rel_dir_between, resolve_root,
+        Dependency, DependencyField, Package, PackageNotFound, Root, SkipReason, Workspace,
+        rel_dir_between, resolve_root,
     },
 };
 use nodejs_semver::Version;
@@ -165,22 +166,18 @@ fn resolves_a_package_by_name() {
 fn package_lookup_fails_for_an_unknown_name() {
     let dir = pnpm_dir(&["packages/*"]);
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
-    let err = format!(
-        "{:#}",
-        discover_ok(dir.path()).package("missing").unwrap_err()
-    );
-    assert!(
-        err.contains("`missing` not found; known packages: pkg-a"),
-        "{err}"
+    let workspace = discover_ok(dir.path());
+    assert!(workspace.package("missing").is_none());
+    assert_eq!(
+        PackageNotFound::new("missing", &workspace).to_string(),
+        "package `missing` not found; known packages: pkg-a"
     );
     let empty = tempfile::tempdir().unwrap();
-    let err = format!(
-        "{:#}",
-        discover_ok(empty.path()).package("missing").unwrap_err()
-    );
-    assert!(
-        err.contains("`missing` not found: the workspace has no named packages"),
-        "{err}"
+    let workspace = discover_ok(empty.path());
+    assert!(workspace.package("missing").is_none());
+    assert_eq!(
+        PackageNotFound::new("missing", &workspace).to_string(),
+        "package `missing` not found: the workspace has no named packages"
     );
 }
 
@@ -234,7 +231,7 @@ fn qualification_keeps_packages_without_a_name_or_version() {
             expected.insert(0, ("<unnamed>", "."));
         }
         assert_eq!(names_and_rel_dirs(&workspace), expected, "{marker}");
-        assert_eq!(versioned_names(&workspace), ["pkg-a"], "{marker}");
+        assert_eq!(versioned_names(&workspace), ["pkg-a", "dup"], "{marker}");
         let manifest = |name: &str| manifest_path(dir.path(), &format!("packages/{name}"));
         let warnings = warning_lines(&output);
         for name in ["d", "g", "h", "i", "j"] {
@@ -253,7 +250,7 @@ fn qualification_keeps_packages_without_a_name_or_version() {
 }
 
 #[test]
-fn versioned_packages_have_a_unique_name_and_a_version() {
+fn skipped_packages_carry_their_reason() {
     let dir = pnpm_dir(&["packages/*"]);
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
     write_file(
@@ -272,8 +269,28 @@ fn versioned_packages_have_a_unique_name_and_a_version() {
         "packages/e/package.json",
         "{ \"name\": \"dup\", \"version\": \"2.0.0\" }\n",
     );
+    write_file(
+        dir.path(),
+        "packages/f/package.json",
+        "{ \"name\": \"pkg-f\", \"version\": \"1.0.0\", \"private\": true }\n",
+    );
     let workspace = discover_ok(dir.path());
-    assert_eq!(versioned_names(&workspace), ["pkg-a"]);
+    assert_eq!(versioned_names(&workspace), ["pkg-a", "dup"]);
+    let reasons: Vec<Option<String>> = workspace
+        .packages()
+        .map(|package| package.skip_reason().map(ToString::to_string))
+        .collect();
+    assert_eq!(
+        reasons,
+        [
+            None,
+            Some("no name".to_owned()),
+            Some("no version".to_owned()),
+            Some("shadowed by packages/e".to_owned()),
+            None,
+            Some("private".to_owned()),
+        ]
+    );
     let pkg_a = workspace.package("pkg-a").unwrap().versioned().unwrap();
     assert_eq!(pkg_a.name(), "pkg-a");
     assert_eq!(pkg_a.version(), &Version::from((1, 0, 0)));
@@ -311,7 +328,7 @@ fn reads_private_leniently() {
 }
 
 #[test]
-fn duplicate_names_are_packages_but_ambiguous_to_resolve() {
+fn duplicate_names_resolve_to_the_last_directory_with_a_warning() {
     let dir = pnpm_dir(&["packages/*"]);
     write_file(
         dir.path(),
@@ -324,7 +341,7 @@ fn duplicate_names_are_packages_but_ambiguous_to_resolve() {
         "{ \"name\": \"dup\", \"version\": \"2.0.0\" }\n",
     );
     write_file(dir.path(), "packages/c/package.json", &pkg("unique"));
-    let workspace = discover_ok(dir.path());
+    let (workspace, output) = discover_captured(dir.path());
     assert_eq!(
         names_and_rel_dirs(&workspace),
         [
@@ -334,28 +351,28 @@ fn duplicate_names_are_packages_but_ambiguous_to_resolve() {
         ]
     );
     assert_eq!(
+        warning_lines(&output),
+        ["warning: the name `dup` is used by packages/a, packages/b; `dup` resolves to packages/b"]
+    );
+    let dup = workspace.package("dup").unwrap();
+    assert_eq!(dup.rel_dir().as_str(), "packages/b");
+    assert_eq!(dup.version(), Some(&Version::from((2, 0, 0))));
+    assert_eq!(versioned_names(&workspace), ["dup", "unique"]);
+    assert_eq!(
+        workspace.packages().next().unwrap().skip_reason(),
+        Some(&SkipReason::Shadowed(dup.rel_dir().clone()))
+    );
+    assert_eq!(
         workspace
-            .find_package("unique")
-            .unwrap()
+            .package("unique")
             .map(|package| package.rel_dir().as_str()),
         Some("packages/c")
     );
-    assert!(workspace.find_package("missing").unwrap().is_none());
-    let err = format!("{:#}", workspace.find_package("dup").unwrap_err());
-    assert_eq!(
-        err,
-        "package `dup` is ambiguous: used by packages/a, packages/b"
-    );
-    assert!(workspace.package("unique").is_ok());
-    let err = format!("{:#}", workspace.package("dup").unwrap_err());
-    assert_eq!(
-        err,
-        "package `dup` is ambiguous: used by packages/a, packages/b"
-    );
+    assert!(workspace.package("missing").is_none());
 }
 
 #[test]
-fn a_versionless_namesake_makes_the_name_ambiguous() {
+fn a_versionless_last_namesake_shadows_the_versioned_one() {
     let dir = pnpm_dir(&["packages/*"]);
     write_file(dir.path(), "packages/a/package.json", &pkg("dup"));
     write_file(
@@ -368,8 +385,16 @@ fn a_versionless_namesake_makes_the_name_ambiguous() {
         names_and_rel_dirs(&workspace),
         [("dup", "packages/a"), ("dup", "packages/b")]
     );
-    let err = format!("{:#}", workspace.package("dup").unwrap_err());
-    assert!(err.contains("ambiguous"), "{err}");
+    assert_eq!(
+        workspace.package("dup").unwrap().rel_dir().as_str(),
+        "packages/b"
+    );
+    assert_eq!(versioned_names(&workspace), [] as [&str; 0]);
+    let reasons: Vec<String> = workspace
+        .packages()
+        .filter_map(|package| package.skip_reason().map(ToString::to_string))
+        .collect();
+    assert_eq!(reasons, ["shadowed by packages/b", "no version"]);
 }
 
 #[cfg(unix)]
@@ -2571,7 +2596,7 @@ fn listed_packages_take_the_qualification() {
             ("dup", "packages/d")
         ]
     );
-    assert_eq!(versioned_names(&workspace), ["pkg-a"]);
+    assert_eq!(versioned_names(&workspace), ["pkg-a", "dup"]);
 }
 
 #[cfg(unix)]

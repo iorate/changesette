@@ -15,7 +15,7 @@ use tracing::info;
 use crate::{
     bump::Bump,
     changeset,
-    workspace::{Versioned, Workspace},
+    workspace::{PackageNotFound, Versioned, Workspace},
 };
 
 pub struct AddArgs {
@@ -36,10 +36,23 @@ pub fn run(workspace: &Workspace, args: AddArgs) -> Result<()> {
     let changeset_dir = workspace.changeset_dir();
     let mut versioned: Vec<Versioned> = workspace.versioned().collect();
     versioned.sort_by_key(Versioned::name);
-    ensure!(
-        !versioned.is_empty(),
-        "no versionable packages found; ensure the packages are not private or ignored and have a version field in package.json"
-    );
+    if versioned.is_empty() {
+        let skipped: Vec<String> = workspace
+            .packages()
+            .filter_map(|package| {
+                package
+                    .skip_reason()
+                    .map(|reason| format!("{package}: {reason}"))
+            })
+            .collect();
+        if skipped.is_empty() {
+            bail!("no packages to version");
+        }
+        bail!(
+            "no packages to version; every package is skipped ({})",
+            skipped.join(", ")
+        );
+    }
     fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
 
     let (releases, summary) = if args.empty {
@@ -63,7 +76,7 @@ pub fn run(workspace: &Workspace, args: AddArgs) -> Result<()> {
             }
         }
         let releases = if flags_given {
-            releases_from_flags(workspace, &versioned, &args.major, &args.minor, &args.patch)?
+            releases_from_flags(workspace, &args.major, &args.minor, &args.patch)?
         } else {
             let Some(releases) = prompt_releases(&versioned)? else {
                 info!("Cancelled");
@@ -148,7 +161,6 @@ pub type Releases = Vec<(String, Option<Bump>)>;
 
 pub fn releases_from_flags(
     workspace: &Workspace,
-    versioned: &[Versioned],
     major: &[String],
     minor: &[String],
     patch: &[String],
@@ -159,18 +171,16 @@ pub fn releases_from_flags(
         ("--patch", Bump::Patch, patch),
     ];
 
-    let mut errors = Vec::new();
     let mut flags_by_name: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (flag, _, names) in &flags {
         for name in *names {
-            if workspace.find_package(name)?.is_none() {
-                errors.push(format!(
-                    "the package `{name}` is passed to `{flag}` but is not a workspace package"
-                ));
-            } else if !versioned.iter().any(|versioned| versioned.name() == name) {
-                errors.push(format!(
-                    "the package `{name}` is passed to `{flag}` but is skipped (private, ignored, or without a version)"
-                ));
+            match workspace.package(name) {
+                None => bail!("`{flag}`: {}", PackageNotFound::new(name, workspace)),
+                Some(package) => {
+                    if let Some(reason) = package.skip_reason() {
+                        bail!("`{flag}`: package `{name}` is skipped: {reason}");
+                    }
+                }
             }
             let entry = flags_by_name.entry(name).or_default();
             if !entry.contains(flag) {
@@ -179,14 +189,12 @@ pub fn releases_from_flags(
         }
     }
     for (name, name_flags) in &flags_by_name {
-        if name_flags.len() > 1 {
-            errors.push(format!(
-                "the package `{name}` is passed to multiple bump type flags: {}",
-                name_flags.join(", ")
-            ));
-        }
+        ensure!(
+            name_flags.len() == 1,
+            "the package `{name}` is passed to multiple bump type flags: {}",
+            name_flags.join(", ")
+        );
     }
-    ensure!(errors.is_empty(), "{}", errors.join("\n"));
 
     let mut releases = Releases::new();
     for (_, bump, names) in flags {

@@ -426,19 +426,20 @@ fn ignore_rejects_an_unknown_package() {
 }
 
 #[test]
-fn ignore_rejects_a_duplicated_name() {
+fn ignore_covers_every_namesake() {
     let dir = workspace_dir();
     write_file(
         dir.path(),
         "packages/b/package.json",
         &pkg("pkg-a", "1.0.0"),
     );
-    let err = format!("{:#}", load_with(dir.path(), &["pkg-a"]).unwrap_err());
-    assert!(err.contains("--ignore"), "{err}");
-    assert!(
-        err.contains("`pkg-a` is ambiguous: used by packages/a, packages/b"),
-        "{err}"
-    );
+    let (workspace, _) = load_with(dir.path(), &["pkg-a"]).unwrap();
+    let reasons: Vec<String> = workspace
+        .packages()
+        .filter_map(|package| package.skip_reason().map(ToString::to_string))
+        .collect();
+    assert_eq!(reasons, ["no name", "shadowed by packages/b", "ignored"]);
+    assert_eq!(workspace.versioned().count(), 0);
 }
 
 #[test]
@@ -467,32 +468,33 @@ fn succeeds_when_every_changeset_is_skipped() {
 
 #[test]
 fn filter_changes_rejects_a_mixed_changeset() {
-    let cases: [(Setup, Releases, Names); 3] = [
+    let cases: [(Setup, Releases, Names, &str); 3] = [
         (
             two_package_workspace_dir,
             &[("pkg-a", "minor"), ("pkg-b", "none")],
             &["pkg-a"],
+            "cannot mix skipped packages (`pkg-a`: ignored) and not skipped packages (`pkg-b`)",
         ),
         (
             two_package_workspace_dir,
             &[("pkg-a", "minor"), ("pkg-b", "patch")],
             &["pkg-a"],
+            "cannot mix skipped packages (`pkg-a`: ignored) and not skipped packages (`pkg-b`)",
         ),
         (
             private_two_package_workspace_dir,
             &[("pkg-a", "minor"), ("pkg-b", "patch")],
             &[],
+            "cannot mix skipped packages (`pkg-b`: private) and not skipped packages (`pkg-a`)",
         ),
     ];
-    for (make_dir, changeset, ignore) in cases {
+    for (make_dir, changeset, ignore, message) in cases {
         let dir = make_dir();
         write_changeset(dir.path(), FILE_B, changeset, "Improve things");
         let before = dir_snapshot(dir.path());
         let err = run_err_with(dir.path(), ignore, args());
         assert!(err.contains(FILE_B), "{err}");
-        assert!(err.contains("cannot mix skipped packages"), "{err}");
-        assert!(err.contains("`pkg-a`"), "{err}");
-        assert!(err.contains("`pkg-b`"), "{err}");
+        assert!(err.contains(message), "{err}");
         assert_eq!(dir_snapshot(dir.path()), before);
     }
 }

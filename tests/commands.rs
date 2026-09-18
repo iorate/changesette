@@ -112,10 +112,8 @@ fn owned(names: &[&str]) -> Vec<String> {
 fn releases_from_flags_keeps_the_flag_order_and_dedupes_a_repeated_name() {
     let dir = two_package_workspace_dir();
     let workspace = workspace(dir.path());
-    let versioned = versioned(&workspace);
     let releases = releases_from_flags(
         &workspace,
-        &versioned,
         &owned(&["pkg-b"]),
         &owned(&["pkg-a", "pkg-a"]),
         &[],
@@ -147,10 +145,20 @@ fn releases_from_flags_rejects_unknown_skipped_and_doubly_flagged_packages() {
             &[],
             &["nope"],
             &[],
-            &["`nope`", "`--minor`", "not a workspace package"],
+            &["`--minor`: package `nope` not found; known packages: pkg-a, pkg-b, pkg-c"],
         ),
-        (&[], &[], &["pkg-b"], &["`pkg-b`", "`--patch`", "skipped"]),
-        (&["pkg-c"], &[], &[], &["`pkg-c`", "`--major`", "skipped"]),
+        (
+            &[],
+            &[],
+            &["pkg-b"],
+            &["`--patch`: package `pkg-b` is skipped: private"],
+        ),
+        (
+            &["pkg-c"],
+            &[],
+            &[],
+            &["`--major`: package `pkg-c` is skipped: ignored"],
+        ),
         (
             &[],
             &["pkg-a"],
@@ -161,20 +169,15 @@ fn releases_from_flags_rejects_unknown_skipped_and_doubly_flagged_packages() {
             &["nope"],
             &["nope"],
             &[],
-            &["not a workspace package", "multiple bump type flags"],
+            &["`--major`: package `nope` not found"],
         ),
     ];
     for (major, minor, patch, needles) in cases {
-        let err = releases_from_flags(
-            &workspace,
-            &versioned,
-            &owned(major),
-            &owned(minor),
-            &owned(patch),
-        )
-        .err()
-        .unwrap();
+        let err = releases_from_flags(&workspace, &owned(major), &owned(minor), &owned(patch))
+            .err()
+            .unwrap();
         let err = format!("{err:#}");
+        assert!(!err.contains('\n'), "{err}");
         for needle in needles {
             assert!(err.contains(needle), "{needle}: {err}");
         }

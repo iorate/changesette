@@ -18,7 +18,7 @@ use crate::{
     pre::{PreJson, PreMode},
     range::{self, Target, Update},
     snapshot::{Snapshot, SnapshotVersions},
-    workspace::{DependencyField, Package, RelDir, Versioned, Workspace},
+    workspace::{DependencyField, Package, PackageNotFound, RelDir, Versioned, Workspace},
 };
 
 pub struct PlannedVersion {
@@ -88,7 +88,7 @@ pub fn plan_version(
         DependentsGraph::build(dependency::internal_dependencies(
             &workspace,
             config.bump_versions_with_workspace_protocol_only,
-        )?)
+        ))
     } else {
         DependentsGraph::default()
     };
@@ -183,11 +183,14 @@ fn filter_changes(
     // Membership is checked before the skip judgment so that a changeset
     // naming an unknown package always reports that rather than a
     // mixed-changeset error.
+    let mut resolved = Vec::new();
     for change in changes {
         let path = changeset_dir.join(change.rel_path());
+        let mut packages = Vec::new();
         for (name, _) in &change.releases {
             let package = workspace
                 .package(name)
+                .ok_or_else(|| PackageNotFound::new(name, workspace))
                 .with_context(|| path.display().to_string())?;
             if package.version().is_none() {
                 bail!(
@@ -195,18 +198,19 @@ fn filter_changes(
                     path.display()
                 );
             }
+            packages.push((name.as_str(), package));
         }
+        resolved.push(packages);
     }
 
     let mut consumed = Vec::new();
-    for change in changes {
+    for (change, packages) in changes.iter().zip(resolved) {
         let mut skipped = Vec::new();
         let mut not_skipped = Vec::new();
-        for (name, _) in &change.releases {
-            if workspace.package(name)?.versioned().is_some() {
-                not_skipped.push(name.as_str());
-            } else {
-                skipped.push(name.as_str());
+        for (name, package) in packages {
+            match package.skip_reason() {
+                Some(reason) => skipped.push(format!("`{name}`: {reason}")),
+                None => not_skipped.push(format!("`{name}`")),
             }
         }
         if skipped.is_empty() {
@@ -215,20 +219,12 @@ fn filter_changes(
             bail!(
                 "{}: cannot mix skipped packages ({}) and not skipped packages ({})",
                 changeset_dir.join(change.rel_path()).display(),
-                quote_list(&skipped),
-                quote_list(&not_skipped)
+                skipped.join(", "),
+                not_skipped.join(", ")
             );
         }
     }
     Ok(consumed)
-}
-
-fn quote_list(names: &[&str]) -> String {
-    names
-        .iter()
-        .map(|name| format!("`{name}`"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 pub struct PlannedRelease {
@@ -262,7 +258,7 @@ fn plan_releases(
         None => BTreeMap::new(),
     };
 
-    let mut drafts = initial_drafts(workspace, changes)?;
+    let mut drafts = initial_drafts(workspace, changes);
     // A package the fixed pass adds can leave a dependent's range, and that
     // dependent can raise its linked group, so the passes repeat until such
     // chains die out.
@@ -398,19 +394,25 @@ impl Draft<'_> {
 
 type Drafts<'a> = BTreeMap<RelDir, Draft<'a>>;
 
-fn initial_drafts<'a>(workspace: &'a Workspace, changes: &[LoadedChange]) -> Result<Drafts<'a>> {
+fn initial_drafts<'a>(workspace: &'a Workspace, changes: &[LoadedChange]) -> Drafts<'a> {
     let mut drafts = BTreeMap::new();
     for (name, bump) in changeset::max_bumps(changes) {
         let versioned = workspace
-            .package(name)?
-            .versioned()
-            .with_context(|| format!("package `{name}` is not versionable"))?;
+            .package(name)
+            .and_then(Package::versioned)
+            .expect("a consumed changeset names only versioned packages");
         drafts.insert(
             versioned.package().rel_dir().clone(),
             Draft::new(versioned, bump),
         );
     }
-    Ok(drafts)
+    drafts
+}
+
+fn member<'a>(workspace: &'a Workspace, name: &str) -> &'a Package {
+    workspace
+        .package(name)
+        .expect("a group member is a workspace package")
 }
 
 fn next_version_of(
@@ -435,8 +437,7 @@ fn next_version_of(
 // The skipped packages of a group count too: their versions bound the group
 // even though the bump application excludes them.
 fn group_version<'a>(workspace: &'a Workspace, kind: &str, name: &str) -> Result<&'a Version> {
-    workspace
-        .package(name)?
+    member(workspace, name)
         .version()
         .with_context(|| format!("package `{name}` in a {kind:?} group has no version"))
 }
@@ -511,12 +512,12 @@ fn apply_fixed<'a>(
 ) -> Result<bool> {
     let mut changed = false;
     for group in groups {
-        let Some(max_bump) = group_max_bump(workspace, group, drafts)? else {
+        let Some(max_bump) = group_max_bump(workspace, group, drafts) else {
             continue;
         };
         let highest = group_highest_version(workspace, "fixed", group)?;
         for name in group {
-            let Some(versioned) = workspace.package(name)?.versioned() else {
+            let Some(versioned) = member(workspace, name).versioned() else {
                 continue;
             };
             let rel_dir = versioned.package().rel_dir();
@@ -553,12 +554,12 @@ fn apply_linked(
 ) -> Result<bool> {
     let mut changed = false;
     for group in groups {
-        let Some(max_bump) = group_max_bump(workspace, group, drafts)? else {
+        let Some(max_bump) = group_max_bump(workspace, group, drafts) else {
             continue;
         };
         let highest = group_highest_version(workspace, "linked", group)?;
         for name in group {
-            let Some(draft) = drafts.get_mut(workspace.package(name)?.rel_dir()) else {
+            let Some(draft) = drafts.get_mut(member(workspace, name).rel_dir()) else {
                 continue;
             };
             if draft.bump.is_none()
@@ -580,19 +581,15 @@ fn apply_linked(
     Ok(changed)
 }
 
-fn group_max_bump(
-    workspace: &Workspace,
-    group: &[String],
-    drafts: &Drafts<'_>,
-) -> Result<Option<Bump>> {
+fn group_max_bump(workspace: &Workspace, group: &[String], drafts: &Drafts<'_>) -> Option<Bump> {
     let mut max_bump = None;
     for name in group {
         let bump = drafts
-            .get(workspace.package(name)?.rel_dir())
+            .get(member(workspace, name).rel_dir())
             .and_then(|draft| draft.bump);
         max_bump = max_bump.max(bump);
     }
-    Ok(max_bump)
+    max_bump
 }
 
 fn group_highest_version(workspace: &Workspace, kind: &str, group: &[String]) -> Result<Version> {
@@ -626,7 +623,7 @@ fn group_pre_counters(
                 ));
             }
             for name in group {
-                pre_counters.insert(workspace.package(name)?.rel_dir().clone(), counter);
+                pre_counters.insert(member(workspace, name).rel_dir().clone(), counter);
             }
         }
     }
@@ -653,7 +650,7 @@ fn rescue_prereleases<'a>(
             }
             if on_prerelease {
                 for name in group {
-                    group_rescued.insert(workspace.package(name)?.rel_dir());
+                    group_rescued.insert(member(workspace, name).rel_dir());
                 }
             }
         }
