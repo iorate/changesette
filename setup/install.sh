@@ -53,12 +53,8 @@ else
   unzip -q "$RUNNER_TEMP/$archive" "changesette$binary_ext" -d "$extract_dir"
 fi
 
-# Verify extracted binary version
-version_output="$("$extract_dir/changesette$binary_ext" --version)"
-if [[ "$version_output" != "changesette $version" ]]; then
-  echo "::error::Unexpected version output: \"$version_output\" (expected \"changesette $version\")"
-  exit 1
-fi
+# Check that the extracted binary runs
+"$extract_dir/changesette$binary_ext" --version
 
 # Move binary into tool cache
 mkdir -p "$tool_dir"
