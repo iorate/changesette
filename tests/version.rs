@@ -433,7 +433,7 @@ fn ignore_covers_every_namesake() {
         .packages()
         .filter_map(|package| package.skip_reason().map(ToString::to_string))
         .collect();
-    assert_eq!(reasons, ["no name", "shadowed by packages/b", "ignored"]);
+    assert_eq!(reasons, ["no name", "ignored", "ignored"]);
     assert_eq!(workspace.versioned().count(), 0);
 }
 

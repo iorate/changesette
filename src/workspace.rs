@@ -246,38 +246,23 @@ impl Workspace {
             }
             cli_ignore.to_vec()
         };
-        let mut namesakes: BTreeMap<&str, Vec<&RelDir>> = BTreeMap::new();
+        let mut resolved: BTreeMap<String, RelDir> = BTreeMap::new();
         for package in self.packages.values() {
-            if let Some(name) = package.name() {
-                namesakes.entry(name).or_default().push(&package.rel_dir);
+            if let Some(name) = &package.name {
+                resolved.insert(name.clone(), package.rel_dir.clone());
             }
-        }
-        let mut resolved = BTreeMap::new();
-        for (name, rel_dirs) in namesakes {
-            let winner = rel_dirs
-                .last()
-                .expect("a name is recorded with the package using it");
-            if rel_dirs.len() > 1 {
-                warn!(
-                    "the name `{name}` is used by {}; `{name}` resolves to {winner}",
-                    rel_dirs
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-            resolved.insert(name.to_owned(), (*winner).clone());
         }
         for package in self.packages.values_mut() {
             let reason = match (&package.name, &package.version) {
                 (None, _) => SkipReason::NoName,
-                (Some(name), _) if resolved[name.as_str()] != package.rel_dir => {
-                    SkipReason::Shadowed(resolved[name.as_str()].clone())
-                }
                 (Some(name), _) if ignore.contains(name) => SkipReason::Ignored,
-                (_, None) => SkipReason::NoVersion,
                 _ if package.private && !config.private_packages_version => SkipReason::Private,
+                (_, None) => SkipReason::NoVersion,
+                (Some(name), _) if resolved[name.as_str()] != package.rel_dir => {
+                    let winner = resolved[name.as_str()].clone();
+                    warn!("{package}: shadowed by {winner}");
+                    SkipReason::Shadowed(winner)
+                }
                 _ => continue,
             };
             debug!("{package}: skipped: {reason}");
@@ -437,20 +422,20 @@ impl fmt::Display for Package {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkipReason {
     NoName,
-    Shadowed(RelDir),
     Ignored,
-    NoVersion,
     Private,
+    NoVersion,
+    Shadowed(RelDir),
 }
 
 impl fmt::Display for SkipReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SkipReason::NoName => f.write_str("no name"),
-            SkipReason::Shadowed(rel_dir) => write!(f, "shadowed by {rel_dir}"),
             SkipReason::Ignored => f.write_str("ignored"),
-            SkipReason::NoVersion => f.write_str("no version"),
             SkipReason::Private => f.write_str("private"),
+            SkipReason::NoVersion => f.write_str("no version"),
+            SkipReason::Shadowed(rel_dir) => write!(f, "shadowed by {rel_dir}"),
         }
     }
 }
