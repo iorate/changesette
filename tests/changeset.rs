@@ -200,7 +200,7 @@ fn parses_crlf_files() {
         [(
             "calmly-tidy-fox".to_owned(),
             vec![("ublacklist", Some(Bump::Patch))],
-            "A body written with CRLF line endings\r\nand a second line",
+            "A body written with CRLF line endings\nand a second line",
         )]
     );
 }

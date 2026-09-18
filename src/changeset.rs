@@ -14,7 +14,7 @@ use crate::bump::Bump;
 const IGNORED_FILE_NAMES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "GEMINI.md"];
 
 static FRONTMATTER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)\s*---(.*?)\r?\n\s*---(\s*(?:\n|$).*)").unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)\s*---(.*?)\n\s*---(\s*(?:\n|$).*)").unwrap());
 
 #[derive(Clone, Debug)]
 pub struct LoadedChange {
@@ -132,8 +132,9 @@ pub fn render(releases: &[(String, Option<Bump>)], summary: &str) -> Result<Stri
 fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
     let file_path = dir.join(file_name);
 
-    let content =
-        fs::read_to_string(&file_path).with_context(|| file_path.display().to_string())?;
+    let content = fs::read_to_string(&file_path)
+        .with_context(|| file_path.display().to_string())?
+        .replace("\r\n", "\n");
     let Some(captures) = FRONTMATTER.captures(&content) else {
         bail!(
             "{}: missing frontmatter (expected `---`-delimited YAML)",

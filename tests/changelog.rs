@@ -197,6 +197,30 @@ fn sees_the_h1_behind_a_bom_and_keeps_the_bom() {
 }
 
 #[test]
+fn follows_crlf_line_endings() {
+    let section = render_section(
+        &"1.0.1".parse().unwrap(),
+        &render_entry(&[(Bump::Patch, "First line\nsecond line")], &[]),
+    );
+    let result = upsert_section(
+        "# ublacklist\r\n\r\n## 1.0.0\r\n\r\n### Minor Changes\r\n\r\n- Add something\r\n",
+        "ublacklist",
+        "1.0.1",
+        &section,
+    );
+    assert_eq!(
+        result,
+        "# ublacklist\r\n\r\n## 1.0.1\r\n\r\n### Patch Changes\r\n\r\n- First line\r\n  second line\r\n\r\n## 1.0.0\r\n\r\n### Minor Changes\r\n\r\n- Add something\r\n"
+    );
+}
+
+#[test]
+fn adds_the_h1_with_crlf_line_endings() {
+    let result = upsert_section("## 1.0.0\r\n", "ublacklist", "1.1.0", "## 1.1.0");
+    assert_eq!(result, "# ublacklist\r\n\r\n## 1.1.0\r\n\r\n## 1.0.0\r\n");
+}
+
+#[test]
 fn extends_the_real_ublacklist_changelog() {
     assert_eq!(
         upsert("ublacklist-head", "10.1.0"),
