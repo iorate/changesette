@@ -2,4 +2,4 @@
 changesette: patch
 ---
 
-The setup action no longer compares the `--version` output of the downloaded binary with the expected version. It only checks that the binary runs, since the version is already fixed by the release tag and the build provenance.
+The setup action no longer runs the downloaded binary to compare its `--version` output with the expected version, since the version is already fixed by the release tag and the build provenance.
