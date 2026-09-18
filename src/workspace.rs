@@ -227,11 +227,11 @@ impl Workspace {
                     .join(", ")
             );
         }
-        workspace.mark_versionable(config, cli_ignore)?;
+        workspace.mark_versioned(config, cli_ignore)?;
         Ok(workspace)
     }
 
-    fn mark_versionable(&mut self, config: &Config, cli_ignore: &[String]) -> Result<()> {
+    fn mark_versioned(&mut self, config: &Config, cli_ignore: &[String]) -> Result<()> {
         let ignore = if config.has_ignore() {
             ensure!(
                 cli_ignore.is_empty(),
@@ -261,7 +261,7 @@ impl Workspace {
                 (Some(name), _) if ignore.contains(name) => "ignored",
                 _ if package.private && !config.private_packages_version => "private",
                 _ => {
-                    package.versionable = true;
+                    package.versioned = true;
                     continue;
                 }
             };
@@ -284,8 +284,8 @@ impl Workspace {
         self.packages.values()
     }
 
-    pub fn versionables(&self) -> impl Iterator<Item = Versionable<'_>> {
-        self.packages.values().filter_map(Package::versionable)
+    pub fn versioned(&self) -> impl Iterator<Item = Versioned<'_>> {
+        self.packages.values().filter_map(Package::versioned)
     }
 
     pub fn find_package(&self, name: &str) -> Result<Option<&Package>> {
@@ -339,7 +339,7 @@ pub struct Package {
     rel_dir: RelDir,
     private: bool,
     dependencies: Vec<Dependency>,
-    versionable: bool,
+    versioned: bool,
 }
 
 impl Package {
@@ -374,11 +374,11 @@ impl Package {
     }
 
     #[must_use]
-    pub fn versionable(&self) -> Option<Versionable<'_>> {
-        if !self.versionable {
+    pub fn versioned(&self) -> Option<Versioned<'_>> {
+        if !self.versioned {
             return None;
         }
-        Some(Versionable {
+        Some(Versioned {
             package: self,
             name: self.name.as_deref()?,
             version: self.version.as_ref()?,
@@ -398,13 +398,13 @@ impl fmt::Display for Package {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Versionable<'a> {
+pub struct Versioned<'a> {
     package: &'a Package,
     name: &'a str,
     version: &'a Version,
 }
 
-impl<'a> Versionable<'a> {
+impl<'a> Versioned<'a> {
     #[must_use]
     pub fn package(&self) -> &'a Package {
         self.package
@@ -794,7 +794,7 @@ fn qualify(value: &Value, dir: PathBuf, rel_dir: RelDir, path: &Path) -> Option<
             .and_then(Value::as_bool)
             .unwrap_or(false),
         dependencies: qualify_dependencies(object, path),
-        versionable: false,
+        versioned: false,
     })
 }
 

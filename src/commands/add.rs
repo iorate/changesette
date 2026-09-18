@@ -15,7 +15,7 @@ use tracing::info;
 use crate::{
     bump::Bump,
     changeset,
-    workspace::{Versionable, Workspace},
+    workspace::{Versioned, Workspace},
 };
 
 pub struct AddArgs {
@@ -34,10 +34,10 @@ pub fn run(workspace: &Workspace, args: AddArgs) -> Result<()> {
     );
 
     let changeset_dir = workspace.changeset_dir();
-    let mut versionables: Vec<Versionable> = workspace.versionables().collect();
-    versionables.sort_by_key(Versionable::name);
+    let mut versioned: Vec<Versioned> = workspace.versioned().collect();
+    versioned.sort_by_key(Versioned::name);
     ensure!(
-        !versionables.is_empty(),
+        !versioned.is_empty(),
         "no versionable packages found; ensure the packages are not private or ignored and have a version field in package.json"
     );
     fs::create_dir_all(&changeset_dir).with_context(|| changeset_dir.display().to_string())?;
@@ -63,15 +63,9 @@ pub fn run(workspace: &Workspace, args: AddArgs) -> Result<()> {
             }
         }
         let releases = if flags_given {
-            releases_from_flags(
-                workspace,
-                &versionables,
-                &args.major,
-                &args.minor,
-                &args.patch,
-            )?
+            releases_from_flags(workspace, &versioned, &args.major, &args.minor, &args.patch)?
         } else {
-            let Some(releases) = prompt_releases(&versionables)? else {
+            let Some(releases) = prompt_releases(&versioned)? else {
                 info!("Cancelled");
                 return Ok(());
             };
@@ -154,7 +148,7 @@ pub type Releases = Vec<(String, Option<Bump>)>;
 
 pub fn releases_from_flags(
     workspace: &Workspace,
-    versionables: &[Versionable],
+    versioned: &[Versioned],
     major: &[String],
     minor: &[String],
     patch: &[String],
@@ -173,10 +167,7 @@ pub fn releases_from_flags(
                 errors.push(format!(
                     "the package `{name}` is passed to `{flag}` but is not a workspace package"
                 ));
-            } else if !versionables
-                .iter()
-                .any(|versionable| versionable.name() == name)
-            {
+            } else if !versioned.iter().any(|versioned| versioned.name() == name) {
                 errors.push(format!(
                     "the package `{name}` is passed to `{flag}` but is skipped (private, ignored, or without a version)"
                 ));
@@ -223,13 +214,13 @@ fn cancel_to_none<T>(result: Result<T, InquireError>) -> Result<Option<T>> {
     }
 }
 
-fn prompt_releases(versionables: &[Versionable]) -> Result<Option<Releases>> {
-    if let [versionable] = versionables {
+fn prompt_releases(versioned: &[Versioned]) -> Result<Option<Releases>> {
+    if let [versioned] = versioned {
         const ITEMS: [Bump; 3] = [Bump::Patch, Bump::Minor, Bump::Major];
         let prompt = format!(
             "What kind of change is this for {}? (current version is {})",
-            versionable.name(),
-            versionable.version()
+            versioned.name(),
+            versioned.version()
         );
         let Some(option) =
             cancel_to_none(Select::new(&prompt, ITEMS.map(Bump::as_str).to_vec()).raw_prompt())?
@@ -237,12 +228,12 @@ fn prompt_releases(versionables: &[Versionable]) -> Result<Option<Releases>> {
             return Ok(None);
         };
         return Ok(Some(vec![(
-            versionable.name().to_owned(),
+            versioned.name().to_owned(),
             Some(ITEMS[option.index]),
         )]));
     }
 
-    let names: Vec<&str> = versionables.iter().map(Versionable::name).collect();
+    let names: Vec<&str> = versioned.iter().map(Versioned::name).collect();
     let Some(selected) = cancel_to_none(
         MultiSelect::new(
             "Which packages were affected by the changes you made?",
@@ -256,14 +247,14 @@ fn prompt_releases(versionables: &[Versionable]) -> Result<Option<Releases>> {
     else {
         return Ok(None);
     };
-    let affected: Vec<Versionable> = selected
+    let affected: Vec<Versioned> = selected
         .into_iter()
-        .map(|option| versionables[option.index])
+        .map(|option| versioned[option.index])
         .collect();
 
     let labels: Vec<String> = affected
         .iter()
-        .map(|versionable| format!("{}@{}", versionable.name(), versionable.version()))
+        .map(|versioned| format!("{}@{}", versioned.name(), versioned.version()))
         .collect();
 
     let mut releases = Vec::new();

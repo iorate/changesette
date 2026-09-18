@@ -533,15 +533,15 @@ fn the_ignore_flag_and_a_config_ignore_are_exclusive() {
 fn private_packages_are_versioned_only_when_configured() {
     let dir = private_two_package_workspace_dir();
     let (workspace, _) = load(dir.path());
-    assert!(workspace.package("pkg-a").unwrap().versionable().is_some());
-    assert!(workspace.package("pkg-b").unwrap().versionable().is_none());
+    assert!(workspace.package("pkg-a").unwrap().versioned().is_some());
+    assert!(workspace.package("pkg-b").unwrap().versioned().is_none());
 
     write_config(
         dir.path(),
         "{ \"privatePackages\": { \"version\": true } }\n",
     );
     let (workspace, _) = load(dir.path());
-    assert!(workspace.package("pkg-b").unwrap().versionable().is_some());
+    assert!(workspace.package("pkg-b").unwrap().versioned().is_some());
 
     write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
     run_ok(dir.path());

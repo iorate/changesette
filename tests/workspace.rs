@@ -63,10 +63,10 @@ fn names(workspace: &Workspace) -> Vec<&str> {
         .collect()
 }
 
-fn versionable_names(workspace: &Workspace) -> Vec<&str> {
+fn versioned_names(workspace: &Workspace) -> Vec<&str> {
     workspace
-        .versionables()
-        .map(|versionable| versionable.name())
+        .versioned()
+        .map(|versioned| versioned.name())
         .collect()
 }
 
@@ -234,7 +234,7 @@ fn qualification_keeps_packages_without_a_name_or_version() {
             expected.insert(0, ("<unnamed>", "."));
         }
         assert_eq!(names_and_rel_dirs(&workspace), expected, "{marker}");
-        assert_eq!(versionable_names(&workspace), ["pkg-a"], "{marker}");
+        assert_eq!(versioned_names(&workspace), ["pkg-a"], "{marker}");
         let manifest = |name: &str| manifest_path(dir.path(), &format!("packages/{name}"));
         let warnings = warning_lines(&output);
         for name in ["d", "g", "h", "i", "j"] {
@@ -253,7 +253,7 @@ fn qualification_keeps_packages_without_a_name_or_version() {
 }
 
 #[test]
-fn versionables_have_a_unique_name_and_a_version() {
+fn versioned_packages_have_a_unique_name_and_a_version() {
     let dir = pnpm_dir(&["packages/*"]);
     write_file(dir.path(), "packages/a/package.json", &pkg("pkg-a"));
     write_file(
@@ -273,8 +273,8 @@ fn versionables_have_a_unique_name_and_a_version() {
         "{ \"name\": \"dup\", \"version\": \"2.0.0\" }\n",
     );
     let workspace = discover_ok(dir.path());
-    assert_eq!(versionable_names(&workspace), ["pkg-a"]);
-    let pkg_a = workspace.package("pkg-a").unwrap().versionable().unwrap();
+    assert_eq!(versioned_names(&workspace), ["pkg-a"]);
+    let pkg_a = workspace.package("pkg-a").unwrap().versioned().unwrap();
     assert_eq!(pkg_a.name(), "pkg-a");
     assert_eq!(pkg_a.version(), &Version::from((1, 0, 0)));
     assert_eq!(pkg_a.package().rel_dir().as_str(), "packages/a");
@@ -409,7 +409,7 @@ fn a_nearest_package_without_a_name_or_version_is_still_a_package() {
         let workspace = discover_ok(dir.path());
         assert_eq!(workspace.root(), dir.path(), "{manifest}");
         assert_eq!(names_and_rel_dirs(&workspace), [expected], "{manifest}");
-        assert_eq!(versionable_names(&workspace), [] as [&str; 0], "{manifest}");
+        assert_eq!(versioned_names(&workspace), [] as [&str; 0], "{manifest}");
     }
 }
 
@@ -2571,7 +2571,7 @@ fn listed_packages_take_the_qualification() {
             ("dup", "packages/d")
         ]
     );
-    assert_eq!(versionable_names(&workspace), ["pkg-a"]);
+    assert_eq!(versioned_names(&workspace), ["pkg-a"]);
 }
 
 #[cfg(unix)]

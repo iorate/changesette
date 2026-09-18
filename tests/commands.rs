@@ -5,7 +5,7 @@ use std::{fs, path::Path};
 use changesette::{
     commands::{add::releases_from_flags, pre, set_summary},
     config::Config,
-    workspace::{Versionable, Workspace},
+    workspace::{Versioned, Workspace},
 };
 use util::{
     dir_snapshot, package_dir, private_two_package_workspace_dir, read_pre_json,
@@ -100,8 +100,8 @@ fn set_summary_rewrites_a_pre_changeset() {
     );
 }
 
-fn versionables(workspace: &Workspace) -> Vec<Versionable<'_>> {
-    workspace.versionables().collect()
+fn versioned(workspace: &Workspace) -> Vec<Versioned<'_>> {
+    workspace.versioned().collect()
 }
 
 fn owned(names: &[&str]) -> Vec<String> {
@@ -112,10 +112,10 @@ fn owned(names: &[&str]) -> Vec<String> {
 fn releases_from_flags_keeps_the_flag_order_and_dedupes_a_repeated_name() {
     let dir = two_package_workspace_dir();
     let workspace = workspace(dir.path());
-    let versionables = versionables(&workspace);
+    let versioned = versioned(&workspace);
     let releases = releases_from_flags(
         &workspace,
-        &versionables,
+        &versioned,
         &owned(&["pkg-b"]),
         &owned(&["pkg-a", "pkg-a"]),
         &[],
@@ -138,8 +138,8 @@ fn releases_from_flags_rejects_unknown_skipped_and_doubly_flagged_packages() {
     );
     write_config(dir.path(), "{ \"ignore\": [\"pkg-c\"] }\n");
     let workspace = workspace(dir.path());
-    let versionables = versionables(&workspace);
-    let names: Vec<&str> = versionables.iter().map(Versionable::name).collect();
+    let versioned = versioned(&workspace);
+    let names: Vec<&str> = versioned.iter().map(Versioned::name).collect();
     assert_eq!(names, ["pkg-a"]);
 
     let cases: [(Names, Names, Names, Names); 5] = [
@@ -167,7 +167,7 @@ fn releases_from_flags_rejects_unknown_skipped_and_doubly_flagged_packages() {
     for (major, minor, patch, needles) in cases {
         let err = releases_from_flags(
             &workspace,
-            &versionables,
+            &versioned,
             &owned(major),
             &owned(minor),
             &owned(patch),

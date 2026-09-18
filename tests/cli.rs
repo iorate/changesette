@@ -236,7 +236,7 @@ fn add_rejects_an_unknown_package_name() {
 }
 
 #[test]
-fn add_fails_without_versionables() {
+fn add_fails_without_versioned_packages() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("package.json"),

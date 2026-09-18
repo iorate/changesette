@@ -18,7 +18,7 @@ use crate::{
     pre::{PreJson, PreMode},
     range::{self, Target, Update},
     snapshot::{Snapshot, SnapshotVersions},
-    workspace::{DependencyField, Package, RelDir, Versionable, Workspace},
+    workspace::{DependencyField, Package, RelDir, Versioned, Workspace},
 };
 
 pub struct PlannedVersion {
@@ -203,7 +203,7 @@ fn filter_changes(
         let mut skipped = Vec::new();
         let mut not_skipped = Vec::new();
         for (name, _) in &change.releases {
-            if workspace.package(name)?.versionable().is_some() {
+            if workspace.package(name)?.versioned().is_some() {
                 not_skipped.push(name.as_str());
             } else {
                 skipped.push(name.as_str());
@@ -291,7 +291,7 @@ fn plan_releases(
 
     let mut releases = Vec::new();
     for (rel_dir, draft) in &drafts {
-        let name = draft.versionable.name();
+        let name = draft.versioned.name();
         let changeset_ids = changes
             .iter()
             .filter(|change| change.releases.iter().any(|(n, _)| n == name))
@@ -379,7 +379,7 @@ fn render_changelog_entries(
 }
 
 struct Draft<'a> {
-    versionable: Versionable<'a>,
+    versioned: Versioned<'a>,
     bump: Option<Bump>,
     // Fixed and linked groups plan every member against the group's highest
     // version rather than its own.
@@ -387,11 +387,11 @@ struct Draft<'a> {
 }
 
 impl Draft<'_> {
-    fn new(versionable: Versionable<'_>, bump: Option<Bump>) -> Draft<'_> {
+    fn new(versioned: Versioned<'_>, bump: Option<Bump>) -> Draft<'_> {
         Draft {
-            versionable,
+            versioned,
             bump,
-            old_version: versionable.version().clone(),
+            old_version: versioned.version().clone(),
         }
     }
 }
@@ -401,13 +401,13 @@ type Drafts<'a> = BTreeMap<RelDir, Draft<'a>>;
 fn initial_drafts<'a>(workspace: &'a Workspace, changes: &[LoadedChange]) -> Result<Drafts<'a>> {
     let mut drafts = BTreeMap::new();
     for (name, bump) in changeset::max_bumps(changes) {
-        let versionable = workspace
+        let versioned = workspace
             .package(name)?
-            .versionable()
+            .versioned()
             .with_context(|| format!("package `{name}` is not versionable"))?;
         drafts.insert(
-            versionable.package().rel_dir().clone(),
-            Draft::new(versionable, bump),
+            versioned.package().rel_dir().clone(),
+            Draft::new(versioned, bump),
         );
     }
     Ok(drafts)
@@ -464,7 +464,7 @@ fn add_dependents<'a>(
             );
             Some((
                 rel_dir.clone(),
-                draft.versionable.name(),
+                draft.versioned.name(),
                 draft.old_version.clone(),
                 next,
             ))
@@ -475,7 +475,7 @@ fn add_dependents<'a>(
             if edge.field == DependencyField::DevDependencies {
                 continue;
             }
-            let Some(dependent) = workspace[&edge.dependent].versionable() else {
+            let Some(dependent) = workspace[&edge.dependent].versioned() else {
                 continue;
             };
             if drafts
@@ -516,10 +516,10 @@ fn apply_fixed<'a>(
         };
         let highest = group_highest_version(workspace, "fixed", group)?;
         for name in group {
-            let Some(versionable) = workspace.package(name)?.versionable() else {
+            let Some(versioned) = workspace.package(name)?.versioned() else {
                 continue;
             };
-            let rel_dir = versionable.package().rel_dir();
+            let rel_dir = versioned.package().rel_dir();
             let previous = drafts.get(rel_dir);
             if previous
                 .is_some_and(|draft| draft.bump == Some(max_bump) && draft.old_version == highest)
@@ -535,7 +535,7 @@ fn apply_fixed<'a>(
             drafts.insert(
                 rel_dir.clone(),
                 Draft {
-                    versionable,
+                    versioned,
                     bump: Some(max_bump),
                     old_version: highest.clone(),
                 },
@@ -658,16 +658,16 @@ fn rescue_prereleases<'a>(
             }
         }
     }
-    for versionable in workspace.versionables() {
-        let rel_dir = versionable.package().rel_dir();
+    for versioned in workspace.versioned() {
+        let rel_dir = versioned.package().rel_dir();
         if drafts
             .get(rel_dir)
             .is_some_and(|draft| draft.bump.is_some())
         {
             continue;
         }
-        if group_rescued.contains(rel_dir) || versionable.version().is_prerelease() {
-            drafts.insert(rel_dir.clone(), Draft::new(versionable, Some(Bump::Patch)));
+        if group_rescued.contains(rel_dir) || versioned.version().is_prerelease() {
+            drafts.insert(rel_dir.clone(), Draft::new(versioned, Some(Bump::Patch)));
         }
     }
     Ok(())
