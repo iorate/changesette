@@ -213,6 +213,7 @@ Prefixes each changeset summary with the short hash of the commit that added it 
       - run: |
           changesette status --output - | jq -c '.changesets[]' | while read -r changeset; do
             id="$(jq -re .id <<< "$changeset")"
+            [[ "$id" == pre/* ]] && continue
             summary="$(jq -re .summary <<< "$changeset")"
             commit="$(gh api -X GET "repos/$GITHUB_REPOSITORY/commits" \
               -f "path=.changeset/$id.md" -F per_page=100 \
@@ -231,6 +232,7 @@ To turn the hash into a link and add the pull request and author, as `@changeset
       - run: |
           changesette status --output - | jq -c '.changesets[]' | while read -r changeset; do
             id="$(jq -re .id <<< "$changeset")"
+            [[ "$id" == pre/* ]] && continue
             summary="$(jq -re .summary <<< "$changeset")"
             commit="$(gh api -X GET "repos/$GITHUB_REPOSITORY/commits" \
               -f "path=.changeset/$id.md" -F per_page=100 \
