@@ -1,0 +1,12 @@
+{
+  "name": "ublacklist",
+  "version": "1.0.0",
+  "version": "2.0.0",
+  "dependencies": {
+    "pkg-a": "^1.0.0"
+  },
+  "dependencies": {
+    "pkg-a": "^1.0.0",
+    "pkg-a": "^2.0.0"
+  }
+}

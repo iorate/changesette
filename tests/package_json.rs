@@ -102,3 +102,24 @@ fn rejects_an_invalid_manifest() {
         );
     }
 }
+
+#[test]
+fn rewrites_the_last_of_duplicate_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::copy(
+        fixture("duplicate-keys").join("package.json"),
+        dir.path().join("package.json"),
+    )
+    .unwrap();
+    let mut package_json = PackageJson::load(dir.path()).unwrap();
+    package_json
+        .set_version(&nodejs_semver::Version::from((2, 0, 1)))
+        .unwrap();
+    package_json
+        .set_dependency(DependencyField::Dependencies, "pkg-a", "^2.0.1")
+        .unwrap();
+    assert_eq!(
+        package_json.text(),
+        "{\n  \"name\": \"ublacklist\",\n  \"version\": \"1.0.0\",\n  \"version\": \"2.0.1\",\n  \"dependencies\": {\n    \"pkg-a\": \"^1.0.0\"\n  },\n  \"dependencies\": {\n    \"pkg-a\": \"^1.0.0\",\n    \"pkg-a\": \"^2.0.1\"\n  }\n}\n"
+    );
+}

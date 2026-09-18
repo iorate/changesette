@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
-use jsonc_parser::cst::{CstObject, CstStringLit};
+use jsonc_parser::cst::{CstObject, CstObjectProp, CstStringLit};
 
 pub fn object_prop(object: &CstObject, key: &str, location: &str) -> Result<Option<CstObject>> {
-    let Some(prop) = object.get(key) else {
+    let Some(prop) = last_prop(object, key) else {
         return Ok(None);
     };
     let object = prop
@@ -13,7 +13,7 @@ pub fn object_prop(object: &CstObject, key: &str, location: &str) -> Result<Opti
 }
 
 pub fn string_prop(object: &CstObject, key: &str, location: &str) -> Result<Option<CstStringLit>> {
-    let Some(prop) = object.get(key) else {
+    let Some(prop) = last_prop(object, key) else {
         return Ok(None);
     };
     let lit = prop
@@ -27,4 +27,14 @@ pub fn string_prop(object: &CstObject, key: &str, location: &str) -> Result<Opti
 // and ranges and validated pre tags never do.
 pub fn set_string_value(lit: &CstStringLit, value: &str) {
     lit.set_raw_value(format!("\"{value}\""));
+}
+
+// `CstObject::get` returns the first of duplicate keys, whereas JSON.parse
+// and serde_json keep the last, which is the value the workspace reads.
+fn last_prop(object: &CstObject, key: &str) -> Option<CstObjectProp> {
+    object.properties().into_iter().rev().find(|prop| {
+        prop.name()
+            .and_then(|name| name.decoded_value().ok())
+            .is_some_and(|name| name == key)
+    })
 }
