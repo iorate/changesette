@@ -130,8 +130,11 @@ fn detect_newline(text: &str) -> &'static str {
 pub fn extract_section(text: &str, version: &str) -> Result<String> {
     // A BOM only hides a `## <version>` heading on the very first line, but
     // strip it as upsert_section does.
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let headings = parse_headings(text);
+    let text = text
+        .strip_prefix('\u{feff}')
+        .unwrap_or(text)
+        .replace("\r\n", "\n");
+    let headings = parse_headings(&text);
     let index =
         find_h2(&headings, version).with_context(|| format!("version {version} not found"))?;
     let end = next_h2_start(&headings, index, text.len());
