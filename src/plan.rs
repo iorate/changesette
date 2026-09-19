@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, btree_map::Entry},
+    collections::{BTreeMap, BTreeSet, VecDeque, btree_map::Entry},
     fs, io,
     path::{Path, PathBuf},
 };
@@ -83,7 +83,8 @@ pub fn plan_version(
         // cycle.
         changes.retain(|change| !change.in_pre);
     }
-    let consumed_changes = filter_changes(&workspace, &changeset_dir, &changes)?;
+    let (consumed_changes, mut skipped_with_changes) =
+        filter_changes(&workspace, &changeset_dir, &changes)?;
     let graph = if config.manage_internal_dependencies {
         DependentsGraph::build(dependency::internal_dependencies(
             &workspace,
@@ -99,7 +100,9 @@ pub fn plan_version(
         snapshot_versions.as_ref(),
         &groups,
         &graph,
+        &mut skipped_with_changes,
     )?;
+    check_release_closure(&workspace, &graph, &releases, &skipped_with_changes)?;
     let dependency_updates = plan_dependency_updates(
         &graph,
         &releases,
@@ -178,7 +181,7 @@ fn filter_changes(
     workspace: &Workspace,
     changeset_dir: &Path,
     changes: &[LoadedChange],
-) -> Result<Vec<LoadedChange>> {
+) -> Result<(Vec<LoadedChange>, BTreeSet<RelDir>)> {
     // Membership is checked before the skip judgment so that a changeset
     // naming an unknown package always reports that rather than a
     // mixed-changeset error.
@@ -186,21 +189,22 @@ fn filter_changes(
     for change in changes {
         let path = changeset_dir.join(change.rel_path());
         let mut packages = Vec::new();
-        for (name, _) in &change.releases {
+        for (name, bump) in &change.releases {
             let package = workspace
                 .package(name)
                 .ok_or_else(|| PackageNotFound::new(name, workspace))
                 .with_context(|| path.display().to_string())?;
-            packages.push((name.as_str(), package));
+            packages.push((name.as_str(), *bump, package));
         }
         resolved.push(packages);
     }
 
     let mut consumed = Vec::new();
+    let mut skipped_with_changes = BTreeSet::new();
     for (change, packages) in changes.iter().zip(resolved) {
         let mut skipped = Vec::new();
         let mut not_skipped = Vec::new();
-        for (name, package) in packages {
+        for (name, _, package) in &packages {
             match package.skip_reason() {
                 Some(reason) => skipped.push(format!("`{name}`: {reason}")),
                 None => not_skipped.push(format!("`{name}`")),
@@ -208,7 +212,13 @@ fn filter_changes(
         }
         if skipped.is_empty() {
             consumed.push(change.clone());
-        } else if !not_skipped.is_empty() {
+        } else if not_skipped.is_empty() {
+            for (_, bump, package) in packages {
+                if bump.is_some() {
+                    skipped_with_changes.insert(package.rel_dir().clone());
+                }
+            }
+        } else {
             bail!(
                 "{}: cannot mix skipped packages ({}) and not skipped packages ({})",
                 changeset_dir.join(change.rel_path()).display(),
@@ -217,7 +227,71 @@ fn filter_changes(
             );
         }
     }
-    Ok(consumed)
+    Ok((consumed, skipped_with_changes))
+}
+
+// The search runs backwards from the skipped package over its dependents so
+// that the first released package it meets is the nearest one and the path
+// between them holds no released package.
+fn check_release_closure(
+    workspace: &Workspace,
+    graph: &DependentsGraph,
+    releases: &[PlannedRelease],
+    skipped_with_changes: &BTreeSet<RelDir>,
+) -> Result<()> {
+    let released: BTreeSet<&RelDir> = releases
+        .iter()
+        .filter(|release| release.bump.is_some())
+        .map(|release| &release.dir)
+        .collect();
+    for skipped in skipped_with_changes {
+        let mut paths = VecDeque::from([vec![skipped]]);
+        let mut visited = BTreeSet::from([skipped]);
+        while let Some(path) = paths.pop_front() {
+            let dependency = path[path.len() - 1];
+            for edge in graph.dependents(dependency) {
+                let dependent = &edge.dependent;
+                if edge.field == DependencyField::DevDependencies || !visited.insert(dependent) {
+                    continue;
+                }
+                let mut path = path.clone();
+                path.push(dependent);
+                if !released.contains(dependent) {
+                    paths.push_back(path);
+                    continue;
+                }
+                // A released package reaches a skipped package with unreleased
+                // changes: no range can name the state it was built against.
+                let name = |rel_dir: &RelDir| {
+                    workspace[rel_dir]
+                        .name()
+                        .expect("a dependency target has a name")
+                };
+                let via: Vec<String> = path[1..path.len() - 1]
+                    .iter()
+                    .rev()
+                    .map(|package| format!("`{}`", name(package)))
+                    .collect();
+                let via = if via.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (via {})", via.join(", "))
+                };
+                let reason = workspace[skipped]
+                    .skip_reason()
+                    .expect("a package with unreleased changes is skipped");
+                bail!(
+                    "{}: is released but depends on `{skipped_name}`{via}, \
+                     which is skipped ({reason}) and has unreleased changes; \
+                     release `{skipped_name}` too or skip `{dependent_name}`",
+                    workspace[dependent],
+                    skipped_name = name(skipped),
+                    dependent_name = name(dependent),
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 pub struct PlannedRelease {
@@ -238,6 +312,7 @@ fn plan_releases(
     snapshot: Option<&SnapshotVersions>,
     groups: &ResolvedGroups,
     graph: &DependentsGraph,
+    skipped_with_changes: &mut BTreeSet<RelDir>,
 ) -> Result<Vec<PlannedRelease>> {
     let pre_tag = pre_state(pre)
         .map(|pre| {
@@ -260,6 +335,7 @@ fn plan_releases(
             pre_tag.as_ref(),
             &pre_counters,
             &mut drafts,
+            skipped_with_changes,
         );
         let fixed = apply_fixed(workspace, &groups.fixed, &mut drafts);
         let linked = apply_linked(workspace, &groups.linked, &mut drafts);
@@ -437,6 +513,7 @@ fn add_dependents<'a>(
     pre_tag: Option<&Prerelease>,
     pre_counters: &BTreeMap<RelDir, u64>,
     drafts: &mut Drafts<'a>,
+    skipped_with_changes: &mut BTreeSet<RelDir>,
 ) -> bool {
     let mut changed = false;
     let nexts: Vec<(RelDir, &str, Version, Version)> = drafts
@@ -463,9 +540,6 @@ fn add_dependents<'a>(
             if edge.field == DependencyField::DevDependencies {
                 continue;
             }
-            let Some(dependent) = workspace[&edge.dependent].versioned() else {
-                continue;
-            };
             if drafts
                 .get(&edge.dependent)
                 .is_some_and(|draft| draft.bump.is_some())
@@ -478,6 +552,10 @@ fn add_dependents<'a>(
             if range.satisfies(&next) {
                 continue;
             }
+            let Some(dependent) = workspace[&edge.dependent].versioned() else {
+                skipped_with_changes.insert(edge.dependent.clone());
+                continue;
+            };
             debug!(
                 "{}: bumped as a dependent of `{name}` ({range} does not include {next})",
                 dependent.package()
