@@ -1,5 +1,11 @@
 # changesette
 
+## 7.0.2
+
+### Patch Changes
+
+- Fail `version` and `status` when a released package depends, directly or through unreleased packages, on a skipped package that has unreleased changes.
+
 ## 7.0.1
 
 ### Patch Changes
