@@ -279,6 +279,16 @@ fn extracts_a_section_behind_a_bom() {
 }
 
 #[test]
+fn extracts_a_crlf_section_with_lf_line_endings() {
+    let section = extract_section(
+        "# ublacklist\r\n\r\n## 1.0.1\r\n\r\n### Patch Changes\r\n\r\n- First line\r\n  second line\r\n\r\n## 1.0.0\r\n\r\n- Old\r\n",
+        "1.0.1",
+    )
+    .unwrap();
+    assert_eq!(section, "### Patch Changes\n\n- First line\n  second line");
+}
+
+#[test]
 fn rejects_a_missing_version() {
     assert!(extract("basic", "3.0.0").is_err());
     assert!(extract("no-h2", "1.0.0").is_err());
