@@ -1,5 +1,11 @@
 # changesette
 
+## 7.0.1
+
+### Patch Changes
+
+- `get-changelog-entry` prints a section of a CHANGELOG.md with CRLF line endings as LF, instead of carrying `\r` into the output.
+
 ## 7.0.0
 
 ### Major Changes
