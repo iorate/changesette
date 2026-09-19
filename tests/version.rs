@@ -495,6 +495,126 @@ fn filter_changes_rejects_a_mixed_changeset() {
 }
 
 #[test]
+fn a_release_over_a_skipped_package_with_changesets_fails() {
+    const MESSAGE: &str = "pkg-a (packages/a): is released but depends on `pkg-b`, which is skipped (ignored) and has unreleased changes; release `pkg-b` too or skip `pkg-a`";
+    let cases: [(&str, &str, Option<&str>); 5] = [
+        ("dependencies", "patch", Some(MESSAGE)),
+        ("peerDependencies", "patch", Some(MESSAGE)),
+        ("optionalDependencies", "patch", Some(MESSAGE)),
+        ("devDependencies", "patch", None),
+        ("dependencies", "none", None),
+    ];
+    for (field, bump, message) in cases {
+        let dir = two_package_workspace_dir();
+        write_file(
+            dir.path(),
+            "packages/a/package.json",
+            &dependent_pkg("pkg-a", "3.1.4", field, "pkg-b", "^2.0.0"),
+        );
+        write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+        write_changeset(dir.path(), FILE_B, &[("pkg-b", bump)], "Note pkg-b");
+        let before = dir_snapshot(dir.path());
+        let result = run_with(dir.path(), &["pkg-b"], args());
+        if let Some(message) = message {
+            assert_eq!(
+                format!("{:#}", result.unwrap_err()),
+                message,
+                "{field} {bump}"
+            );
+            assert_eq!(dir_snapshot(dir.path()), before);
+        } else {
+            result.unwrap();
+            assert_eq!(
+                manifest_version(dir.path(), "packages/a/package.json"),
+                "3.2.0",
+                "{field} {bump}"
+            );
+        }
+    }
+
+    let dir = private_two_package_workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/a/package.json",
+        &dependent_pkg("pkg-a", "3.1.4", "dependencies", "pkg-b", "^2.0.0"),
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    assert_eq!(
+        run_err(dir.path()),
+        "pkg-a (packages/a): is released but depends on `pkg-b`, which is skipped (private) and has unreleased changes; release `pkg-b` too or skip `pkg-a`"
+    );
+}
+
+#[test]
+fn a_release_over_a_skipped_dependent_left_out_of_range_fails() {
+    let dir = workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/a/package.json",
+        &dependent_pkg("pkg-a", "3.1.4", "dependencies", "pkg-d", "^1.0.0"),
+    );
+    write_file(
+        dir.path(),
+        "packages/c/package.json",
+        &pkg("pkg-c", "1.0.0"),
+    );
+    write_file(
+        dir.path(),
+        "packages/d/package.json",
+        &dependent_pkg("pkg-d", "1.0.0", "dependencies", "pkg-c", "1.0.0"),
+    );
+    write_changeset(dir.path(), FILE_B, &[("pkg-c", "patch")], "Fix pkg-c");
+    let planned = plan_with(dir.path(), &["pkg-d"], None).unwrap();
+    assert_eq!(releases(&planned), ["pkg-c patch 1.0.0 -> 1.0.1"]);
+
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    let before = dir_snapshot(dir.path());
+    assert_eq!(
+        run_err_with(dir.path(), &["pkg-d"], args()),
+        "pkg-a (packages/a): is released but depends on `pkg-d`, which is skipped (ignored) and has unreleased changes; release `pkg-d` too or skip `pkg-a`"
+    );
+    assert_eq!(dir_snapshot(dir.path()), before);
+}
+
+#[test]
+fn a_release_reaching_a_skipped_package_through_an_unreleased_package_fails() {
+    let cases: [(Releases, &str); 2] = [
+        (
+            &[("pkg-a", "minor")],
+            "pkg-a (packages/a): is released but depends on `pkg-d` (via `pkg-b`), which is skipped (ignored) and has unreleased changes; release `pkg-d` too or skip `pkg-a`",
+        ),
+        (
+            &[("pkg-a", "minor"), ("pkg-b", "patch")],
+            "pkg-b (packages/b): is released but depends on `pkg-d`, which is skipped (ignored) and has unreleased changes; release `pkg-d` too or skip `pkg-b`",
+        ),
+    ];
+    for (changeset, message) in cases {
+        let dir = workspace_dir();
+        write_file(
+            dir.path(),
+            "packages/a/package.json",
+            &dependent_pkg("pkg-a", "3.1.4", "dependencies", "pkg-b", "^2.0.0"),
+        );
+        write_file(
+            dir.path(),
+            "packages/b/package.json",
+            &dependent_pkg("pkg-b", "2.0.0", "dependencies", "pkg-d", "^1.0.0"),
+        );
+        write_file(
+            dir.path(),
+            "packages/d/package.json",
+            &pkg("pkg-d", "1.0.0"),
+        );
+        write_changeset(dir.path(), FILE_A, changeset, "Improve things");
+        write_changeset(dir.path(), FILE_B, &[("pkg-d", "patch")], "Fix pkg-d");
+        let before = dir_snapshot(dir.path());
+        assert_eq!(run_err_with(dir.path(), &["pkg-d"], args()), message);
+        assert_eq!(dir_snapshot(dir.path()), before);
+    }
+}
+
+#[test]
 fn the_ignore_flag_and_a_config_ignore_are_exclusive() {
     for (config, ignore) in [
         ("{ \"ignore\": [\"pkg-b\"] }\n", "pkg-a"),
