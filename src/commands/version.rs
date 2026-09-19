@@ -9,6 +9,7 @@ pub struct VersionArgs {
     pub snapshot: Option<Option<String>>,
     pub snapshot_prerelease_template: Option<String>,
     pub allow_no_changesets: bool,
+    pub allow_unreleased_dependencies: bool,
     pub output: Option<PathBuf>,
 }
 
@@ -17,7 +18,12 @@ pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<(
         tag,
         template: args.snapshot_prerelease_template,
     });
-    let planned = plan::plan_version(workspace, config, snapshot.as_ref())?;
+    let planned = plan::plan_version(
+        workspace,
+        config,
+        snapshot.as_ref(),
+        args.allow_unreleased_dependencies,
+    )?;
     let pre = planned.in_pre();
     if let Some(pre) = pre {
         info!(

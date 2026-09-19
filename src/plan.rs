@@ -55,6 +55,7 @@ pub fn plan_version(
     workspace: Workspace,
     config: &Config,
     snapshot: Option<&Snapshot>,
+    allow_unreleased_dependencies: bool,
 ) -> Result<PlannedVersion> {
     let changeset_dir = workspace.changeset_dir();
     let config_path = changeset_dir.join("config.json");
@@ -102,7 +103,9 @@ pub fn plan_version(
         &graph,
         &mut skipped_with_changes,
     )?;
-    check_release_closure(&workspace, &graph, &releases, &skipped_with_changes)?;
+    if !allow_unreleased_dependencies {
+        check_release_closure(&workspace, &graph, &releases, &skipped_with_changes)?;
+    }
     let dependency_updates = plan_dependency_updates(
         &graph,
         &releases,

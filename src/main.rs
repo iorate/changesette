@@ -74,6 +74,9 @@ enum Command {
         /// Succeed even when there are no unreleased changesets
         #[arg(short, long)]
         allow_no_changesets: bool,
+        /// Succeed even when a released package depends on a skipped package with unreleased changes
+        #[arg(long)]
+        allow_unreleased_dependencies: bool,
         /// Write the release plan to the file (or stdout with `-`) as JSON
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
@@ -88,6 +91,9 @@ enum Command {
         /// Show the new versions and the changeset files
         #[arg(short, long)]
         verbose: bool,
+        /// Succeed even when a released package depends on a skipped package with unreleased changes
+        #[arg(long)]
+        allow_unreleased_dependencies: bool,
         /// Write the release plan to the file (or stdout with `-`) as JSON instead
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
@@ -184,6 +190,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             snapshot,
             snapshot_prerelease_template,
             allow_no_changesets,
+            allow_unreleased_dependencies,
             output,
             ..
         } => commands::version::run(
@@ -193,6 +200,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 snapshot,
                 snapshot_prerelease_template,
                 allow_no_changesets,
+                allow_unreleased_dependencies,
                 output,
             },
         ),
@@ -200,9 +208,17 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             PreCommand::Enter { tag } => commands::pre::enter(&workspace, &tag),
             PreCommand::Exit => commands::pre::exit(&workspace),
         },
-        Command::Status { verbose, output } => {
-            commands::status::run(workspace, &config, verbose, output.as_deref())
-        }
+        Command::Status {
+            verbose,
+            allow_unreleased_dependencies,
+            output,
+        } => commands::status::run(
+            workspace,
+            &config,
+            verbose,
+            allow_unreleased_dependencies,
+            output.as_deref(),
+        ),
         Command::GetPackages { all } => commands::get_packages::run(&workspace, all),
         Command::GetChangelogEntry { package, version } => {
             commands::get_changelog_entry::run(&workspace, &package, &version)
