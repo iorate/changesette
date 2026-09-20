@@ -59,6 +59,7 @@ fn args() -> VersionArgs {
         snapshot: None,
         snapshot_prerelease_template: None,
         allow_no_changesets: false,
+        allow_unreleased_dependencies: false,
         output: None,
     }
 }
@@ -98,7 +99,7 @@ fn run_err(dir: &Path) -> String {
 
 fn plan_with(dir: &Path, ignore: &[&str], snapshot: Option<&Snapshot>) -> Result<PlannedVersion> {
     let (workspace, config) = load_with(dir, ignore)?;
-    plan::plan_version(workspace, &config, snapshot)
+    plan::plan_version(workspace, &config, snapshot, false)
 }
 
 fn plan(dir: &Path) -> PlannedVersion {
@@ -134,7 +135,7 @@ fn plan_json(planned: &PlannedVersion) -> Value {
 
 fn status_to_file(dir: &Path, path: &Path) -> Result<()> {
     let (workspace, config) = load(dir);
-    status::run(workspace, &config, false, Some(path))
+    status::run(workspace, &config, false, false, Some(path))
 }
 
 fn read(dir: &Path, rel: &str) -> String {
@@ -544,6 +545,32 @@ fn a_release_over_a_skipped_package_with_changesets_fails() {
         run_err(dir.path()),
         "pkg-a (packages/a): is released but depends on `pkg-b`, which is skipped (private) and has unreleased changes; release `pkg-b` too or skip `pkg-a`"
     );
+}
+
+#[test]
+fn allow_unreleased_dependencies_lets_a_release_over_a_skipped_package_through() {
+    let dir = two_package_workspace_dir();
+    write_file(
+        dir.path(),
+        "packages/a/package.json",
+        &dependent_pkg("pkg-a", "3.1.4", "dependencies", "pkg-b", "^2.0.0"),
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    write_changeset(dir.path(), FILE_B, &[("pkg-b", "patch")], "Fix pkg-b");
+    run_with(
+        dir.path(),
+        &["pkg-b"],
+        VersionArgs {
+            allow_unreleased_dependencies: true,
+            ..args()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        manifest_version(dir.path(), "packages/a/package.json"),
+        "3.2.0"
+    );
+    assert!(dir.path().join(".changeset").join(FILE_B).exists());
 }
 
 #[test]

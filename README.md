@@ -275,13 +275,15 @@ Creates the `.changeset/` directory with a `README.md` and a `config.json` holdi
 
 Creates a changeset file in `.changeset/`. `--empty` creates a changeset that names no packages; `--open` opens the created changeset in your editor; `--message` (short form `-m`) sets the summary; `--major`, `--minor`, and `--patch` each take a comma-separated list of package names. When run in a terminal, missing inputs are prompted for interactively.
 
-### `changesette version [--ignore <pkgs>] [--snapshot [<tag>]] [--snapshot-prerelease-template <template>] [--allow-no-changesets] [--output <file>]`
+### `changesette version [--ignore <pkgs>] [--snapshot [<tag>]] [--snapshot-prerelease-template <template>] [--allow-no-changesets] [--allow-unreleased-dependencies] [--output <file>]`
 
 Applies all pending changesets: bumps each released package's `package.json`, inserts the new section into its `CHANGELOG.md`, and deletes the consumed changesets. With zero changesets, nothing changes and the command fails; `--allow-no-changesets` (short form `-a`) makes it succeed instead. In [pre-release mode](#pre-release-mode), `version` bumps to `-<tag>.<n>` prereleases.
 
 `--ignore` skips packages by exact name for this run.
 
 `--snapshot` and `--snapshot-prerelease-template` create a [snapshot release](#snapshot-releases) instead, bumping to throwaway `0.0.0-<suffix>` versions.
+
+`--allow-unreleased-dependencies` succeeds even when a released package depends on a skipped package with unreleased changes.
 
 `--output` (short form `-o`) suppresses the report and writes the release plan to the given file (`-` for stdout) as JSON, extending the changesets `ReleasePlan` type with `dir` and `changelogEntry`:
 
@@ -317,9 +319,9 @@ Applies all pending changesets: bumps each released package's `package.json`, in
 
 In pre-release mode, a top-level `preState` object is included.
 
-### `changesette status [--verbose] [--output <file>]`
+### `changesette status [--verbose] [--allow-unreleased-dependencies] [--output <file>]`
 
-Prints the packages that `version` would bump, without changing any file. `--output` (short form `-o`) writes the release plan to the given file (`-` for stdout) instead — the same JSON `version --output` writes.
+Prints the packages that `version` would bump, without changing any file. `--allow-unreleased-dependencies` succeeds even when a released package depends on a skipped package with unreleased changes. `--output` (short form `-o`) writes the release plan to the given file (`-` for stdout) instead — the same JSON `version --output` writes.
 
 ### `changesette pre enter <tag>`
 

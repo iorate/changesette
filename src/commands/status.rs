@@ -8,9 +8,10 @@ pub fn run(
     workspace: Workspace,
     config: &Config,
     verbose: bool,
+    allow_unreleased_dependencies: bool,
     output_path: Option<&Path>,
 ) -> Result<()> {
-    let planned = plan::plan_version(workspace, config, None)?;
+    let planned = plan::plan_version(workspace, config, None, allow_unreleased_dependencies)?;
 
     if let Some(path) = output_path {
         return release_plan::write_file(path, &release_plan::build(&planned));
