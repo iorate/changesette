@@ -1,5 +1,11 @@
 # changesette
 
+## 7.1.0
+
+### Minor Changes
+
+- Fail `version` and `status` when a released package depends, directly or through unreleased packages, on a skipped package that has unreleased changes, unless `--allow-unreleased-dependencies` is given.
+
 ## 7.0.1
 
 ### Patch Changes
