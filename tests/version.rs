@@ -381,13 +381,13 @@ fn release_plan_lists_skipped_changesets_without_a_release() {
             "changesets": [
                 {
                     "id": ID_A,
-                    "summary": "Improve pkg-a",
-                    "releases": [{ "name": "pkg-a", "type": "minor" }]
+                    "releases": [{ "name": "pkg-a", "type": "minor" }],
+                    "summary": "Improve pkg-a"
                 },
                 {
                     "id": ID_B,
-                    "summary": "Fix pkg-b",
-                    "releases": [{ "name": "pkg-b", "type": "patch" }]
+                    "releases": [{ "name": "pkg-b", "type": "patch" }],
+                    "summary": "Fix pkg-b"
                 }
             ],
             "releases": [
@@ -1395,8 +1395,8 @@ fn status_writes_the_plan_without_modifying_files() {
             "changesets": [
                 {
                     "id": ID_B,
-                    "summary": "Add feature",
-                    "releases": [{ "name": "ublacklist", "type": "minor" }]
+                    "releases": [{ "name": "ublacklist", "type": "minor" }],
+                    "summary": "Add feature"
                 }
             ],
             "releases": [
