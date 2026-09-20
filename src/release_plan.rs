@@ -23,8 +23,8 @@ pub struct PreState {
 #[derive(Serialize)]
 pub struct ChangesetEntry {
     pub id: String,
-    pub summary: String,
     pub releases: Vec<ReleaseRef>,
+    pub summary: String,
 }
 
 #[derive(Serialize)]
@@ -97,7 +97,6 @@ pub fn build(planned: &PlannedVersion) -> ReleasePlan {
             .iter()
             .map(|change| ChangesetEntry {
                 id: change.id(),
-                summary: change.summary.clone(),
                 releases: change
                     .releases
                     .iter()
@@ -106,6 +105,7 @@ pub fn build(planned: &PlannedVersion) -> ReleasePlan {
                         bump: bump.map_or("none", Bump::as_str),
                     })
                     .collect(),
+                summary: change.summary.clone(),
             })
             .collect(),
         releases,

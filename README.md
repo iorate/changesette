@@ -292,13 +292,13 @@ Applies all pending changesets: bumps each released package's `package.json`, in
   "changesets": [
     {
       "id": "lovely-notable-rooster",
-      "summary": "Add feature",
       "releases": [
         {
           "name": "my-package",
           "type": "minor"
         }
-      ]
+      ],
+      "summary": "Add feature"
     }
   ],
   "releases": [
