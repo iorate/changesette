@@ -265,7 +265,7 @@ To turn the hash into a link and add the pull request and author, as `@changeset
 
 ## CLI
 
-Every command accepts `--log-level <error|warn|info|debug>` (default `info`) after the subcommand, setting the lowest level of the messages printed to stderr. Every command also accepts `--root <dir>`, using the given directory as the root instead of finding it from the working directory (see [Workspaces](#workspaces)); the `CHANGESETTE_ROOT` environment variable does the same.
+Every command accepts `--log-level <error|warn|info|debug>` (default `info`) after the subcommand, setting the lowest level of the messages printed to stderr. Every command also accepts `--root <dir>`, using the given directory as the root instead of finding it from the working directory; the `CHANGESETTE_ROOT` environment variable does the same.
 
 ### `changesette init`
 
@@ -412,13 +412,11 @@ Options for [snapshot releases](#snapshot-releases). `useCalculatedVersion` base
 
 Default: `{ "manageInternalDependencies": true }`.
 
-Settings specific to `changesette`. `manageInternalDependencies` set to `false` makes `version` leave the dependency ranges and the dependents of a released package alone; `packages`, unset by default, lists the directories of the workspace packages as literal `/`-separated paths relative to the root (`.` for the root itself), used instead of discovering them (see [Workspaces](#workspaces)).
+Settings specific to `changesette`. `manageInternalDependencies` set to `false` makes `version` leave the dependency ranges and the dependents of a released package alone; `packages`, unset by default, lists the directories of the workspace packages as literal `/`-separated paths relative to the root (`.` for the root itself), used instead of discovering them.
 
 ## Workspaces
 
 `changesette` works on npm / yarn / pnpm workspaces and manages the dependencies between their packages. When a workspace package is released, the packages that depend on it are updated as well: a dependent whose range on it no longer includes the new version is bumped as a patch, and the range on the released package in every dependent's `package.json` is raised to the new version (`workspace:*`, `workspace:^`, and `workspace:~` ranges are left alone). Each dependent that is released, whether by its own changesets or by that patch bump, lists the new version under "Updated dependencies" in its changelog. [`updateInternalDependencies`](#updateinternaldependencies), [`bumpVersionsWithWorkspaceProtocolOnly`](#bumpversionswithworkspaceprotocolonly), and [`changesette.manageInternalDependencies`](#changesette-1) adjust this.
-
-`changesette` resolves the workspace by rules of its own, which can differ from the package manager's. When they do, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
 
 ## Pre-release mode
 
@@ -453,10 +451,21 @@ By default the suffix is `<tag>-<datetime>`, or just `<datetime>` when no tag is
 
 ## Differences from changesets
 
-`changesette` shares the changeset file format with changesets, but is deliberately much smaller. Coming from changesets, expect the following:
+`changesette` shares the changeset file format with changesets, but is deliberately much smaller. Coming from changesets 3, expect the following.
 
-- No git operations: nothing is committed or tagged, and changelog sections are built from the plain changeset summaries, without auto-generated commit / pull request / author attributions (see [Adding commit, pull request, and author attributions](#adding-commit-pull-request-and-author-attributions)).
-- No npm publishing: publishing belongs to your workflows (see [Example workflows](#example-workflows)).
+### No git operations and no publishing
+
+Nothing is committed, tagged, or published; those belong to your workflows (see [Example workflows](#example-workflows)). Changelog sections are built from the plain changeset summaries, without auto-generated commit / pull request / author attributions (see [Adding commit, pull request, and author attributions](#adding-commit-pull-request-and-author-attributions)). The `changelog`, `commit`, `access`, and `baseBranch` settings are ignored.
+
+### Workspace resolution
+
+`changesette` resolves the workspace root and the member packages by rules of its own, which can differ from changesets' (`@manypkg/get-packages`) and from the package manager's. When they do, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
+
+### Dependency updates
+
+When a package is released, the range on it is raised in every dependent, including one that stays in range and is not released itself: with `pkg-a` depending on `pkg-b` as `^1.0.0`, releasing `pkg-b` at `1.1.0` rewrites the range to `^1.1.0` and lists `pkg-a` in the release plan as a `none` release. changesets leaves `pkg-a` alone until it is released for another reason, and when that release relies on `pkg-b` `1.1.0`, the range still says `^1.0.0`. The churn of rewriting `pkg-a` on every release of `pkg-b` can be limited: with [`updateInternalDependencies`](#updateinternaldependencies) set to `"minor"`, patch releases leave `pkg-a` alone.
+
+Depending on a skipped package is allowed; `version` and `status` fail only when a released package depends, directly or transitively, on a skipped package with unreleased changes, and `--allow-unreleased-dependencies` overrides that. changesets rejects such a dependency up front unless the dependent is private.
 
 ## License
 
