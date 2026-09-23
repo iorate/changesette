@@ -47,7 +47,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -58,7 +58,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -296,7 +296,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -699,14 +699,14 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "saphyr"
-version = "0.0.12"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "372edd44fb1d21f97d7160ca1fb3ed522b7f7315b2369cd10e5127379db5af33"
+checksum = "79830a82cc4eeea33aa46346f910d7cc1e576249a6fbe2fefab6ba89eba8a203"
 dependencies = [
  "encoding_rs",
  "hashlink",
@@ -717,9 +717,9 @@ dependencies = [
 
 [[package]]
 name = "saphyr-parser"
-version = "0.0.12"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0b1b76852c5643f558e7347e4de549474c3ecb7154295a189f4668428c1b453"
+checksum = "7429158804c36e705d9423b7848018e535b3e92d439a763e364ee12670ef473b"
 dependencies = [
  "arraydeque",
  "thiserror",
@@ -870,7 +870,7 @@ dependencies = [
  "getrandom",
  "once_cell",
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
