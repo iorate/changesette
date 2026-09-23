@@ -18,7 +18,7 @@ fast-glob = "1.1.0"
 file-id = "0.2.3"
 inquire = "0.9.4"
 jsonc-parser = { version = "0.33.1", features = ["cst"] }
-nodejs-semver = "5.0.0"
+nodejs-semver = "6.0.0"
 petname = { version = "3.2.0", default-features = false, features = ["default-words"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }
 rand = "0.10.2"
