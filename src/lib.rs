@@ -8,6 +8,7 @@ use crate::{
 };
 
 pub mod bump;
+pub mod catalog;
 pub mod changelog;
 pub mod changeset;
 pub mod commands;

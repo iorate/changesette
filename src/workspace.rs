@@ -16,7 +16,10 @@ use saphyr::{LoadableYamlNode, Yaml};
 use serde_json::{Map, Value};
 use tracing::{debug, warn};
 
-use crate::config::Config;
+use crate::{
+    catalog::{CatalogFormat, Catalogs},
+    config::Config,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageManager {
@@ -146,6 +149,7 @@ pub fn resolve_root(dir: &Path) -> Result<PathBuf> {
 pub struct Workspace {
     root: PathBuf,
     packages: BTreeMap<RelDir, Package>,
+    catalogs: Catalogs,
 }
 
 impl Workspace {
@@ -155,6 +159,10 @@ impl Workspace {
             pm,
             reroot,
         } = root;
+        let catalogs = match pm {
+            Some(pm) => read_catalogs(&root, pm)?,
+            None => Catalogs::default(),
+        };
         if let Some(rel_dirs) = &config.packages {
             let mut candidates = Vec::new();
             for entry in rel_dirs {
@@ -177,13 +185,21 @@ impl Workspace {
                 root,
                 "workspace listed by changesette.packages",
                 qualify_candidates(candidates)?,
+                catalogs,
                 config,
                 cli_ignore,
             );
         }
         let Some(pm) = pm else {
             warn!("{}: no workspace found", root.display());
-            return Workspace::new(root, "no workspace", Vec::new(), config, cli_ignore);
+            return Workspace::new(
+                root,
+                "no workspace",
+                Vec::new(),
+                catalogs,
+                config,
+                cli_ignore,
+            );
         };
         let packages = if let Some(candidates) = reroot {
             qualify_candidates(candidates)?
@@ -191,7 +207,14 @@ impl Workspace {
             let (manifest, patterns) = read_patterns(&root, pm)?;
             collect_packages(&root, &manifest, &patterns, pm)?
         };
-        Workspace::new(root, pm.workspace_kind(), packages, config, cli_ignore)
+        Workspace::new(
+            root,
+            pm.workspace_kind(),
+            packages,
+            catalogs,
+            config,
+            cli_ignore,
+        )
     }
 
     // The one construction point, so that every loading path reports the
@@ -201,6 +224,7 @@ impl Workspace {
         root: PathBuf,
         kind: &'static str,
         packages: Vec<Package>,
+        catalogs: Catalogs,
         config: &Config,
         cli_ignore: &[String],
     ) -> Result<Workspace> {
@@ -210,6 +234,7 @@ impl Workspace {
                 .into_iter()
                 .map(|package| (package.rel_dir.clone(), package))
                 .collect(),
+            catalogs,
         };
         if workspace.packages.is_empty() {
             debug!("{}: {kind}, no packages", workspace.root.display());
@@ -274,6 +299,11 @@ impl Workspace {
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    #[must_use]
+    pub fn catalogs(&self) -> &Catalogs {
+        &self.catalogs
     }
 
     #[must_use]
@@ -611,7 +641,7 @@ fn read_patterns(root: &Path, pm: PackageManager) -> Result<(PathBuf, Vec<String
     match pm {
         PackageManager::Pnpm => {
             let manifest = root.join("pnpm-workspace.yaml");
-            let patterns = read_pnpm_manifest(&manifest)?
+            let patterns = read_yaml(&manifest)?
                 .and_then(|doc| pnpm_patterns(&doc, &manifest))
                 .unwrap_or_default();
             Ok((manifest, patterns))
@@ -626,10 +656,33 @@ fn read_patterns(root: &Path, pm: PackageManager) -> Result<(PathBuf, Vec<String
     }
 }
 
+fn read_catalogs(root: &Path, pm: PackageManager) -> Result<Catalogs> {
+    let (path, format) = match pm {
+        PackageManager::Pnpm => (
+            root.join("pnpm-workspace.yaml"),
+            CatalogFormat::PnpmWorkspace,
+        ),
+        PackageManager::Yarn => (root.join(".yarnrc.yml"), CatalogFormat::Yarnrc),
+        PackageManager::Npm => {
+            let path = root.join("package.json");
+            return Ok(read_manifest(&path)?
+                .map(|value| Catalogs::from_json(path, &value))
+                .unwrap_or_default());
+        }
+    };
+    Ok(read_yaml(&path)?
+        .map(|doc| Catalogs::from_yaml(path, &doc, format))
+        .unwrap_or_default())
+}
+
 // An empty or comment-only file holds no document, making it a settings-only
-// root.
-fn read_pnpm_manifest(path: &Path) -> Result<Option<Yaml<'static>>> {
-    let text = fs::read_to_string(path).with_context(|| path.display().to_string())?;
+// root. saphyr keeps a BOM as part of the first key, so it is stripped first.
+fn read_yaml(path: &Path) -> Result<Option<Yaml<'static>>> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).context(path.display().to_string()),
+    };
     let docs = match Yaml::load_from_str(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
         Ok(docs) => docs,
         Err(err) => bail!("{}: invalid YAML: {err}", path.display()),

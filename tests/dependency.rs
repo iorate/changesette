@@ -5,8 +5,8 @@ use std::path::Path;
 use changesette::{
     config::Config,
     dependency::{
-        Alias, DependentsGraph, InternalDependency, Spec, effective_range, internal_dependencies,
-        parse_spec,
+        Alias, DependentsGraph, InternalDependency, Spec, SpecLocation, effective_range,
+        internal_dependencies, parse_spec,
     },
     workspace::{DependencyField, RelDir, Root, Workspace, rel_dir_between},
 };
@@ -244,6 +244,7 @@ fn dependents_graph_lists_every_field_of_a_dependent() {
         field,
         spec_text: String::new(),
         spec: Spec::Any,
+        location: SpecLocation::Manifest,
     };
     let graph = DependentsGraph::build(vec![
         edge(
@@ -273,4 +274,143 @@ fn dependents_graph_lists_every_field_of_a_dependent() {
     );
     assert!(dependents("packages/c").is_empty());
     assert_eq!(graph.iter().count(), 3);
+}
+
+const A_MANIFEST: &str = "{ \"name\": \"pkg-a\", \"version\": \"1.0.0\" }\n";
+
+fn catalog_edges(workspace: &Workspace) -> Vec<(DependencyField, Spec, SpecLocation)> {
+    internal_dependencies(workspace, false)
+        .into_iter()
+        .map(|edge| (edge.field, edge.spec, edge.location))
+        .collect()
+}
+
+fn catalog(name: &str, path: &[&str]) -> SpecLocation {
+    SpecLocation::Catalog {
+        name: name.to_owned(),
+        path: path.iter().map(|key| (*key).to_owned()).collect(),
+    }
+}
+
+#[test]
+fn internal_dependencies_resolve_pnpm_catalog_references() {
+    let dir = workspace_dir(&[
+        ("packages/a", A_MANIFEST),
+        (
+            "packages/b",
+            "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\" }\n",
+        ),
+        (
+            "packages/c",
+            "{ \"name\": \"pkg-c\", \"version\": \"1.0.0\", \"dependencies\": { \"pkg-a\": \"catalog:\", \"pkg-b\": \"catalog:\" }, \"devDependencies\": { \"pkg-a\": \"catalog:legacy\" }, \"peerDependencies\": { \"pkg-a\": \"catalog:missing\" }, \"optionalDependencies\": { \"pkg-a\": \"catalog: default \" } }\n",
+        ),
+    ]);
+    write_file(
+        dir.path(),
+        "pnpm-workspace.yaml",
+        "packages:\n  - \"packages/*\"\ncatalog:\n  pkg-a: ^1.0.0\n  pkg-b: catalog:legacy\ncatalogs:\n  legacy:\n    pkg-a: workspace:*\n",
+    );
+    let workspace = load(dir.path());
+    let mut found = Vec::new();
+    let output = capture_output(|| found = catalog_edges(&workspace));
+    assert_eq!(
+        found,
+        [
+            (
+                DependencyField::Dependencies,
+                plain("^1.0.0"),
+                catalog("default", &["catalog", "pkg-a"])
+            ),
+            (
+                DependencyField::DevDependencies,
+                Spec::WorkspaceAlias(Alias::Exact),
+                catalog("legacy", &["catalogs", "legacy", "pkg-a"])
+            ),
+            (
+                DependencyField::OptionalDependencies,
+                plain("^1.0.0"),
+                catalog("default", &["catalog", "pkg-a"])
+            ),
+        ]
+    );
+    let warnings: Vec<&str> = output
+        .lines()
+        .filter(|line| line.starts_with("warning: "))
+        .collect();
+    assert_eq!(
+        warnings,
+        [
+            "warning: pkg-c (packages/c): depends on `pkg-b` at \"catalog:\", whose entry in catalog \"default\" is \"catalog:legacy\", another catalog reference; the dependency is ignored",
+            "warning: pkg-c (packages/c): depends on `pkg-a` at \"catalog:missing\", which has no catalog entry; the dependency is ignored",
+        ],
+        "{output}"
+    );
+}
+
+#[test]
+fn yarn_keeps_the_unnamed_catalog_apart_from_the_default_one() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(dir.path(), "yarn.lock", "");
+    write_file(
+        dir.path(),
+        "package.json",
+        "{ \"workspaces\": [\"packages/*\"] }\n",
+    );
+    write_file(
+        dir.path(),
+        ".yarnrc.yml",
+        "catalog:\n  pkg-a: ^1.0.0\ncatalogs:\n  default:\n    pkg-a: ~1.0.0\n",
+    );
+    write_file(dir.path(), "packages/a/package.json", A_MANIFEST);
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\", \"dependencies\": { \"pkg-a\": \"catalog:\" }, \"devDependencies\": { \"pkg-a\": \"catalog:default\" } }\n",
+    );
+    assert_eq!(
+        catalog_edges(&load(dir.path())),
+        [
+            (
+                DependencyField::Dependencies,
+                plain("^1.0.0"),
+                catalog("", &["catalog", "pkg-a"])
+            ),
+            (
+                DependencyField::DevDependencies,
+                plain("~1.0.0"),
+                catalog("default", &["catalogs", "default", "pkg-a"])
+            ),
+        ]
+    );
+}
+
+#[test]
+fn bun_catalogs_under_workspaces_hide_top_level_ones() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(
+        dir.path(),
+        "package.json",
+        "{ \"workspaces\": { \"packages\": [\"packages/*\"], \"catalog\": { \"pkg-a\": \"^1.0.0\" } }, \"catalogs\": { \"legacy\": { \"pkg-a\": \"~1.0.0\" } } }\n",
+    );
+    write_file(dir.path(), "packages/a/package.json", A_MANIFEST);
+    write_file(
+        dir.path(),
+        "packages/b/package.json",
+        "{ \"name\": \"pkg-b\", \"version\": \"1.0.0\", \"dependencies\": { \"pkg-a\": \"catalog:default\" }, \"devDependencies\": { \"pkg-a\": \"catalog:legacy\" } }\n",
+    );
+    let workspace = load(dir.path());
+    let mut found = Vec::new();
+    let output = capture_output(|| found = catalog_edges(&workspace));
+    assert_eq!(
+        found,
+        [(
+            DependencyField::Dependencies,
+            plain("^1.0.0"),
+            catalog("default", &["workspaces", "catalog", "pkg-a"])
+        )]
+    );
+    assert!(
+        output.contains("depends on `pkg-a` at \"catalog:legacy\", which has no catalog entry"),
+        "{output}"
+    );
 }
