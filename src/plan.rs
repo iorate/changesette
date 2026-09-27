@@ -10,15 +10,18 @@ use tracing::debug;
 
 use crate::{
     bump::{self, Bump, Prerelease},
+    catalog::{CatalogFormat, CatalogYaml},
     changelog::{self, render_entry, render_section},
     changeset::{self, LoadedChange},
     config::{Config, ResolvedGroups, UpdateInternalDependencies},
-    dependency::{self, DependentsGraph, effective_range},
+    dependency::{self, DependentsGraph, SpecLocation, effective_range},
     package_json::PackageJson,
     pre::{PreJson, PreMode},
     range::{self, Target, Update},
     snapshot::{Snapshot, SnapshotVersions},
-    workspace::{DependencyField, Package, PackageNotFound, RelDir, Versioned, Workspace},
+    workspace::{
+        DependencyField, Package, PackageNotFound, RelDir, Versioned, Workspace, rel_dir_between,
+    },
 };
 
 pub struct PlannedVersion {
@@ -131,6 +134,7 @@ pub struct DependencyUpdate {
     pub dependency: RelDir,
     pub dependency_name: String,
     pub field: DependencyField,
+    pub location: SpecLocation,
     pub old: String,
     pub new: Option<String>,
 }
@@ -167,6 +171,7 @@ fn plan_dependency_updates(
             dependency: edge.dependency.clone(),
             dependency_name: (*name).to_owned(),
             field: edge.field,
+            location: edge.location.clone(),
             old: edge.spec_text.clone(),
             new: match update {
                 Update::Explicit(new) => Some(new),
@@ -731,6 +736,17 @@ impl StagedWrite {
     }
 }
 
+fn load_manifest<'a>(
+    manifests: &'a mut BTreeMap<RelDir, PackageJson>,
+    root: &Path,
+    dir: &Path,
+) -> Result<&'a mut PackageJson> {
+    Ok(match manifests.entry(rel_dir_between(root, dir)) {
+        Entry::Occupied(entry) => entry.into_mut(),
+        Entry::Vacant(entry) => entry.insert(PackageJson::load(dir)?),
+    })
+}
+
 pub fn stage_writes(
     workspace: &Workspace,
     releases: &[PlannedRelease],
@@ -764,21 +780,45 @@ pub fn stage_writes(
             ),
         });
     }
+    let mut catalog_yaml: Option<CatalogYaml> = None;
     for update in dependency_updates {
         let Some(new) = &update.new else {
             continue;
         };
-        let package_json = match manifests.entry(update.dependent.clone()) {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                entry.insert(PackageJson::load(workspace[&update.dependent].dir())?)
+        match &update.location {
+            SpecLocation::Manifest => {
+                let dir = workspace[&update.dependent].dir();
+                load_manifest(&mut manifests, workspace.root(), dir)?.set_dependency(
+                    update.field,
+                    &update.dependency_name,
+                    new,
+                )?;
             }
-        };
-        package_json.set_dependency(update.field, &update.dependency_name, new)?;
+            SpecLocation::Catalog { path, .. } => {
+                let source = workspace
+                    .catalogs()
+                    .source()
+                    .expect("a catalog reference resolved through a catalog file");
+                if source.format == CatalogFormat::PackageJson {
+                    let root = workspace.root();
+                    load_manifest(&mut manifests, root, root)?.set_string(path, new)?;
+                } else {
+                    let yaml = match &mut catalog_yaml {
+                        Some(yaml) => yaml,
+                        None => catalog_yaml.insert(CatalogYaml::load(&source.path)?),
+                    };
+                    yaml.set(path, new)?;
+                }
+            }
+        }
     }
     writes.extend(manifests.into_values().map(|package_json| StagedWrite {
         path: package_json.path().to_owned(),
         content: package_json.text(),
+    }));
+    writes.extend(catalog_yaml.map(|yaml| StagedWrite {
+        path: yaml.path().to_owned(),
+        content: yaml.text(),
     }));
     Ok(writes)
 }

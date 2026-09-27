@@ -2324,3 +2324,86 @@ fn update_internal_dependencies_minor_keeps_the_range_on_a_patch_bump() {
         );
     }
 }
+
+#[test]
+fn catalog_entries_are_raised_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(
+        dir.path(),
+        "pnpm-workspace.yaml",
+        "packages:\n  - \"packages/*\"\ncatalog:\n  pkg-a: ^3.1.4\n  left-pad: ^1.0.0\n",
+    );
+    write_file(
+        dir.path(),
+        "packages/a/package.json",
+        &pkg("pkg-a", "3.1.4"),
+    );
+    let b_manifest = dependent_pkg("pkg-b", "2.0.0", "dependencies", "pkg-a", "catalog:");
+    let c_manifest = dependent_pkg("pkg-c", "1.0.0", "devDependencies", "pkg-a", "catalog:");
+    write_file(dir.path(), "packages/b/package.json", &b_manifest);
+    write_file(dir.path(), "packages/c/package.json", &c_manifest);
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "patch")], "Fix pkg-a");
+    let planned = plan(dir.path());
+    assert_eq!(
+        plan_json(&planned)["releases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|release| format!("{} {}", release["name"], release["type"]))
+            .collect::<Vec<_>>(),
+        [
+            "\"pkg-a\" \"patch\"",
+            "\"pkg-b\" \"none\"",
+            "\"pkg-c\" \"none\""
+        ]
+    );
+
+    let output = capture_output(|| run_ok(dir.path()));
+    let lines: Vec<&str> = output
+        .lines()
+        .filter(|line| !line.starts_with("debug: "))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "Bumped pkg-a 3.1.4 -> 3.1.5".to_owned(),
+            format!(
+                "Updated {}: pkg-a in catalog \"default\" ^3.1.4 -> ^3.1.5",
+                expected_path(dir.path(), "pnpm-workspace.yaml")
+            ),
+        ],
+        "{output}"
+    );
+    assert_eq!(
+        read(dir.path(), "pnpm-workspace.yaml"),
+        "packages:\n  - \"packages/*\"\ncatalog:\n  pkg-a: ^3.1.5\n  left-pad: ^1.0.0\n"
+    );
+    assert_eq!(read(dir.path(), "packages/b/package.json"), b_manifest);
+    assert_eq!(read(dir.path(), "packages/c/package.json"), c_manifest);
+}
+
+#[test]
+fn a_bun_catalog_is_written_together_with_the_root_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let root_manifest = |version, spec| {
+        format!(
+            "{{\n  \"name\": \"root\",\n  \"version\": \"{version}\",\n  \"workspaces\": [\"packages/*\"],\n  \"catalog\": {{\n    \"pkg-a\": \"{spec}\"\n  }},\n  \"dependencies\": {{\n    \"pkg-a\": \"catalog:\"\n  }}\n}}\n"
+        )
+    };
+    write_file(dir.path(), "package.json", &root_manifest("1.0.0", "3.1.4"));
+    write_file(
+        dir.path(),
+        "packages/a/package.json",
+        &pkg("pkg-a", "3.1.4"),
+    );
+    write_changeset(dir.path(), FILE_A, &[("pkg-a", "minor")], "Improve pkg-a");
+    run_ok(dir.path());
+    assert_eq!(
+        read(dir.path(), "package.json"),
+        root_manifest("1.0.1", "3.2.0")
+    );
+    assert_eq!(
+        read(dir.path(), "CHANGELOG.md"),
+        "# root\n\n## 1.0.1\n\n### Patch Changes\n\n- Updated dependencies\n  - pkg-a@3.2.0\n"
+    );
+}

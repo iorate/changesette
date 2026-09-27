@@ -1,9 +1,12 @@
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeSet, fs, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
 use tracing::info;
 
-use crate::{config::Config, plan, release_plan, snapshot::Snapshot, workspace::Workspace};
+use crate::{
+    catalog, config::Config, dependency::SpecLocation, plan, release_plan, snapshot::Snapshot,
+    workspace::Workspace,
+};
 
 pub struct VersionArgs {
     pub snapshot: Option<Option<String>>,
@@ -107,13 +110,38 @@ pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<(
     if !bumped && !planned.changes.is_empty() {
         info!("No packages to bump");
     }
+    report_updates(&planned);
+    Ok(())
+}
+
+fn report_updates(planned: &plan::PlannedVersion) {
+    let mut reported_paths = BTreeSet::new();
     for update in &planned.dependency_updates {
-        if let Some(new) = &update.new {
-            info!(
+        let Some(new) = &update.new else {
+            continue;
+        };
+        match &update.location {
+            SpecLocation::Manifest => info!(
                 "Updated {}: {} {} -> {}",
                 planned.workspace[&update.dependent], update.dependency_name, update.old, new
-            );
+            ),
+            SpecLocation::Catalog { name, path } => {
+                if reported_paths.insert(path) {
+                    let source = planned
+                        .workspace
+                        .catalogs()
+                        .source()
+                        .expect("a catalog reference resolved through a catalog file");
+                    info!(
+                        "Updated {}: {} in {} {} -> {}",
+                        source.path.display(),
+                        update.dependency_name,
+                        catalog::describe(name),
+                        update.old,
+                        new
+                    );
+                }
+            }
         }
     }
-    Ok(())
 }

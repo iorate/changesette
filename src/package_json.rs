@@ -53,17 +53,29 @@ impl PackageJson {
     }
 
     pub fn set_dependency(&mut self, field: DependencyField, name: &str, spec: &str) -> Result<()> {
-        let field = field.as_str();
-        let lit = object_prop(&self.object, field, &format!("top-level {field:?}"))
-            .and_then(|deps| match deps {
-                Some(deps) => string_prop(&deps, name, &format!("{name:?} in {field:?}")),
-                None => Ok(None),
-            })
-            .with_context(|| self.path.display().to_string())?;
-        let Some(lit) = lit else {
-            bail!("{}: missing {name:?} in {field:?}", self.path.display())
+        self.set_string(&[field.as_str().to_owned(), name.to_owned()], spec)
+    }
+
+    pub fn set_string(&mut self, path: &[String], value: &str) -> Result<()> {
+        let (last, parents) = path.split_last().expect("a key path is not empty");
+        let location = |key: &str, parent: Option<&String>| match parent {
+            None => format!("top-level {key:?}"),
+            Some(parent) => format!("{key:?} in {parent:?}"),
         };
-        set_string_value(&lit, spec);
+        let mut object = self.object.clone();
+        let mut parent = None;
+        for key in parents {
+            let location = location(key, parent);
+            object = object_prop(&object, key, &location)
+                .with_context(|| self.path.display().to_string())?
+                .with_context(|| format!("{}: missing {location}", self.path.display()))?;
+            parent = Some(key);
+        }
+        let location = location(last, parent);
+        let lit = string_prop(&object, last, &location)
+            .with_context(|| self.path.display().to_string())?
+            .with_context(|| format!("{}: missing {location}", self.path.display()))?;
+        set_string_value(&lit, value);
         Ok(())
     }
 

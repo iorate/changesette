@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use nodejs_semver::{Range, Version};
 use tracing::{debug, warn};
 
-use crate::workspace::{DependencyField, RelDir, Workspace};
+use crate::{
+    catalog,
+    workspace::{DependencyField, RelDir, Workspace},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Spec {
@@ -72,12 +75,19 @@ pub fn effective_range(spec: &Spec, dependency_version: &Version) -> Option<Rang
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpecLocation {
+    Manifest,
+    Catalog { name: String, path: Vec<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InternalDependency {
     pub dependent: RelDir,
     pub dependency: RelDir,
     pub field: DependencyField,
     pub spec_text: String,
     pub spec: Spec,
+    pub location: SpecLocation,
 }
 
 #[must_use]
@@ -101,8 +111,36 @@ pub fn internal_dependencies(
                 );
                 continue;
             };
+            let (spec_text, location) = match catalog::reference(&dependency.spec) {
+                None => (dependency.spec.clone(), SpecLocation::Manifest),
+                Some(reference) => match workspace.catalogs().lookup(reference, name) {
+                    Some((catalog, entry)) if catalog::reference(&entry.spec).is_none() => (
+                        entry.spec.clone(),
+                        SpecLocation::Catalog {
+                            name: catalog.to_owned(),
+                            path: entry.path.clone(),
+                        },
+                    ),
+                    Some((catalog, entry)) => {
+                        warn!(
+                            "{dependent}: depends on `{name}` at {:?}, whose entry in {} is {:?}, another catalog reference; the dependency is ignored",
+                            dependency.spec,
+                            catalog::describe(catalog),
+                            entry.spec
+                        );
+                        continue;
+                    }
+                    None => {
+                        warn!(
+                            "{dependent}: depends on `{name}` at {:?}, which has no catalog entry; the dependency is ignored",
+                            dependency.spec
+                        );
+                        continue;
+                    }
+                },
+            };
             let spec = parse_spec(
-                &dependency.spec,
+                &spec_text,
                 dependent.rel_dir(),
                 target.rel_dir(),
                 workspace_only,
@@ -112,8 +150,7 @@ pub fn internal_dependencies(
             };
             if !range.satisfies(version) {
                 warn!(
-                    "{dependent}: depends on `{name}` at {:?}, which does not include the workspace's {name}@{version}; the dependency is ignored",
-                    dependency.spec
+                    "{dependent}: depends on `{name}` at {spec_text:?}, which does not include the workspace's {name}@{version}; the dependency is ignored"
                 );
                 continue;
             }
@@ -121,8 +158,9 @@ pub fn internal_dependencies(
                 dependent: dependent.rel_dir().clone(),
                 dependency: target.rel_dir().clone(),
                 field: dependency.field,
-                spec_text: dependency.spec.clone(),
+                spec_text,
                 spec,
+                location,
             });
         }
     }
