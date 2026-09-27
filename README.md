@@ -8,7 +8,7 @@ A version and changelog manager using the same changeset file format as [changes
 
 `changesette` reads changeset files, bumps the version in each released package's `package.json`, and generates its `CHANGELOG.md`. It works on single-package repositories and on npm / yarn / pnpm workspaces.
 
-`changesette` performs **no git operations and no network access**; commits, pull requests, tags, and releases belong to your workflows. The CLI feeds those workflows structured data — a machine-readable release plan (`version --output`), the workspace package list (`get-packages`), and per-version changelog sections (`get-changelog-entry`) — and accepts summary rewrites (`set-summary`). The [example workflows](#example-workflows) build the whole release loop from these outputs — no changesets-specific action or bot required.
+`changesette` performs **no git operations and no publishing**; commits, pull requests, tags, releases, and publishing to a registry belong to your workflows. The CLI feeds those workflows structured data — a machine-readable release plan (`version --output`), the workspace package list (`get-packages`), and per-version changelog sections (`get-changelog-entry`) — and accepts summary rewrites (`set-summary`). The [example workflows](#example-workflows) build the whole release loop from these outputs — no changesets-specific action or bot required.
 
 ## Install
 
@@ -459,7 +459,7 @@ Nothing is committed, tagged, or published; those belong to your workflows (see 
 
 ### Workspace resolution
 
-`changesette` resolves the workspace root and the member packages by rules of its own, which can differ from changesets' (`@manypkg/get-packages`) and from the package manager's. When they do, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
+`changesette` finds the workspace root and the member packages by rules of its own rather than by calling the package manager or `@manypkg/get-packages`. For ordinary workspace declarations the result is the same as the package manager's; the rules part ways only on unusual patterns and layouts. For example, `["packages/*", "!packages/b", "packages/b"]` includes `packages/b` in npm, but not in yarn, pnpm, or `changesette`. When the result differs from what you expect, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
 
 ### Dependency updates
 
