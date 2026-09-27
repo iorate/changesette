@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "changesette"
-version = "7.1.0"
+version = "7.2.0"
 dependencies = [
  "anyhow",
  "clap",
