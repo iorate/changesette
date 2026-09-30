@@ -17,7 +17,7 @@ dunce = "1.0.5"
 fast-glob = "1.1.0"
 file-id = "0.2.3"
 inquire = "0.9.4"
-jsonc-parser = { version = "0.33.1", features = ["cst"] }
+jsonc-parser = { version = "0.34.0", features = ["cst"] }
 nodejs-semver = "7.0.0"
 petname = { version = "3.2.0", default-features = false, features = ["default-words"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }
