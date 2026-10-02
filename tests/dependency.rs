@@ -272,7 +272,7 @@ fn dependents_graph_lists_every_field_of_a_dependent() {
         dependents("packages/a"),
         [("packages/c".to_owned(), DependencyField::Dependencies)]
     );
-    assert!(dependents("packages/c").is_empty());
+    assert_eq!(dependents("packages/c"), []);
     assert_eq!(graph.iter().count(), 3);
 }
 

@@ -78,7 +78,10 @@ fn resolves_ignore_names_and_globs() {
         ),
         ["pkg-a", "pkg-b"]
     );
-    assert!(resolve("{ \"ignore\": [\"missing-*\"] }\n", &["pkg-a"]).is_empty());
+    assert_eq!(
+        resolve("{ \"ignore\": [\"missing-*\"] }\n", &["pkg-a"]),
+        [] as [&str; 0]
+    );
 }
 
 #[test]
@@ -120,8 +123,8 @@ fn resolves_group_globs_with_negation() {
 #[test]
 fn resolves_empty_groups_without_warnings() {
     let (groups, output) = resolve_groups("{}\n", &["pkg-a"]);
-    assert!(groups.fixed.is_empty());
-    assert!(groups.linked.is_empty());
+    assert_eq!(groups.fixed, [] as [[&str; 0]; 0]);
+    assert_eq!(groups.linked, [] as [[&str; 0]; 0]);
     assert_eq!(output, "");
 }
 
