@@ -459,7 +459,7 @@ Nothing is committed, tagged, or published; those belong to your workflows (see 
 
 ### Workspace resolution
 
-`changesette` finds the workspace root and the member packages by rules of its own rather than by calling the package manager or `@manypkg/get-packages`. For ordinary workspace declarations the result is the same as the package manager's; the rules part ways only on unusual patterns and layouts. For example, `["packages/*", "!packages/b", "packages/b"]` includes `packages/b` in npm, but not in yarn, pnpm, or `changesette`. When the result differs from what you expect, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
+`changesette` finds the workspace root and the member packages by rules of its own, which differ from those of changesets. For ordinary workspace declarations the result is the same; the rules part ways only on unusual patterns and layouts. For example, the extglob `packages/+(a|b)` matches `packages/a` and `packages/b` in changesets, but nothing in `changesette`. When the result differs from what you expect, override it: [`--root`](#cli) sets the workspace root, and [`changesette.packages`](#changesette-1) lists the package directories directly.
 
 ### Dependency updates
 
