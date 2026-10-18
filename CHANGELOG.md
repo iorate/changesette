@@ -1,5 +1,11 @@
 # changesette
 
+## 7.2.2
+
+### Patch Changes
+
+- `version --output` no longer suppresses the report of bumped packages and updated dependencies on stderr.
+
 ## 7.2.1
 
 ### Patch Changes
