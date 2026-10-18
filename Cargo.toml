@@ -2,7 +2,6 @@
 name = "changesette"
 version = "7.2.0"
 edition = "2024"
-rust-version = "1.88"
 description = "A version and changelog manager using the changesets file format"
 homepage = "https://github.com/iorate/changesette"
 repository = "https://github.com/iorate/changesette"
