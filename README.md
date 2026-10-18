@@ -285,7 +285,7 @@ Applies all pending changesets: bumps each released package's `package.json`, in
 
 `--allow-unreleased-dependencies` succeeds even when a released package depends on a skipped package with unreleased changes.
 
-`--output` (short form `-o`) suppresses the report and writes the release plan to the given file (`-` for stdout) as JSON, extending the changesets `ReleasePlan` type with `dir` and `changelogEntry`:
+`--output` (short form `-o`) also writes the release plan to the given file (`-` for stdout) as JSON, extending the changesets `ReleasePlan` type with `dir` and `changelogEntry`:
 
 ```json
 {
