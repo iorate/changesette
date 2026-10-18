@@ -89,28 +89,28 @@ pub fn run(workspace: Workspace, config: &Config, args: VersionArgs) -> Result<(
         }
     }
 
-    if let Some(path) = &args.output {
-        return release_plan::write_file(path, &release_plan::build(&planned));
-    }
-
     if planned.changes.is_empty() && !exiting {
         info!("No unreleased changesets found");
-        return Ok(());
-    }
-    let mut bumped = false;
-    for release in &planned.releases {
-        if release.bump.is_some() {
-            info!(
-                "Bumped {} {} -> {}",
-                release.name, release.old_version, release.new_version
-            );
-            bumped = true;
+    } else {
+        let mut bumped = false;
+        for release in &planned.releases {
+            if release.bump.is_some() {
+                info!(
+                    "Bumped {} {} -> {}",
+                    release.name, release.old_version, release.new_version
+                );
+                bumped = true;
+            }
         }
+        if !bumped && !planned.changes.is_empty() {
+            info!("No packages to bump");
+        }
+        report_updates(&planned);
     }
-    if !bumped && !planned.changes.is_empty() {
-        info!("No packages to bump");
+
+    if let Some(path) = &args.output {
+        release_plan::write_file(path, &release_plan::build(&planned))?;
     }
-    report_updates(&planned);
     Ok(())
 }
 

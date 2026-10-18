@@ -570,6 +570,10 @@ fn version_output_writes_the_pretty_plan_and_applies_the_changesets() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "");
     assert_eq!(
+        stderr(&output),
+        "Bumped ublacklist 1.2.3 -> 1.3.0\nWrote the release plan to plan.json\n"
+    );
+    assert_eq!(
         fs::read_to_string(dir.path().join("plan.json")).unwrap(),
         pretty_plan(ID_B)
     );
@@ -592,7 +596,7 @@ fn version_output_dash_writes_the_pretty_plan_to_stdout() {
     let output = changesette(dir.path(), &["version", "--output", "-"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), pretty_plan(ID_B));
-    assert_eq!(stderr(&output), "");
+    assert_eq!(stderr(&output), "Bumped ublacklist 1.2.3 -> 1.3.0\n");
     assert!(!dir.path().join("-").exists());
     assert!(!dir.path().join(".changeset").join(FILE_B).exists());
 }
