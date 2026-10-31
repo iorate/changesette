@@ -676,14 +676,14 @@ fn read_catalogs(root: &Path, pm: PackageManager) -> Result<Catalogs> {
 }
 
 // An empty or comment-only file holds no document, making it a settings-only
-// root. saphyr keeps a BOM as part of the first key, so it is stripped first.
+// root.
 fn read_yaml(path: &Path) -> Result<Option<Yaml<'static>>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(err).context(path.display().to_string()),
     };
-    let docs = match Yaml::load_from_str(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
+    let docs = match Yaml::load_from_str(&text) {
         Ok(docs) => docs,
         Err(err) => bail!("{}: invalid YAML: {err}", path.display()),
     };

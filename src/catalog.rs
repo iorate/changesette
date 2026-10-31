@@ -215,7 +215,6 @@ impl Node for Value {
 
 pub struct CatalogYaml {
     path: PathBuf,
-    bom: bool,
     text: String,
     edits: Vec<(Range<usize>, String)>,
 }
@@ -223,13 +222,8 @@ pub struct CatalogYaml {
 impl CatalogYaml {
     pub fn load(path: &Path) -> Result<Self> {
         let text = fs::read_to_string(path).with_context(|| path.display().to_string())?;
-        let (bom, text) = match text.strip_prefix('\u{feff}') {
-            Some(rest) => (true, rest.to_owned()),
-            None => (false, text),
-        };
         Ok(Self {
             path: path.to_owned(),
-            bom,
             text,
             edits: Vec::new(),
         })
@@ -296,9 +290,6 @@ impl CatalogYaml {
         let mut text = self.text.clone();
         for (range, value) in edits {
             text.replace_range(range.clone(), value);
-        }
-        if self.bom {
-            text.insert(0, '\u{feff}');
         }
         text
     }
