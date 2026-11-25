@@ -247,7 +247,7 @@ impl CatalogYaml {
 
     // The markers count characters, and the end of a quoted scalar takes the
     // spaces and the comment after it on its line along. The span of a block
-    // scalar starts after the header and ends past the line break, so it is
+    // scalar starts at its indicator and ends past the line break, so it is
     // told apart by that break and refused.
     fn locate(&self, key_path: &[String]) -> Result<Range<usize>> {
         let docs = MarkedYaml::load_from_str(&self.text)
