@@ -7,7 +7,10 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use regex::Regex;
-use saphyr::{LoadableYamlNode, Mapping, Scalar, Yaml, YamlEmitter};
+use saphyr::{
+    LoadableYamlNode, Mapping, MappingOwned, Scalar, ScalarOwned, Yaml, YamlEmitter, YamlOwned,
+};
+use serde_json::{Map, Number, Value};
 
 use crate::bump::Bump;
 
@@ -22,6 +25,20 @@ pub struct LoadedChange {
     pub in_pre: bool,
     pub releases: Vec<(String, Option<Bump>)>,
     pub summary: String,
+    pub metadata: Option<Metadata>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Metadata {
+    yaml: YamlOwned,
+    json: Map<String, Value>,
+}
+
+impl Metadata {
+    #[must_use]
+    pub fn json(&self) -> &Map<String, Value> {
+        &self.json
+    }
 }
 
 impl LoadedChange {
@@ -105,9 +122,13 @@ pub fn max_bumps(changes: &[LoadedChange]) -> BTreeMap<&str, Option<Bump>> {
     bumps
 }
 
-pub fn render(releases: &[(String, Option<Bump>)], summary: &str) -> Result<String> {
+pub fn render(
+    releases: &[(String, Option<Bump>)],
+    metadata: Option<&Metadata>,
+    summary: &str,
+) -> Result<String> {
     let summary = summary.trim();
-    let mut content = if releases.is_empty() {
+    let mut content = if releases.is_empty() && metadata.is_none() {
         String::from("---\n---\n")
     } else {
         let mut mapping = Mapping::new();
@@ -115,6 +136,12 @@ pub fn render(releases: &[(String, Option<Bump>)], summary: &str) -> Result<Stri
             mapping.insert(
                 Yaml::Value(Scalar::String(name.as_str().into())),
                 Yaml::Value(Scalar::String(bump.map_or("none", Bump::as_str).into())),
+            );
+        }
+        if let Some(metadata) = metadata {
+            mapping.insert(
+                Yaml::Value(Scalar::String("_".into())),
+                Yaml::from(&metadata.yaml),
             );
         }
         let mut frontmatter = String::new();
@@ -144,7 +171,7 @@ fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
     let frontmatter = &captures[1];
     let summary = captures[2].trim();
 
-    let docs = match Yaml::load_from_str(frontmatter) {
+    let docs = match YamlOwned::load_from_str(frontmatter) {
         Ok(docs) => docs,
         Err(err) => bail!(
             "{}: invalid YAML in frontmatter: {err}",
@@ -153,17 +180,35 @@ fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
     };
 
     let mut releases = Vec::new();
+    let mut metadata = None;
     match docs.into_iter().next() {
         None => {}
         Some(doc) if doc.is_null() => {}
-        Some(Yaml::Mapping(mapping)) => {
-            for (key, value) in &mapping {
+        Some(YamlOwned::Mapping(mapping)) => {
+            for (key, value) in mapping {
                 let Some(name) = key.as_str() else {
                     bail!(
                         "{}: invalid package name in frontmatter",
                         file_path.display()
                     )
                 };
+                if name == "_" {
+                    let YamlOwned::Mapping(entries) = &value else {
+                        bail!(
+                            "{}: `_` in frontmatter must be a mapping",
+                            file_path.display()
+                        )
+                    };
+                    let json = match mapping_to_json(entries) {
+                        Ok(json) => json,
+                        Err(reason) => bail!(
+                            "{}: metadata in frontmatter contains {reason}",
+                            file_path.display()
+                        ),
+                    };
+                    metadata = Some(Metadata { yaml: value, json });
+                    continue;
+                }
                 let bump = match value.as_str() {
                     Some("major") => Some(Bump::Major),
                     Some("minor") => Some(Bump::Minor),
@@ -192,5 +237,32 @@ fn load_one(dir: &Path, file_name: &str, in_pre: bool) -> Result<LoadedChange> {
         in_pre,
         releases,
         summary: summary.to_owned(),
+        metadata,
     })
+}
+
+fn mapping_to_json(mapping: &MappingOwned) -> Result<Map<String, Value>, &'static str> {
+    let mut json = Map::new();
+    for (key, value) in mapping {
+        let Some(key) = key.as_str() else {
+            return Err("a non-string key");
+        };
+        json.insert(key.to_owned(), to_json(value)?);
+    }
+    Ok(json)
+}
+
+fn to_json(yaml: &YamlOwned) -> Result<Value, &'static str> {
+    match yaml {
+        YamlOwned::Value(ScalarOwned::Null) => Ok(Value::Null),
+        YamlOwned::Value(ScalarOwned::Boolean(value)) => Ok(Value::Bool(*value)),
+        YamlOwned::Value(ScalarOwned::Integer(value)) => Ok(Value::from(*value)),
+        YamlOwned::Value(ScalarOwned::FloatingPoint(value)) => Number::from_f64(value.into_inner())
+            .map(Value::Number)
+            .ok_or("a non-finite number"),
+        YamlOwned::Value(ScalarOwned::String(value)) => Ok(Value::String(value.clone())),
+        YamlOwned::Sequence(sequence) => sequence.iter().map(to_json).collect(),
+        YamlOwned::Mapping(mapping) => mapping_to_json(mapping).map(Value::Object),
+        _ => Err("a tagged or invalid value"),
+    }
 }

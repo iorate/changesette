@@ -2,6 +2,7 @@ use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result};
 use serde::Serialize;
+use serde_json::{Map, Value};
 use tracing::info;
 
 use crate::{bump::Bump, output, plan::PlannedVersion};
@@ -25,6 +26,8 @@ pub struct ChangesetEntry {
     pub id: String,
     pub releases: Vec<ReleaseRef>,
     pub summary: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Map<String, Value>>,
 }
 
 #[derive(Serialize)]
@@ -106,6 +109,10 @@ pub fn build(planned: &PlannedVersion) -> ReleasePlan {
                     })
                     .collect(),
                 summary: change.summary.clone(),
+                metadata: change
+                    .metadata
+                    .as_ref()
+                    .map(|metadata| metadata.json().clone()),
             })
             .collect(),
         releases,

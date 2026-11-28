@@ -406,6 +406,38 @@ fn release_plan_lists_skipped_changesets_without_a_release() {
 }
 
 #[test]
+fn release_plan_carries_the_metadata() {
+    let dir = package_dir();
+    write_file(
+        dir.path(),
+        &format!(".changeset/{FILE_A}"),
+        "---\nublacklist: minor\n_:\n  pr: 1337\n---\n\nAdd feature\n",
+    );
+    write_file(
+        dir.path(),
+        &format!(".changeset/{FILE_B}"),
+        "---\nublacklist: patch\n_: {}\n---\n\nFix bug\n",
+    );
+    assert_eq!(
+        plan_json(&plan(dir.path()))["changesets"],
+        json!([
+            {
+                "id": ID_A,
+                "releases": [{ "name": "ublacklist", "type": "minor" }],
+                "summary": "Add feature",
+                "metadata": { "pr": 1337 }
+            },
+            {
+                "id": ID_B,
+                "releases": [{ "name": "ublacklist", "type": "patch" }],
+                "summary": "Fix bug",
+                "metadata": {}
+            }
+        ])
+    );
+}
+
+#[test]
 fn ignore_rejects_an_unknown_package() {
     let dir = package_dir();
     write_changeset(

@@ -13,7 +13,7 @@ pub fn run(workspace: &Workspace, id: &str, summary: &str) -> Result<()> {
         bail!("no changeset with id `{id}`")
     };
 
-    let content = changeset::render(&change.releases, summary)?;
+    let content = changeset::render(&change.releases, change.metadata.as_ref(), summary)?;
     let path = changeset_dir.join(change.rel_path());
     fs::write(&path, content).with_context(|| path.display().to_string())?;
 

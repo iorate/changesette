@@ -4,6 +4,7 @@ use changesette::{
     bump::Bump,
     changeset::{self, LoadedChange},
 };
+use serde_json::{Value, json};
 
 const FILE: &str = "calmly-tidy-fox.md";
 
@@ -39,7 +40,7 @@ fn render(releases: &[(&str, Option<Bump>)], summary: &str) -> String {
         .iter()
         .map(|(name, bump)| ((*name).to_owned(), *bump))
         .collect();
-    changeset::render(&releases, summary).unwrap()
+    changeset::render(&releases, None, summary).unwrap()
 }
 
 #[test]
@@ -236,6 +237,7 @@ fn max_bumps_picks_the_highest_per_package() {
             .map(|(name, bump)| ((*name).to_owned(), *bump))
             .collect(),
         summary: String::new(),
+        metadata: None,
     };
     let changes = [
         change(
@@ -329,5 +331,67 @@ fn renders_releases_in_the_given_order() {
             "Summary",
         ),
         "---\npkg-b: patch\npkg-a: major\n---\n\nSummary\n"
+    );
+}
+
+#[test]
+fn loads_metadata_apart_from_the_releases() {
+    let changes = load("metadata");
+    assert_eq!(
+        view(&changes),
+        [(
+            "calmly-tidy-fox".to_owned(),
+            vec![
+                ("ublacklist", Some(Bump::Minor)),
+                ("@iorate/ublacklist", Some(Bump::Patch)),
+            ],
+            "Add feature",
+        )]
+    );
+    assert_eq!(
+        Value::Object(changes[0].metadata.as_ref().unwrap().json().clone()),
+        json!({
+            "pr": 1337,
+            "author": ["alice", "bob"],
+            "nested": { "ratio": 1.5, "draft": true, "note": null }
+        })
+    );
+}
+
+#[test]
+fn rejects_metadata_without_a_json_form() {
+    for (case, message) in [
+        ("metadata-null", "`_` in frontmatter must be a mapping"),
+        (
+            "metadata-non-string-key",
+            "metadata in frontmatter contains a non-string key",
+        ),
+        (
+            "metadata-non-finite",
+            "metadata in frontmatter contains a non-finite number",
+        ),
+        (
+            "metadata-tagged",
+            "metadata in frontmatter contains a tagged or invalid value",
+        ),
+    ] {
+        let err = format!("{:#}", changeset::load(&fixture(case)).unwrap_err());
+        let path = fixture(case).join(FILE);
+        assert_eq!(err, format!("{}: {message}", path.display()));
+    }
+}
+
+#[test]
+fn renders_metadata_last_in_its_written_order() {
+    let changes = load("metadata");
+    let metadata = changes[0].metadata.as_ref();
+    let rendered = "_:\n  pr: 1337\n  author:\n    - alice\n    - bob\n  nested:\n    ratio: 1.5\n    draft: true\n    note: ~\n---\n";
+    assert_eq!(
+        changeset::render(&changes[0].releases, metadata, "New summary").unwrap(),
+        format!("---\nublacklist: minor\n\"@iorate/ublacklist\": patch\n{rendered}\nNew summary\n")
+    );
+    assert_eq!(
+        changeset::render(&[], metadata, "").unwrap(),
+        format!("---\n{rendered}")
     );
 }
