@@ -100,6 +100,21 @@ fn set_summary_rewrites_a_pre_changeset() {
     );
 }
 
+#[test]
+fn set_summary_keeps_the_metadata() {
+    let dir = package_dir();
+    write_file(
+        dir.path(),
+        ".changeset/early.md",
+        "---\n_:\n  pr: 1337\nublacklist: minor\n---\n\nOld summary\n",
+    );
+    set_summary::run(&workspace(dir.path()), "early", "New summary").unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.path().join(".changeset/early.md")).unwrap(),
+        "---\nublacklist: minor\n_:\n  pr: 1337\n---\n\nNew summary\n"
+    );
+}
+
 fn versioned(workspace: &Workspace) -> Vec<Versioned<'_>> {
     workspace.versioned().collect()
 }

@@ -105,7 +105,7 @@ pub fn run(workspace: &Workspace, args: AddArgs) -> Result<()> {
             .context("failed to generate a changeset name")?
     );
     let path = changeset_dir.join(&file_name);
-    let content = changeset::render(&releases, &summary)?;
+    let content = changeset::render(&releases, None, &summary)?;
     fs::OpenOptions::new()
         .write(true)
         .create_new(true)
